@@ -91,8 +91,7 @@ async def test_provision_runtime_role_rotates_migration_default_password():
             database = owner_url.database
             if database:
                 revoke_sql = await owner.fetchval(
-                    "SELECT format('REVOKE CONNECT ON DATABASE %I FROM %I', "
-                    "$1::text, $2::text)",
+                    "SELECT format('REVOKE CONNECT ON DATABASE %I FROM %I', $1::text, $2::text)",
                     database,
                     role,
                 )
