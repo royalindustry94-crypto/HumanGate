@@ -38,9 +38,8 @@ is the independent audit and merge authority.
   after Codex has audited that PR's exact current head SHA.
 - `CODEX_AUDIT: CHECKPOINT_PASS` authorizes one further bounded coding cycle on
   an incomplete but safe checkpoint. `CODEX_AUDIT: PASS` is the only final
-  merge verdict, except under the documented Codex-unavailable fallback below.
-  `CODEX_AUDIT: CHANGES_REQUESTED` authorizes only the listed remediation, not
-  additional feature work.
+  merge verdict. `CODEX_AUDIT: CHANGES_REQUESTED` authorizes only the listed
+  remediation, not additional feature work.
 - Every new commit invalidates the previous verdict. Claude returns to stopped
   review state until Codex records a verdict for the new exact head SHA.
 - Codex has standing authority to push audit/governance work, publish verdicts,
@@ -48,43 +47,38 @@ is the independent audit and merge authority.
   green. If Codex changes application code, that change still needs fresh
   independent evidence before Codex records the final pass.
 
-### Auditor fallback — Codex unavailable (Founder directive 2026-09-13)
+### Codex unavailable — credit-saving model, not an audit fallback (Founder directive 2026-09-13; revised same day after Codex review)
 
-Codex running out of credit must never leave a task silently stalled. When
-Codex is documented unavailable for the current exact head SHA — a posted
-Codex "out of credit" / error message, or no Codex verdict after a genuine,
-documented attempt — GitHub Copilot (`request_copilot_review`) may stand in
-as the independent auditor for that SHA. This is wired into the actual gates
-(`.github/workflows/codex-audit-gate.yml`, `.github/workflows/claude.yml`),
-not just documented, and requires this exact sequence on the PR itself
-(the same thread the gates read — a note on issue #90 is good practice for
-visibility but does not satisfy the gate):
+An earlier version of this section let an owner-posted comment claiming
+`COPILOT_AUDIT: PASS`/`CHECKPOINT_PASS` stand in for a real `CODEX_AUDIT`
+verdict once "Codex unavailable" evidence had been posted. Codex's own
+exact-head review of that change (PR #131) correctly identified it as a
+self-asserted bypass, not an independent audit: the gate scripts never
+verified that Copilot had actually reviewed the exact head, never checked
+reviewer identity, and the "unavailable" evidence never expired or
+re-validated once Codex came back — so a stale evidence comment could
+authorize a bypass indefinitely. That mechanism has been fully removed from
+`.github/workflows/codex-audit-gate.yml` and `.github/workflows/claude.yml`
+(both restored to Codex-only). It is not coming back in that form.
 
-1. **Evidence, posted by the owner on the PR**, with the marker
-   `<!-- codex-unavailable-evidence:v1 -->` and `HEAD_SHA: <exact head>` —
-   the out-of-credit/error message, or the attempt and elapsed time.
-2. **At least a 60-minute wait** after that evidence comment. The gates
-   enforce this timestamp gap so the fallback cannot be invoked and
-   self-satisfied in the same instant.
-3. **The verdict, posted by the owner on the PR**, with the marker
-   `<!-- copilot-audit-fallback:v1 -->`, `HEAD_SHA: <same exact head>`, and
-   `COPILOT_AUDIT: CHECKPOINT_PASS` / `CHANGES_REQUESTED` / `FAIL` / `PASS`,
-   reflecting Copilot's actual review. This carries the same authority as the
-   equivalent `CODEX_AUDIT` verdict for the checkpoint/continue/remediate
-   gates and keeps bounded 30-minute coding cycles moving.
+The actual fix for "Codex runs out of credit and the project stalls" is to
+reduce how much work is waiting on Codex when it returns, not to let anything
+else self-issue a Codex-equivalent verdict:
 
-A Copilot `PASS` clears the independent-review requirement for that exact SHA
-but does **not** itself execute a merge. Merge still requires Codex to
-countersign the exact head (once it has credit again) **or** the Founder to
-merge directly after confirming the same merge-gate checklist below
-(required CI green, non-negotiables intact, no unresolved P0/P1). Claude
-never merges under this fallback either.
-
-The fallback is per-SHA: the very next commit invalidates it exactly like a
-normal verdict, and Codex remains the default auditor the moment it is
-available again. This fallback does not relax anything in "Non-negotiables"
-above — a Copilot verdict that skips or hand-waves workspace isolation, the
-Human Review Gate, spend controls, or audit logging evidence is not a PASS.
+- **GitHub Copilot** (`request_copilot_review`) may do first-pass review,
+  lint, test, and docs work on any open PR at any time — this is unchanged
+  from its existing "cheaper bounded-work" role below. Use it liberally while
+  Codex is away so a PR is fully clean (CI green, obvious nits fixed, a
+  consolidated handoff posted) by the time Codex audits it, shortening that
+  audit.
+- **`CODEX_AUDIT: CHECKPOINT_PASS`, `CHANGES_REQUESTED`, and `PASS` remain
+  Codex-only, with no exception and no expiry logic to reason about.**
+- If Codex is genuinely unreachable for an extended period, that is a
+  decision for the Founder, not an automated gate: post the evidence for
+  visibility (still good practice), and the Founder may merge directly using
+  their own judgment and the existing standing authority in "Operating
+  authority" below — a human decision each time, not a mechanism any agent
+  can trigger for itself.
 
 - Repository instructions are the shared control plane. Private Claude Project
   instructions that are not copied into this repository cannot override this
@@ -96,9 +90,9 @@ Human Review Gate, spend controls, or audit logging evidence is not a PASS.
   PRs within its assigned task. It does not have merge authority. Codex may
   merge only after recording `CODEX_AUDIT: PASS` for the exact current PR head
   and confirming required checks are green (Founder directive 2026-09-12).
-  Under the documented Codex-unavailable fallback (2026-09-13), the Founder
-  may merge directly on a trusted `COPILOT_AUDIT: PASS` instead — Claude does
-  not gain merge authority under either path.
+  If Codex is genuinely unreachable for an extended period, the Founder may
+  choose to merge directly using their own judgment — a human decision, not
+  something any agent (Claude included) can trigger or self-authorize.
 - This authority does **not** extend to weakening anything in "Non-negotiables" above — those remain product safety guarantees, not process gates, and are not the agent's to loosen on its own judgment.
 - Real, hard-to-reverse, or high-blast-radius actions (destructive data operations, spending real money via a live/production API key, changing who has repo/org access, rewriting shared history) still warrant pausing to flag the action clearly before proceeding, even without a formal approval step — the Founder should never be surprised by one of these after the fact.
 

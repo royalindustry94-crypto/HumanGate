@@ -13,11 +13,10 @@ review, and evidence requirement win.
 | Role | Primary worker | Owns | Must not do |
 | --- | --- | --- | --- |
 | Founder | Mitch / `royalindustry94-crypto` | Priorities, product decisions, real-money/credential decisions | Delegate the Human Review Gate to automation |
-| **Lead coding agent** | **Claude Code** | Owns one bounded coding task, branch, tests, checkpoints, PR, and exact-SHA handoff per 30-minute cycle | Continue without the matching Codex (or documented Copilot-fallback) checkpoint verdict; certify or merge its own work; weaken a non-negotiable |
+| **Lead coding agent** | **Claude Code** | Owns one bounded coding task, branch, tests, checkpoints, PR, and exact-SHA handoff per 30-minute cycle | Continue without the matching Codex checkpoint verdict; certify or merge its own work; weaken a non-negotiable |
 | Delegated implementation worker | Cursor (background/cloud agent) | Bounded implementation tasks assigned via Cursor's own dispatch surface, once connected | Merge, deploy, or act outside an assigned bounded task |
 | Independent auditor / merge authority | Codex | Exact-head code, security, CI, and release-readiness audit; checkpoint/final verdict; merge after final PASS | Pass a different SHA; merge with failed checks or unresolved blockers; treat its own application-code change as independently verified |
-| Fallback independent auditor | GitHub Copilot (`request_copilot_review`) — only when Codex is documented unavailable (out of credit / no verdict after a genuine attempt) | Stand in for Codex's exact-head checkpoint/audit verdict (`COPILOT_AUDIT: CHECKPOINT_PASS/CHANGES_REQUESTED/FAIL/PASS`) so a 30-minute coding cycle isn't stalled by Codex's credit balance | Execute the merge itself; substitute for Codex when Codex is actually available; wave through a verdict that skips non-negotiable evidence |
-| Cheaper bounded-work / test / docs worker | GitHub Copilot (`assign_copilot_to_issue`, `request_copilot_review`) | Small, well-specified bounded tasks (test fixes, docs, lint-scale changes) end-to-end: issue → PR; lightweight PR review | Own architecturally significant work; merge its own PR; act as sole reviewer of its own diff |
+| Cheaper bounded-work / test / docs worker | GitHub Copilot (`assign_copilot_to_issue`, `request_copilot_review`) | Small, well-specified bounded tasks (test fixes, docs, lint-scale changes) end-to-end: issue → PR; lightweight first-pass review that shortens Codex's later audit, including while Codex is unavailable | Own architecturally significant work; merge its own PR; act as sole reviewer of its own diff; issue a checkpoint or merge verdict of any kind |
 | Builder (legacy label, still valid) | Claude Code or Cursor, explicitly assigned per task | One queued issue, one branch, implementation, tests, and pull request | Merge; work without a current exact-SHA authorization; weaken controls; work outside the assigned issue |
 | Reviewer / QA | A fresh Codex, Copilot, or other designated agent that did not build the change | Scope review, regression checks, exact-head CI evidence | Modify the reviewed head while claiming independence |
 | Security auditor | Independent agent | PASS / CONDITIONAL / FAIL audit against the exact head SHA and non-negotiables | Approve its own implementation or ignore missing evidence |
@@ -46,20 +45,15 @@ Codex then records one exact-SHA outcome:
 - `CHANGES_REQUESTED`: only the listed remediation is authorized.
 - `FAIL`: all coding and merge activity remains stopped.
 
-**Codex-unavailable fallback (Founder directive 2026-09-13):** wired into
-`.github/workflows/codex-audit-gate.yml` and `.github/workflows/claude.yml`,
-not just documented here. If Codex is documented unavailable for the exact
-current head SHA, an owner-posted `<!-- codex-unavailable-evidence:v1 -->`
-comment on the PR itself, followed at least 60 minutes later by an
-owner-posted `<!-- copilot-audit-fallback:v1 -->` comment recording
-`COPILOT_AUDIT: CHECKPOINT_PASS / CHANGES_REQUESTED / FAIL / PASS` for that
-same exact SHA, carries identical authority to unblock the next bounded
-coding cycle. A Copilot `PASS` still does not execute a merge — that requires
-Codex to countersign the exact head once available again, or the Founder to
-merge directly against the same merge-gate checklist below. The fallback is
-per-SHA: the next commit invalidates it, and Codex is the default auditor
-again as soon as it can record a verdict. See `AGENTS.md` for the full rule
-and exact comment format.
+**Codex unavailable (2026-09-13):** there is no automated substitute for a
+`CODEX_AUDIT` verdict, checkpoint or final — an earlier version of this rule
+let an owner-posted comment stand in for one, and Codex's own review of that
+change correctly rejected it as an unverifiable self-asserted bypass. While
+Codex is away, use Copilot for first-pass review/lint/test/docs so the PR is
+fully clean and ready the moment Codex returns, shortening its audit. If
+Codex is unreachable for an extended period, that is a Founder decision
+(direct merge on their own judgment), never an automated gate. See
+`AGENTS.md` for the full rule.
 
 Every new commit invalidates the prior outcome. A new task may start only when
 coordination issue #90 contains `CODEX_BASELINE: PASS` for the current `main`
@@ -79,20 +73,16 @@ The Build Watchdog runs every 30 minutes and can also be started manually. It mo
 
 ## Merge gate
 
-Only Codex may merge — or, under the documented Codex-unavailable fallback
-(item 4 below), the Founder directly — and only once all of the following
-refer to the same head SHA:
+Only Codex may merge — or, if Codex is unreachable for an extended period, the
+Founder directly on their own judgment (a human decision each time, never an
+automated substitute) — and only once all of the following refer to the same
+head SHA:
 
 1. Scope matches the assigned issue.
 2. Required CI is successful.
 3. Independent review and security audit are complete (reproduced, not just read — see `AGENTS.md`'s reproduce-before-trusting discipline).
 4. The Codex audit verdict is `PASS`. A checkpoint pass or conditional finding
-   is not merge authorization. **Exception (Codex-unavailable fallback,
-   Founder directive 2026-09-13):** when Codex is documented unavailable per
-   the rule above, a `COPILOT_AUDIT: PASS` on the exact head SHA satisfies
-   this item, but Codex still performs the merge itself once available, or
-   the Founder merges directly — Claude never merges under this exception
-   either.
+   is not merge authorization, and no other agent's verdict substitutes for it.
 5. Human Review requirements are satisfied.
 6. No unresolved P0/P1 blocker remains.
 
