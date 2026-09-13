@@ -47,9 +47,7 @@ def test_staging_compose_keeps_owner_and_runtime_credentials_separate():
     assert text.count("${POSTGRES_PASSWORD:?required}") >= 1
     assert text.count("${APP_RUNTIME_PASSWORD:?required}") >= 1
     # Runtime URL must not reuse the owner password interpolation.
-    runtime_lines = [
-        line for line in text.splitlines() if "APP_DATABASE_URL:" in line
-    ]
+    runtime_lines = [line for line in text.splitlines() if "APP_DATABASE_URL:" in line]
     assert runtime_lines
     assert "POSTGRES_PASSWORD" not in runtime_lines[0]
     assert "APP_RUNTIME_PASSWORD" in runtime_lines[0]

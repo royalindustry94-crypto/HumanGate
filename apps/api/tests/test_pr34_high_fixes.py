@@ -88,7 +88,7 @@ def test_c2_production_rejects_default_app_runtime_password():
     production against a database where that default was never rotated
     must fail closed, mirroring the AUTH_MODE=local guard above.
     """
-    with pytest.raises(ValidationError, match="app_runtime"):
+    with pytest.raises(ValidationError, match="known default database password"):
         Settings(
             **_base_settings_kwargs(
                 environment="production",

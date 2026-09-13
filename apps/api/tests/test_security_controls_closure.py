@@ -25,6 +25,19 @@ from app.services import local_auth
 from tests.conftest import nontest_jwt_secret
 
 STRONG_PASSWORD = "Correct-Horse-Battery-9!"
+_ROTATED_OWNER_URL = (
+    "postgresql://postgres:rotated-owner-password@127.0.0.1:5432/content_orchestrator_test"
+)
+_ROTATED_RUNTIME_URL = (
+    "postgresql://app_runtime:rotated-test-password@127.0.0.1:5432/content_orchestrator_test"
+)
+
+
+def _non_local_settings_env(monkeypatch) -> None:
+    """Non-local ENVIRONMENT values reject the test-process DB defaults."""
+    monkeypatch.setenv("DATABASE_URL", _ROTATED_OWNER_URL)
+    monkeypatch.setenv("APP_DATABASE_URL", _ROTATED_RUNTIME_URL)
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", nontest_jwt_secret())
 
 
 # --- M-G: /metrics must fail closed outside explicit local environments ----
@@ -44,9 +57,7 @@ def test_mg_metrics_requires_token_in_every_deployed_environment(monkeypatch, en
     """
     monkeypatch.delenv("METRICS_SCRAPER_TOKEN", raising=False)
     monkeypatch.setenv("ENVIRONMENT", environment)
-    # Staging-like environments are not ENVIRONMENT=test, so the committed
-    # repository test JWT secret is rejected. Use a distinct non-reserved secret.
-    monkeypatch.setenv("SUPABASE_JWT_SECRET", nontest_jwt_secret())
+    _non_local_settings_env(monkeypatch)
     get_settings.cache_clear()
     try:
         assert environment.strip().lower() not in TOKENLESS_METRICS_ENVIRONMENTS
@@ -68,7 +79,7 @@ def test_mg_production_is_never_tokenless(environment):
 def test_mg_metrics_token_is_required_and_compared_exactly(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "staging")
     monkeypatch.setenv("METRICS_SCRAPER_TOKEN", "scrape-token-abcdef123456")
-    monkeypatch.setenv("SUPABASE_JWT_SECRET", nontest_jwt_secret())
+    _non_local_settings_env(monkeypatch)
     get_settings.cache_clear()
     try:
         # Correct token passes.

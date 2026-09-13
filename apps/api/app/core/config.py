@@ -171,12 +171,8 @@ class Settings(BaseSettings):
     # Local-only environments may still use documented docker-compose.yml
     # defaults (postgres/postgres, app_runtime/app_runtime). Every other
     # environment — including staging — is non-local and fail-closed.
-    _LOCAL_ENVIRONMENTS: ClassVar[frozenset[str]] = frozenset(
-        {"test", "development", "dev"}
-    )
-    _KNOWN_DEFAULT_DB_PASSWORDS: ClassVar[frozenset[str]] = frozenset(
-        {"postgres", "app_runtime"}
-    )
+    _LOCAL_ENVIRONMENTS: ClassVar[frozenset[str]] = frozenset({"test", "development", "dev"})
+    _KNOWN_DEFAULT_DB_PASSWORDS: ClassVar[frozenset[str]] = frozenset({"postgres", "app_runtime"})
 
     @property
     def openapi_docs_enabled(self) -> bool:
