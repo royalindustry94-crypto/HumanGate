@@ -19,7 +19,7 @@ from jwt import encode as jwt_encode
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
+from app.core.config import LOCAL_JWT_ISSUER, get_settings
 from app.models.local_auth import LocalAuthCredential
 
 # M-F brute-force controls. Local auth has no external identity provider in
@@ -90,7 +90,7 @@ def mint_access_token(*, user_id: uuid.UUID, email: str, expires_in: int = 3600)
         "aud": settings.supabase_jwt_audience,
         "exp": int(time.time()) + expires_in,
         "role": "authenticated",
-        "iss": "content-orchestrator-local",
+        "iss": LOCAL_JWT_ISSUER,
     }
     return jwt_encode(
         payload,

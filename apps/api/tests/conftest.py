@@ -10,6 +10,7 @@ matter most here) test nothing real.
 from __future__ import annotations
 
 import os
+import secrets
 import time
 import uuid
 
@@ -42,6 +43,15 @@ from app.main import app
 settings = get_settings()
 
 
+def nontest_jwt_secret() -> str:
+    """High-entropy JWT secret for Settings() constructions outside tests.
+
+    Generated at runtime so the suite never commits a production-accepted
+    signing credential that secret scanners would treat as live.
+    """
+    return secrets.token_urlsafe(48)
+
+
 def make_token(user_id: str | None = None, email: str = "test@example.com") -> str:
     """Mint a Supabase-shaped access token signed with the test secret,
     matching what Supabase Auth would issue (sub, email, aud, exp).
@@ -53,6 +63,7 @@ def make_token(user_id: str | None = None, email: str = "test@example.com") -> s
         "aud": settings.supabase_jwt_audience,
         "exp": int(time.time()) + 3600,
         "role": "authenticated",
+        "iss": settings.supabase_jwt_issuer,
     }
     return jwt_encode(
         payload, settings.supabase_jwt_secret, algorithm=settings.supabase_jwt_algorithm

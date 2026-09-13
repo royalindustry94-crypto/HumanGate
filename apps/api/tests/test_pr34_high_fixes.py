@@ -31,6 +31,7 @@ from app.models.workspace_membership import WorkspaceMembership, WorkspaceRole
 from app.orchestration import controller, dispatcher, scheduler
 from app.services import billing as billing_service
 from app.services.spend import ensure_default_spend_cap
+from tests.conftest import nontest_jwt_secret
 
 
 def _base_settings_kwargs(**overrides) -> dict:
@@ -43,7 +44,8 @@ def _base_settings_kwargs(**overrides) -> dict:
         "app_database_url": (
             "postgresql://app_runtime:rotated-test-password@127.0.0.1:5432/content_orchestrator_test"
         ),
-        "supabase_jwt_secret": "test-supabase-jwt-secret-0123456789abcdef",
+        "supabase_jwt_secret": nontest_jwt_secret(),
+        "supabase_jwt_issuer": "https://test-project.supabase.co/auth/v1",
         "environment": "development",
         "auth_mode": "supabase",
     }
@@ -73,6 +75,7 @@ def test_h1_production_allows_local_with_explicit_override():
             environment="production",
             auth_mode="local",
             allow_local_auth_in_production=True,
+            supabase_jwt_issuer=None,
         )
     )
     assert settings.auth_mode == "local"
