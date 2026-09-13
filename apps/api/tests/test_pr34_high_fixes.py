@@ -36,7 +36,7 @@ from tests.conftest import nontest_jwt_secret
 
 def _base_settings_kwargs(**overrides) -> dict:
     kwargs = {
-        "database_url": "postgresql://postgres:postgres@127.0.0.1:5432/content_orchestrator_test",
+        "database_url": "postgresql://postgres:rotated-owner-password@127.0.0.1:5432/content_orchestrator_test",
         # Deliberately NOT the migration-default `app_runtime` password —
         # see test_c2_* below for that specific, isolated check. Using the
         # default here would make every production-environment test in
@@ -114,6 +114,32 @@ def test_c2_default_password_is_fine_outside_production():
         )
     )
     assert settings.environment == "development"
+
+
+@pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
+def test_c2_non_local_rejects_default_app_runtime_password(environment: str):
+    with pytest.raises(ValidationError, match="known default database password"):
+        Settings(
+            **_base_settings_kwargs(
+                environment=environment,
+                app_database_url=(
+                    "postgresql://app_runtime:app_runtime@127.0.0.1:5432/content_orchestrator_test"
+                ),
+            )
+        )
+
+
+@pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
+def test_c2_non_local_rejects_default_postgres_password(environment: str):
+    with pytest.raises(ValidationError, match="known default database password"):
+        Settings(
+            **_base_settings_kwargs(
+                environment=environment,
+                database_url=(
+                    "postgresql://postgres:postgres@127.0.0.1:5432/content_orchestrator_test"
+                ),
+            )
+        )
 
 
 async def _seed_workspace_item(session):

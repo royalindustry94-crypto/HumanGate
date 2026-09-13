@@ -168,29 +168,48 @@ class Settings(BaseSettings):
     github_api_token: str | None = Field(default=None)
     github_repository: str | None = Field(default=None)  # owner/repo
 
+    # Local-only environments may still use documented docker-compose.yml
+    # defaults (postgres/postgres, app_runtime/app_runtime). Every other
+    # environment — including staging — is non-local and fail-closed.
+    _LOCAL_ENVIRONMENTS: ClassVar[frozenset[str]] = frozenset(
+        {"test", "development", "dev"}
+    )
+    _KNOWN_DEFAULT_DB_PASSWORDS: ClassVar[frozenset[str]] = frozenset(
+        {"postgres", "app_runtime"}
+    )
+
     @property
     def openapi_docs_enabled(self) -> bool:
         """Swagger/ReDoc/OpenAPI JSON are development-only (P-005)."""
         return self.environment.strip().lower() in {"development", "dev"}
 
+    @property
+    def is_local_environment(self) -> bool:
+        return self.environment.strip().lower() in self._LOCAL_ENVIRONMENTS
+
     @model_validator(mode="after")
-    def _validate_app_runtime_password(self) -> Settings:
-        """Migration 0001 creates the `app_runtime` Postgres role with the
-        literal default password `app_runtime` when it doesn't already
-        exist (see that migration's docstring — managed Supabase is
-        expected to reject the automated CREATE ROLE, but a self-hosted
-        Postgres owner connection would not). Fail closed in production
-        rather than trusting that operational assumption silently.
+    def _validate_database_credentials(self) -> Settings:
+        """P0-2 (2026-09-13): known default Postgres passwords are only
+        legal on the local docker-compose.yml path. Staging and every
+        other non-local environment must supply rotated owner and
+        runtime secrets. Owner (`DATABASE_URL`) and least-privileged
+        runtime (`APP_DATABASE_URL`) stay separate connections.
         """
-        env = self.environment.strip().lower()
-        hosts = self.app_database_url.hosts()
-        default_password_in_use = any(h.get("password") == "app_runtime" for h in hosts)
-        if env in {"production", "prod"} and default_password_in_use:
-            raise ValueError(
-                "APP_DATABASE_URL still uses the migration-default app_runtime "
-                "password in a production environment; rotate the app_runtime "
-                "role's password and update APP_DATABASE_URL before starting"
-            )
+        if self.is_local_environment:
+            return self
+        checks = (
+            ("DATABASE_URL", self.database_url),
+            ("APP_DATABASE_URL", self.app_database_url),
+        )
+        for label, url in checks:
+            for host in url.hosts():
+                password = (host.get("password") or "").strip().lower()
+                if password in self._KNOWN_DEFAULT_DB_PASSWORDS:
+                    raise ValueError(
+                        f"{label} still uses a known default database password "
+                        f"in ENVIRONMENT={self.environment!r}; rotate the "
+                        "credential and update the URL before starting"
+                    )
         return self
 
     # Known-weak/placeholder JWT signing secrets seen in the wild (docs,

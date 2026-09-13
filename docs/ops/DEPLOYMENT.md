@@ -14,18 +14,29 @@ Required for API boot:
 | Variable | Purpose |
 |----------|---------|
 | `DATABASE_URL` | Owner/migration connection (Alembic) |
-| `APP_DATABASE_URL` | Runtime connection as `app_runtime` (RLS) |
+| `APP_DATABASE_URL` | Runtime connection as `app_runtime` (RLS). Non-local environments reject the `app_runtime`/`postgres` default passwords |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Staging Compose owner role — required, no defaults |
+| `APP_RUNTIME_USER` / `APP_RUNTIME_PASSWORD` | Staging Compose least-privileged runtime role — required, separate from owner |
 | `SUPABASE_JWT_SECRET` | Verifies Supabase-issued JWTs — must be a real, random secret >= 32 bytes (P0-1, 2026-09-13 audit); the API refuses to boot with a blank, short, known-placeholder, or committed repository/CI test secret outside `ENVIRONMENT=test` |
 | `SUPABASE_JWT_ISSUER` | Required when `AUTH_MODE=supabase` outside `ENVIRONMENT=test`. `AUTH_MODE=local` defaults to and verifies `content-orchestrator-local`. Issuer-less tokens are rejected. |
 
-Compose overrides DB hostnames to the `postgres` service; keep the local
-`.env` values for host-run processes if you mix modes.
+Staging Compose does **not** publish Postgres on the host. It interpolates
+required owner and runtime secrets (`POSTGRES_*` and `APP_RUNTIME_*`) with
+`${VAR:?required}` — unset values fail closed. Known defaults
+(`postgres` / `app_runtime` passwords) are rejected at API startup in every
+non-local environment, including `staging`.
+
+If a previous staging deploy used `postgres/postgres` or
+`app_runtime/app_runtime`, treat those credentials as compromised: rotate
+both roles, update `DATABASE_URL` / `APP_DATABASE_URL`, and inspect
+Postgres / host access logs for unexpected connections on 5432.
 
 ## Build and run staging
 
 ```bash
 cp .env.example .env
-# set at least SUPABASE_JWT_SECRET
+# set SUPABASE_JWT_SECRET plus rotated POSTGRES_* and APP_RUNTIME_* secrets
+# (no postgres/postgres or app_runtime/app_runtime)
 
 docker compose -f docker-compose.staging.yml up --build
 ```
@@ -34,7 +45,7 @@ Services:
 
 | Service | Image / build | Host port | Notes |
 |---------|---------------|-----------|--------|
-| `postgres` | `postgres:16-alpine` | `5432` | Creates `content_orchestrator` DB |
+| `postgres` | `postgres:16-alpine` | none | Reachable only on the Compose network |
 | `api` | `apps/api/Dockerfile` | `8000` | `RUN_MIGRATIONS=1` → `alembic upgrade head` then uvicorn |
 | `worker` | `apps/worker/Dockerfile` | — | `python -m worker.main`; needs `WORKER_CREDENTIAL` / `WORKER_ID` to claim work |
 | `web` | `apps/web/Dockerfile` | `8080` | nginx serves `dist`; proxies `/api/` → `api:8000/` |

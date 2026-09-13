@@ -1,23 +1,25 @@
-# Staging / full-stack local compose.
-# Usage (from repo root, with a filled .env):
-#   docker compose -f docker-compose.staging.yml up --build
+# Staging stack. Does not publish Postgres on the host network.
+# Required secrets have no defaults — Compose fails closed if they are unset:
+#   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+#   APP_RUNTIME_USER, APP_RUNTIME_PASSWORD
+# Owner/migration and runtime credentials stay separate. Never reuse
+# postgres/postgres or app_runtime/app_runtime here.
 #
-# Dev-only Postgres remains in docker-compose.yml (no app images).
+# Usage (from repo root, with a filled non-default .env):
+#   docker compose -f docker-compose.staging.yml up --build
 
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: content_orchestrator
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${POSTGRES_DB:?required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -30,9 +32,8 @@ services:
     env_file:
       - .env
     environment:
-      # Compose network hostnames override local .env localhost URLs.
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/content_orchestrator
-      APP_DATABASE_URL: postgresql://app_runtime:app_runtime@postgres:5432/content_orchestrator
+      DATABASE_URL: postgresql://${POSTGRES_USER:?required}:${POSTGRES_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:?required}
+      APP_DATABASE_URL: postgresql://${APP_RUNTIME_USER:?required}:${APP_RUNTIME_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:?required}
       ENVIRONMENT: ${ENVIRONMENT:-staging}
       RUN_MIGRATIONS: "1"
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["http://localhost:8080"]}
@@ -62,7 +63,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/content_orchestrator
+      DATABASE_URL: postgresql://${POSTGRES_USER:?required}:${POSTGRES_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:?required}
       API_BASE_URL: http://api:8000
       ENVIRONMENT: ${ENVIRONMENT:-staging}
       HEALTH_CHECK_INTERVAL_SECONDS: ${HEALTH_CHECK_INTERVAL_SECONDS:-300}

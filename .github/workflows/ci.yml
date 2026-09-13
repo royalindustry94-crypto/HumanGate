@@ -271,6 +271,13 @@ jobs:
           assert "token_urlsafe" in smoke
           assert "GITHUB_ENV" in smoke
 
+          staging = Path("docker-compose.staging.yml").read_text()
+          assert "5432:5432" not in staging
+          assert "${POSTGRES_PASSWORD:?required}" in staging
+          assert "${APP_RUNTIME_PASSWORD:?required}" in staging
+          assert "postgresql://postgres:postgres@" not in staging
+          assert "postgresql://app_runtime:app_runtime@" not in staging
+
           watchdog = Path(".github/workflows/build-watchdog.yml").read_text()
           assert "failure|cancelled|timed_out|stale|startup_failure)" in watchdog
           assert "action_required)" in watchdog
