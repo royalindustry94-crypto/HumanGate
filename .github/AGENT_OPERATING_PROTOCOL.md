@@ -16,6 +16,7 @@ review, and evidence requirement win.
 | **Lead coding agent** | **Claude Code** | Owns one bounded coding task, branch, tests, checkpoints, PR, and exact-SHA handoff per 30-minute cycle | Continue without the matching Codex checkpoint verdict; certify or merge its own work; weaken a non-negotiable |
 | Delegated implementation worker | Cursor (background/cloud agent) | Bounded implementation tasks assigned via Cursor's own dispatch surface, once connected | Merge, deploy, or act outside an assigned bounded task |
 | Independent auditor / merge authority | Codex | Exact-head code, security, CI, and release-readiness audit; checkpoint/final verdict; merge after final PASS | Pass a different SHA; merge with failed checks or unresolved blockers; treat its own application-code change as independently verified |
+| Fallback independent auditor | GitHub Copilot (`request_copilot_review`) — only when Codex is documented unavailable (out of credit / no verdict after a genuine attempt) | Stand in for Codex's exact-head checkpoint/audit verdict (`COPILOT_AUDIT: CHECKPOINT_PASS/CHANGES_REQUESTED/FAIL/PASS`) so a 30-minute coding cycle isn't stalled by Codex's credit balance | Execute the merge itself; substitute for Codex when Codex is actually available; wave through a verdict that skips non-negotiable evidence |
 | Cheaper bounded-work / test / docs worker | GitHub Copilot (`assign_copilot_to_issue`, `request_copilot_review`) | Small, well-specified bounded tasks (test fixes, docs, lint-scale changes) end-to-end: issue → PR; lightweight PR review | Own architecturally significant work; merge its own PR; act as sole reviewer of its own diff |
 | Builder (legacy label, still valid) | Claude Code or Cursor, explicitly assigned per task | One queued issue, one branch, implementation, tests, and pull request | Merge; work without a current exact-SHA authorization; weaken controls; work outside the assigned issue |
 | Reviewer / QA | A fresh Codex, Copilot, or other designated agent that did not build the change | Scope review, regression checks, exact-head CI evidence | Modify the reviewed head while claiming independence |
@@ -45,6 +46,18 @@ Codex then records one exact-SHA outcome:
 - `CHANGES_REQUESTED`: only the listed remediation is authorized.
 - `FAIL`: all coding and merge activity remains stopped.
 
+**Codex-unavailable fallback (Founder directive 2026-09-13):** if Codex is
+documented unavailable for the exact current head SHA (a posted "out of
+credit"/error message, or no verdict after a genuine, documented attempt
+logged on issue #90), GitHub Copilot may record the equivalent
+`COPILOT_AUDIT: CHECKPOINT_PASS / CHANGES_REQUESTED / FAIL / PASS` for that
+same exact SHA, with identical authority to unblock the next bounded coding
+cycle. A Copilot `PASS` still does not execute a merge — that requires Codex
+to countersign the exact head once available again, or the Founder to merge
+directly against the same merge-gate checklist below. The fallback is
+per-SHA: the next commit invalidates it, and Codex is the default auditor
+again as soon as it can record a verdict. See `AGENTS.md` for the full rule.
+
 Every new commit invalidates the prior outcome. A new task may start only when
 coordination issue #90 contains `CODEX_BASELINE: PASS` for the current `main`
 SHA. A private agent-project instruction cannot override repository state.
@@ -69,7 +82,12 @@ Only Codex may merge, and only once all of the following refer to the same head 
 2. Required CI is successful.
 3. Independent review and security audit are complete (reproduced, not just read — see `AGENTS.md`'s reproduce-before-trusting discipline).
 4. The Codex audit verdict is `PASS`. A checkpoint pass or conditional finding
-   is not merge authorization.
+   is not merge authorization. **Exception (Codex-unavailable fallback,
+   Founder directive 2026-09-13):** when Codex is documented unavailable per
+   the rule above, a `COPILOT_AUDIT: PASS` on the exact head SHA satisfies
+   this item, but Codex still performs the merge itself once available, or
+   the Founder merges directly — Claude never merges under this exception
+   either.
 5. Human Review requirements are satisfied.
 6. No unresolved P0/P1 blocker remains.
 

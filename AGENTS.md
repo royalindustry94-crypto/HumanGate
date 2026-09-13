@@ -46,6 +46,35 @@ is the independent audit and merge authority.
   and merge an exact SHA after its audit passes and all repository checks are
   green. If Codex changes application code, that change still needs fresh
   independent evidence before Codex records the final pass.
+
+### Auditor fallback — Codex unavailable (Founder directive 2026-09-13)
+
+Codex running out of credit must never leave a task silently stalled. When
+Codex is documented unavailable for the current exact head SHA — a posted
+Codex "out of credit" / error message, or no Codex verdict on coordination
+issue #90 after a genuine, documented attempt — GitHub Copilot
+(`request_copilot_review`) may stand in as the independent auditor for that
+SHA, using the same verdict vocabulary:
+
+- Before requesting the fallback, post the Codex-unavailable evidence (the
+  error message, or the attempt and elapsed time) to issue #90 so the
+  substitution is auditable, not silent.
+- `COPILOT_AUDIT: CHECKPOINT_PASS` / `CHANGES_REQUESTED` / `FAIL` on the exact
+  head SHA carry the same authority as the equivalent `CODEX_AUDIT` verdict
+  and keep bounded 30-minute coding cycles moving.
+- A Copilot `PASS` clears the independent-review requirement for that exact
+  SHA but does **not** itself execute a merge. Merge still requires Codex to
+  countersign the exact head (once it has credit again) **or** the Founder to
+  merge directly after confirming the same merge-gate checklist below
+  (required CI green, non-negotiables intact, no unresolved P0/P1). Claude
+  never merges under this fallback either.
+- The fallback is per-SHA: the very next commit invalidates it exactly like a
+  normal verdict, and Codex remains the default auditor the moment it is
+  available again.
+- This fallback does not relax anything in "Non-negotiables" above — a
+  Copilot verdict that skips or hand-waves workspace isolation, the Human
+  Review Gate, spend controls, or audit logging evidence is not a PASS.
+
 - Repository instructions are the shared control plane. Private Claude Project
   instructions that are not copied into this repository cannot override this
   gate or any non-negotiable.
