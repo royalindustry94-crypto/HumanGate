@@ -45,16 +45,36 @@ jobs:
                 ? 'continue'
                 : 'build';
 
-            const trustedCommentFor = (comments, sha, allowedVerdicts, marker) =>
+            const trustedCommentFor = (comments, sha, allowedVerdicts, marker, verdictPrefix) =>
               comments.some((comment) => {
                 if (comment.user?.login !== owner) return false;
                 const text = comment.body || '';
                 if (!text.includes(marker)) return false;
                 if (!text.includes(`HEAD_SHA: ${sha}`)) return false;
                 return allowedVerdicts.some((verdict) =>
-                  text.includes(`CODEX_AUDIT: ${verdict}`)
+                  text.includes(`${verdictPrefix}: ${verdict}`)
                 );
               });
+
+            // Codex-unavailable fallback (Founder directive 2026-09-13): a trusted
+            // COPILOT_AUDIT verdict authorizes the same continue/remediate cycle as
+            // CODEX_AUDIT, but only once a documented codex-unavailable-evidence
+            // comment exists and at least MIN_FALLBACK_WAIT_MINUTES has passed since
+            // it, so the fallback cannot be invoked and self-satisfied instantly.
+            const MIN_FALLBACK_WAIT_MINUTES = 60;
+            const fallbackAuthorizedFor = (comments, sha, allowedVerdicts) => {
+              const evidence = comments
+                .filter((c) => c.user?.login === owner &&
+                  (c.body || '').includes('<!-- codex-unavailable-evidence:v1 -->') &&
+                  (c.body || '').includes(`HEAD_SHA: ${sha}`))
+                .map((c) => new Date(c.created_at).getTime())
+                .sort((a, b) => a - b)[0];
+              if (evidence === undefined) return false;
+              return trustedCommentFor(
+                comments.filter((c) => new Date(c.created_at).getTime() >= evidence + MIN_FALLBACK_WAIT_MINUTES * 60 * 1000),
+                sha, allowedVerdicts, '<!-- copilot-audit-fallback:v1 -->', 'COPILOT_AUDIT'
+              );
+            };
 
             if (isPullRequest) {
               const number = context.payload.pull_request?.number || context.issue.number;
@@ -72,9 +92,12 @@ jobs:
               const allowed = requestedMode === 'remediate'
                 ? ['CHANGES_REQUESTED']
                 : ['CHECKPOINT_PASS'];
-              if (!trustedCommentFor(comments, pr.head.sha, allowed, '<!-- codex-audit-gate:v1 -->')) {
+              const authorized =
+                trustedCommentFor(comments, pr.head.sha, allowed, '<!-- codex-audit-gate:v1 -->', 'CODEX_AUDIT') ||
+                fallbackAuthorizedFor(comments, pr.head.sha, allowed);
+              if (!authorized) {
                 core.setFailed(
-                  `Claude ${requestedMode} blocked: no trusted Codex ${allowed.join('/')} for exact PR head ${pr.head.sha}`
+                  `Claude ${requestedMode} blocked: no trusted Codex/Copilot-fallback ${allowed.join('/')} for exact PR head ${pr.head.sha}`
                 );
                 return;
               }

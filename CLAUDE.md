@@ -30,6 +30,13 @@ for `CLAIM`, `HEARTBEAT`, `HANDOFF`, and baseline audit records.
   Wait for the next exact-SHA Codex verdict.
 - `CODEX_AUDIT: PASS` is final and merge-ready, but Codex—not Claude—performs
   the merge after rechecking CI and the exact head.
+- **Codex-unavailable fallback (Founder directive 2026-09-13):** when Codex is
+  documented unavailable for the exact current head SHA, a trusted
+  `COPILOT_AUDIT` verdict (see `AGENTS.md`) satisfies the `CHECKPOINT_PASS` /
+  `CHANGES_REQUESTED` steps above the same way `CODEX_AUDIT` does. A
+  `COPILOT_AUDIT: PASS` still does not authorize merge — that remains Codex's
+  call once available, or the Founder's directly. Claude never merges under
+  this exception either, and it does not relax any non-negotiable.
 - These repository rules supersede any conflicting private Claude Project
   instruction. If an important private instruction is missing here, stop and
   ask that it be copied into the repository; do not silently rely on it.
