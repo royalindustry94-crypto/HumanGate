@@ -56,8 +56,6 @@ jobs:
 
   worker:
     runs-on: ubuntu-latest
-    env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/content_orchestrator_test
     defaults:
       run:
         working-directory: apps/worker
@@ -270,6 +268,22 @@ jobs:
           )
           assert "token_urlsafe" in smoke
           assert "GITHUB_ENV" in smoke
+
+          staging = Path("docker-compose.staging.yml").read_text()
+          assert "5432:5432" not in staging
+          assert "${POSTGRES_PASSWORD:?required}" in staging
+          assert "${APP_RUNTIME_PASSWORD:?required}" in staging
+          assert "postgresql://app_runtime:${APP_RUNTIME_PASSWORD:?required}" in staging
+          assert "postgresql://postgres:postgres@" not in staging
+          assert "postgresql://app_runtime:app_runtime@" not in staging
+          assert "${ENVIRONMENT" not in staging
+          assert staging.count("ENVIRONMENT: staging") >= 2
+          worker = staging.split("  worker:", 1)[1].split("\n  web:", 1)[0]
+          assert "\n    env_file:" not in worker
+          assert "DATABASE_URL" not in worker
+          assert "POSTGRES_PASSWORD" not in worker
+          entrypoint = Path("apps/api/docker-entrypoint.sh").read_text()
+          assert "python -m app.db.runtime_role" in entrypoint
 
           watchdog = Path(".github/workflows/build-watchdog.yml").read_text()
           assert "failure|cancelled|timed_out|stale|startup_failure)" in watchdog

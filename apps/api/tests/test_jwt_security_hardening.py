@@ -21,7 +21,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 def _base_settings_kwargs(**overrides) -> dict:
     kwargs = {
-        "database_url": "postgresql://postgres:postgres@127.0.0.1:5432/content_orchestrator_test",
+        "database_url": "postgresql://postgres:rotated-owner-password@127.0.0.1:5432/content_orchestrator_test",
         "app_database_url": (
             "postgresql://app_runtime:rotated-test-password@127.0.0.1:5432/content_orchestrator_test"
         ),

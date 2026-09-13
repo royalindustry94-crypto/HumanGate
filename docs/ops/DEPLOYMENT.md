@@ -14,18 +14,42 @@ Required for API boot:
 | Variable | Purpose |
 |----------|---------|
 | `DATABASE_URL` | Owner/migration connection (Alembic) |
-| `APP_DATABASE_URL` | Runtime connection as `app_runtime` (RLS) |
+| `APP_DATABASE_URL` | Runtime connection as the canonical `app_runtime` role (RLS). Non-local environments reject other role names, the `app_runtime`/`postgres` default passwords, blank URLs, and reused owner credentials |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Staging Compose owner role — required, no defaults |
+| `APP_RUNTIME_PASSWORD` | Staging Compose password for the canonical `app_runtime` role — required, distinct from the owner password |
 | `SUPABASE_JWT_SECRET` | Verifies Supabase-issued JWTs — must be a real, random secret >= 32 bytes (P0-1, 2026-09-13 audit); the API refuses to boot with a blank, short, known-placeholder, or committed repository/CI test secret outside `ENVIRONMENT=test` |
 | `SUPABASE_JWT_ISSUER` | Required when `AUTH_MODE=supabase` outside `ENVIRONMENT=test`. `AUTH_MODE=local` defaults to and verifies `content-orchestrator-local`. Issuer-less tokens are rejected. |
 
-Compose overrides DB hostnames to the `postgres` service; keep the local
-`.env` values for host-run processes if you mix modes.
+Staging Compose does **not** publish Postgres on the host. It interpolates
+required owner secrets (`POSTGRES_*`) and `APP_RUNTIME_PASSWORD` with
+`${VAR:?required}` — unset values fail closed. The API runtime DSN is
+hard-set to user `app_runtime` (the only role the migration chain grants).
+API and worker services hard-set `ENVIRONMENT: staging` so a copied
+`.env.example` (`ENVIRONMENT=development`) cannot mark the process local
+and skip those checks. Known defaults (`postgres` / `app_runtime`
+passwords), blank passwords, non-canonical runtime roles, and reused
+owner/runtime identities or secrets are rejected at API startup in every
+non-local environment, including `staging`.
+
+The worker service does **not** load `.env` and does not receive
+`DATABASE_URL` or `POSTGRES_PASSWORD`. It talks to the API over HTTP.
+
+After `alembic upgrade head`, the API entrypoint rotates the runtime role
+to `APP_RUNTIME_PASSWORD` using PostgreSQL `format(%I, %L)` (no raw-SQL
+concatenation). Do not rely on migration 0001's local `app_runtime`
+password in staging.
+
+If a previous staging deploy used `postgres/postgres` or
+`app_runtime/app_runtime`, treat those credentials as compromised: rotate
+both roles, update `DATABASE_URL` / `APP_DATABASE_URL`, and inspect
+Postgres / host access logs for unexpected connections on 5432.
 
 ## Build and run staging
 
 ```bash
 cp .env.example .env
-# set at least SUPABASE_JWT_SECRET
+# set SUPABASE_JWT_SECRET plus rotated POSTGRES_* and APP_RUNTIME_* secrets
+# (no postgres/postgres or app_runtime/app_runtime)
 
 docker compose -f docker-compose.staging.yml up --build
 ```
@@ -34,9 +58,9 @@ Services:
 
 | Service | Image / build | Host port | Notes |
 |---------|---------------|-----------|--------|
-| `postgres` | `postgres:16-alpine` | `5432` | Creates `content_orchestrator` DB |
+| `postgres` | `postgres:16-alpine` | none | Reachable only on the Compose network |
 | `api` | `apps/api/Dockerfile` | `8000` | `RUN_MIGRATIONS=1` → `alembic upgrade head` then uvicorn |
-| `worker` | `apps/worker/Dockerfile` | — | `python -m worker.main`; needs `WORKER_CREDENTIAL` / `WORKER_ID` to claim work |
+| `worker` | `apps/worker/Dockerfile` | — | HTTP-only; no `.env` / owner DSN. Needs `WORKER_CREDENTIAL` / `WORKER_ID` to claim work |
 | `web` | `apps/web/Dockerfile` | `8080` | nginx serves `dist`; proxies `/api/` → `api:8000/` |
 
 Stop / tear down:
@@ -167,7 +191,8 @@ and `web` wait on that condition.
 - Migrations use `DATABASE_URL` (owner). They create the `app_runtime`
   role (password `app_runtime` in the local/dev migration) and the
   `auth.users` shim when absent — see
-  `docs/milestone-2-identity-and-access.md` §6.
+  `docs/milestone-2-identity-and-access.md` §6. Staging compose then
+  rotates that role to `APP_RUNTIME_PASSWORD` before the API listens.
 - Against managed Supabase, if `CREATE ROLE` is denied, create
   `app_runtime` once in the SQL editor, then run Alembic for the rest.
 - CI also runs a migration replay: `alembic downgrade base && alembic upgrade head`.

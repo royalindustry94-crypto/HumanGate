@@ -1,23 +1,29 @@
-# Staging / full-stack local compose.
-# Usage (from repo root, with a filled .env):
-#   docker compose -f docker-compose.staging.yml up --build
+# Staging stack. Does not publish Postgres on the host network.
+# Required secrets have no defaults — Compose fails closed if they are unset:
+#   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+#   APP_RUNTIME_PASSWORD
+# Runtime login is hard-set to app_runtime (the role migrations grant).
+# Owner/migration and runtime credentials stay separate. Never reuse
+# postgres/postgres or app_runtime/app_runtime here.
+# API/worker hard-set ENVIRONMENT: staging (do not inherit development
+# from .env.example). The API entrypoint rotates the runtime role after
+# migrations. The worker is HTTP-only and must not receive owner DB secrets.
 #
-# Dev-only Postgres remains in docker-compose.yml (no app images).
+# Usage (from repo root, with a filled non-default .env):
+#   docker compose -f docker-compose.staging.yml up --build
 
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: content_orchestrator
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${POSTGRES_DB:?required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -30,10 +36,12 @@ services:
     env_file:
       - .env
     environment:
-      # Compose network hostnames override local .env localhost URLs.
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/content_orchestrator
-      APP_DATABASE_URL: postgresql://app_runtime:app_runtime@postgres:5432/content_orchestrator
-      ENVIRONMENT: ${ENVIRONMENT:-staging}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?required}:${POSTGRES_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:?required}
+      APP_DATABASE_URL: postgresql://app_runtime:${APP_RUNTIME_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:?required}
+      # Hard-set. Do not interpolate ENVIRONMENT from .env / .env.example
+      # (those files default to development and would bypass non-local
+      # credential checks, OpenAPI lockdown, and AUTH_MODE staging rules).
+      ENVIRONMENT: staging
       RUN_MIGRATIONS: "1"
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["http://localhost:8080"]}
     ports:
@@ -59,14 +67,15 @@ services:
       context: ./apps/worker
       dockerfile: Dockerfile
     restart: unless-stopped
-    env_file:
-      - .env
+    # Worker-only environment. Do not inherit the repo env file or owner
+    # database credentials; this process talks to the API over HTTP.
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/content_orchestrator
       API_BASE_URL: http://api:8000
-      ENVIRONMENT: ${ENVIRONMENT:-staging}
+      ENVIRONMENT: staging
       HEALTH_CHECK_INTERVAL_SECONDS: ${HEALTH_CHECK_INTERVAL_SECONDS:-300}
       HEARTBEAT_INTERVAL_SECONDS: ${HEARTBEAT_INTERVAL_SECONDS:-10}
+      WORKER_CREDENTIAL: ${WORKER_CREDENTIAL:-}
+      WORKER_ID: ${WORKER_ID:-}
     depends_on:
       api:
         condition: service_healthy

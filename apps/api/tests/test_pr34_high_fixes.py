@@ -36,7 +36,7 @@ from tests.conftest import nontest_jwt_secret
 
 def _base_settings_kwargs(**overrides) -> dict:
     kwargs = {
-        "database_url": "postgresql://postgres:postgres@127.0.0.1:5432/content_orchestrator_test",
+        "database_url": "postgresql://postgres:rotated-owner-password@127.0.0.1:5432/content_orchestrator_test",
         # Deliberately NOT the migration-default `app_runtime` password —
         # see test_c2_* below for that specific, isolated check. Using the
         # default here would make every production-environment test in
@@ -88,7 +88,7 @@ def test_c2_production_rejects_default_app_runtime_password():
     production against a database where that default was never rotated
     must fail closed, mirroring the AUTH_MODE=local guard above.
     """
-    with pytest.raises(ValidationError, match="app_runtime"):
+    with pytest.raises(ValidationError, match="known default database password"):
         Settings(
             **_base_settings_kwargs(
                 environment="production",
@@ -114,6 +114,105 @@ def test_c2_default_password_is_fine_outside_production():
         )
     )
     assert settings.environment == "development"
+
+
+@pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
+def test_c2_non_local_rejects_default_app_runtime_password(environment: str):
+    with pytest.raises(ValidationError, match="known default database password"):
+        Settings(
+            **_base_settings_kwargs(
+                environment=environment,
+                app_database_url=(
+                    "postgresql://app_runtime:app_runtime@127.0.0.1:5432/content_orchestrator_test"
+                ),
+            )
+        )
+
+
+@pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
+def test_c2_non_local_rejects_default_postgres_password(environment: str):
+    with pytest.raises(ValidationError, match="known default database password"):
+        Settings(
+            **_base_settings_kwargs(
+                environment=environment,
+                database_url=(
+                    "postgresql://postgres:postgres@127.0.0.1:5432/content_orchestrator_test"
+                ),
+            )
+        )
+
+
+@pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
+def test_c2_non_local_rejects_non_canonical_runtime_role(environment: str):
+    with pytest.raises(ValidationError, match="canonical"):
+        Settings(
+            **_base_settings_kwargs(
+                environment=environment,
+                app_database_url=(
+                    "postgresql://other_runtime:rotated-runtime-password@"
+                    "127.0.0.1:5432/content_orchestrator_test"
+                ),
+            )
+        )
+
+
+@pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
+def test_c2_non_local_rejects_same_owner_and_runtime_identity(environment: str):
+    with pytest.raises(ValidationError, match="owner identity"):
+        Settings(
+            **_base_settings_kwargs(
+                environment=environment,
+                database_url=(
+                    "postgresql://app_runtime:rotated-owner-password@127.0.0.1:5432/content_orchestrator_test"
+                ),
+                app_database_url=(
+                    "postgresql://app_runtime:rotated-runtime-password@127.0.0.1:5432/content_orchestrator_test"
+                ),
+            )
+        )
+
+
+@pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
+def test_c2_non_local_rejects_reused_owner_runtime_password(environment: str):
+    with pytest.raises(ValidationError, match="reuse the DATABASE_URL password"):
+        Settings(
+            **_base_settings_kwargs(
+                environment=environment,
+                database_url=(
+                    "postgresql://postgres:shared-secret-password@127.0.0.1:5432/content_orchestrator_test"
+                ),
+                app_database_url=(
+                    "postgresql://app_runtime:shared-secret-password@127.0.0.1:5432/content_orchestrator_test"
+                ),
+            )
+        )
+
+
+@pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
+@pytest.mark.parametrize(
+    "database_url,app_database_url",
+    [
+        (
+            "postgresql://postgres@127.0.0.1:5432/content_orchestrator_test",
+            "postgresql://app_runtime:rotated-test-password@127.0.0.1:5432/content_orchestrator_test",
+        ),
+        (
+            "postgresql://postgres:rotated-owner-password@127.0.0.1:5432/content_orchestrator_test",
+            "postgresql://app_runtime@127.0.0.1:5432/content_orchestrator_test",
+        ),
+    ],
+)
+def test_c2_non_local_rejects_passwordless_urls(
+    environment: str, database_url: str, app_database_url: str
+):
+    with pytest.raises(ValidationError, match="missing a password"):
+        Settings(
+            **_base_settings_kwargs(
+                environment=environment,
+                database_url=database_url,
+                app_database_url=app_database_url,
+            )
+        )
 
 
 async def _seed_workspace_item(session):
