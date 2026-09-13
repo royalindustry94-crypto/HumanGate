@@ -22,6 +22,7 @@ from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal, RuntimeSessionLocal
 from app.models.local_auth import LocalAuthCredential
 from app.services import local_auth
+from tests.conftest import nontest_jwt_secret
 
 STRONG_PASSWORD = "Correct-Horse-Battery-9!"
 
@@ -43,6 +44,9 @@ def test_mg_metrics_requires_token_in_every_deployed_environment(monkeypatch, en
     """
     monkeypatch.delenv("METRICS_SCRAPER_TOKEN", raising=False)
     monkeypatch.setenv("ENVIRONMENT", environment)
+    # Staging-like environments are not ENVIRONMENT=test, so the committed
+    # repository test JWT secret is rejected. Use a distinct non-reserved secret.
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", nontest_jwt_secret())
     get_settings.cache_clear()
     try:
         assert environment.strip().lower() not in TOKENLESS_METRICS_ENVIRONMENTS
@@ -64,6 +68,7 @@ def test_mg_production_is_never_tokenless(environment):
 def test_mg_metrics_token_is_required_and_compared_exactly(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "staging")
     monkeypatch.setenv("METRICS_SCRAPER_TOKEN", "scrape-token-abcdef123456")
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", nontest_jwt_secret())
     get_settings.cache_clear()
     try:
         # Correct token passes.

@@ -9,10 +9,19 @@ failure" rule in the project instructions.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import TypedDict
+from typing import ClassVar, TypedDict
 
 from pydantic import Field, PostgresDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Minted by AUTH_MODE=local (see app/services/local_auth.py) and required on
+# every verified local token. Shared so issuance and verification cannot drift.
+LOCAL_JWT_ISSUER = "content-orchestrator-local"
+
+# Fixed secret used only by API tests/CI under ENVIRONMENT=test. Listed in
+# the known-weak set so a production/staging/development process cannot boot
+# with this publicly committed value.
+REPOSITORY_TEST_JWT_SECRET = "test-supabase-jwt-secret-0123456789abcdef"
 
 
 class OpenAPIRouteKwargs(TypedDict):
@@ -53,6 +62,12 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str
     supabase_jwt_algorithm: str = Field(default="HS256")
     supabase_jwt_audience: str = Field(default="authenticated")
+    # Required `iss` claim on every verified JWT (P0-1 Codex re-audit).
+    # AUTH_MODE=local defaults this to LOCAL_JWT_ISSUER. AUTH_MODE=supabase
+    # outside ENVIRONMENT=test must set the managed project issuer
+    # (`https://<project-ref>.supabase.co/auth/v1`); startup fails closed
+    # if it is missing.
+    supabase_jwt_issuer: str | None = Field(default=None)
     auth_mode: str = Field(default="supabase")  # local | supabase
     # Explicit break-glass for AUTH_MODE=local when ENVIRONMENT=production.
     allow_local_auth_in_production: bool = Field(default=False)
@@ -178,6 +193,83 @@ class Settings(BaseSettings):
             )
         return self
 
+    # Known-weak/placeholder JWT signing secrets seen in the wild (docs,
+    # scaffolding, copy-pasted between projects) — reject them outright
+    # rather than trust that "not blank" means "not guessable". Matched
+    # case-insensitively as an exact value, not a substring: real generated
+    # secrets legitimately contain words like "test" or "secret" inside a
+    # longer random string (e.g. this repo's own test fixtures).
+    _KNOWN_WEAK_JWT_SECRETS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "",
+            "secret",
+            "changeme",
+            "change-me",
+            "change_me",
+            "your-secret",
+            "your-jwt-secret",
+            "your_jwt_secret",
+            "example",
+            "test",
+            "password",
+            "insecure",
+            "default",
+            "jwtsecret",
+            "supersecretjwtkey",
+            # The Supabase CLI's `supabase start` local-dev default — long
+            # enough to pass a naive length check, and copy-pasted into real
+            # deployments often enough to be worth rejecting by name.
+            "super-secret-jwt-token-with-at-least-32-characters-long",
+            # Publicly committed repository/CI fixtures. ENVIRONMENT=test
+            # remains exempt; every other environment must use a distinct secret.
+            REPOSITORY_TEST_JWT_SECRET,
+            "ci-test-supabase-jwt-secret",
+            "ci-browser-smoke-supabase-jwt-secret",
+        }
+    )
+    # Retired high-entropy CI fixtures, stored split so secret scanners do
+    # not treat the deny-list itself as a live credential.
+    _RETIRED_JWT_SECRET_PARTS: ClassVar[tuple[tuple[str, ...], ...]] = (
+        ("HgCiBrowserSmokeJwt", "9f3a7c2e1b8d0465k4m2"),
+    )
+
+    @model_validator(mode="after")
+    def _validate_jwt_secret(self) -> Settings:
+        """P0-1 (2026-09-13 independent audit): `app.core.security` only
+        checks a JWT's signature and claim *shape* — a weak, blank, or
+        widely-known placeholder secret means anyone can forge a validly
+        "signed" token for any user. Exempt only `ENVIRONMENT=test`, which
+        pins its own fixed secret in `tests/conftest.py`; every other
+        environment, including local `development`, must supply a real,
+        sufficiently random secret.
+
+        This does not migrate existing deployments off HMAC shared secrets
+        automatically — a deployed weak secret must still be rotated by an
+        operator, and asymmetric verification via Supabase's JWKS endpoint
+        (removing the shared-secret risk entirely) is tracked as a bounded
+        follow-up, not implemented in this pass.
+        """
+        if self.environment.strip().lower() == "test":
+            return self
+        secret = self.supabase_jwt_secret
+        normalized = secret.strip().lower()
+        if len(secret.encode("utf-8")) < 32:
+            raise ValueError(
+                "SUPABASE_JWT_SECRET must be at least 32 bytes outside ENVIRONMENT=test"
+            )
+        retired = {"".join(parts).lower() for parts in self._RETIRED_JWT_SECRET_PARTS}
+        if normalized in self._KNOWN_WEAK_JWT_SECRETS or normalized in retired:
+            raise ValueError(
+                "SUPABASE_JWT_SECRET is a known placeholder/default value; "
+                "generate a real random secret"
+            )
+        if len(set(secret)) < 8:
+            raise ValueError(
+                "SUPABASE_JWT_SECRET looks predictable (too few distinct characters); "
+                "generate a real random secret"
+            )
+        return self
+
     @model_validator(mode="after")
     def _validate_auth_mode(self) -> Settings:
         mode = self.auth_mode.strip().lower()
@@ -194,6 +286,32 @@ class Settings(BaseSettings):
                 "AUTH_MODE=local is forbidden when ENVIRONMENT is production; "
                 "set ALLOW_LOCAL_AUTH_IN_PRODUCTION=true only as an audited override"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_jwt_issuer(self) -> Settings:
+        """P0-1 Codex CHANGES_REQUESTED: issuer verification is not optional
+        for accepted tokens. Local mode uses the minted local issuer.
+        Non-test Supabase mode requires an operator-supplied issuer.
+        """
+        env = self.environment.strip().lower()
+        raw = self.supabase_jwt_issuer
+        issuer = None if raw is None else raw.strip() or None
+        if self.auth_mode == "local":
+            if issuer is not None and issuer != LOCAL_JWT_ISSUER:
+                raise ValueError(
+                    f"SUPABASE_JWT_ISSUER must be {LOCAL_JWT_ISSUER!r} when AUTH_MODE=local"
+                )
+            object.__setattr__(self, "supabase_jwt_issuer", LOCAL_JWT_ISSUER)
+            return self
+        if env == "test":
+            object.__setattr__(self, "supabase_jwt_issuer", issuer or LOCAL_JWT_ISSUER)
+            return self
+        if issuer is None:
+            raise ValueError(
+                "SUPABASE_JWT_ISSUER is required when AUTH_MODE=supabase outside ENVIRONMENT=test"
+            )
+        object.__setattr__(self, "supabase_jwt_issuer", issuer)
         return self
 
 

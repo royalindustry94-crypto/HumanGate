@@ -15,7 +15,8 @@ Required for API boot:
 |----------|---------|
 | `DATABASE_URL` | Owner/migration connection (Alembic) |
 | `APP_DATABASE_URL` | Runtime connection as `app_runtime` (RLS) |
-| `SUPABASE_JWT_SECRET` | Verifies Supabase-issued JWTs |
+| `SUPABASE_JWT_SECRET` | Verifies Supabase-issued JWTs — must be a real, random secret >= 32 bytes (P0-1, 2026-09-13 audit); the API refuses to boot with a blank, short, known-placeholder, or committed repository/CI test secret outside `ENVIRONMENT=test` |
+| `SUPABASE_JWT_ISSUER` | Required when `AUTH_MODE=supabase` outside `ENVIRONMENT=test`. `AUTH_MODE=local` defaults to and verifies `content-orchestrator-local`. Issuer-less tokens are rejected. |
 
 Compose overrides DB hostnames to the `postgres` service; keep the local
 `.env` values for host-run processes if you mix modes.
@@ -97,7 +98,7 @@ See `.env.example` for the full annotated list. Staging-relevant knobs:
 | Variable | Default / notes |
 |----------|-----------------|
 | `ENVIRONMENT` | `staging` in compose override |
-| `AUTH_MODE` | `local` (default): `POST /auth/signup|/login` mint Supabase-shaped JWTs. `supabase`: local auth routes return 404; use Supabase-issued tokens. |
+| `AUTH_MODE` | `local` (default): `POST /auth/signup|/login` mint Supabase-shaped JWTs and verify `iss=content-orchestrator-local`. `supabase`: local auth routes return 404; require `SUPABASE_JWT_ISSUER`. |
 | `ENVIRONMENT` | `development` enables `/docs`, `/redoc`, `/openapi.json`. Any other value (including `staging` / `production` / `test`) disables them (P-005). |
 | `CORS_ALLOW_ORIGINS` | Include the web origin, e.g. `["http://localhost:8080"]` |
 | `RUN_MIGRATIONS` | Set to `1` on the API container for migrate-on-start |
