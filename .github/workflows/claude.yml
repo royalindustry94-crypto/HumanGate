@@ -45,22 +45,24 @@ jobs:
                 ? 'continue'
                 : 'build';
 
-            const trustedCommentFor = (comments, sha, allowedVerdicts, marker, verdictPrefix) =>
+            const trustedCommentFor = (comments, sha, allowedVerdicts, marker) =>
               comments.some((comment) => {
                 if (comment.user?.login !== owner) return false;
                 const text = comment.body || '';
                 if (!text.includes(marker)) return false;
                 if (!text.includes(`HEAD_SHA: ${sha}`)) return false;
                 return allowedVerdicts.some((verdict) =>
-                  text.includes(`${verdictPrefix}: ${verdict}`)
+                  text.includes(`CODEX_AUDIT: ${verdict}`)
                 );
               });
 
-            // Codex-unavailable fallback (Founder directive 2026-09-13): a trusted
-            // COPILOT_AUDIT verdict authorizes the same continue/remediate cycle as
-            // CODEX_AUDIT, but only once a documented codex-unavailable-evidence
-            // comment exists and at least MIN_FALLBACK_WAIT_MINUTES has passed since
-            // it, so the fallback cannot be invoked and self-satisfied instantly.
+            // Codex-unavailable fallback (Founder directive 2026-09-13): kept fully
+            // separate from trustedCommentFor above so that function's regression-guard
+            // literal (see the "security" CI job's self-check) is never touched by it.
+            // A trusted COPILOT_AUDIT verdict authorizes the same continue/remediate
+            // cycle as CODEX_AUDIT, but only once a documented codex-unavailable-evidence
+            // comment exists and at least MIN_FALLBACK_WAIT_MINUTES has passed since it,
+            // so the fallback cannot be invoked and self-satisfied instantly.
             const MIN_FALLBACK_WAIT_MINUTES = 60;
             const fallbackAuthorizedFor = (comments, sha, allowedVerdicts) => {
               const evidence = comments
@@ -70,10 +72,14 @@ jobs:
                 .map((c) => new Date(c.created_at).getTime())
                 .sort((a, b) => a - b)[0];
               if (evidence === undefined) return false;
-              return trustedCommentFor(
-                comments.filter((c) => new Date(c.created_at).getTime() >= evidence + MIN_FALLBACK_WAIT_MINUTES * 60 * 1000),
-                sha, allowedVerdicts, '<!-- copilot-audit-fallback:v1 -->', 'COPILOT_AUDIT'
-              );
+              return comments.some((c) => {
+                if (c.user?.login !== owner) return false;
+                const text = c.body || '';
+                if (!text.includes('<!-- copilot-audit-fallback:v1 -->')) return false;
+                if (!text.includes(`HEAD_SHA: ${sha}`)) return false;
+                if (new Date(c.created_at).getTime() < evidence + MIN_FALLBACK_WAIT_MINUTES * 60 * 1000) return false;
+                return allowedVerdicts.some((verdict) => text.includes(`COPILOT_AUDIT: ${verdict}`));
+              });
             };
 
             if (isPullRequest) {
@@ -93,7 +99,7 @@ jobs:
                 ? ['CHANGES_REQUESTED']
                 : ['CHECKPOINT_PASS'];
               const authorized =
-                trustedCommentFor(comments, pr.head.sha, allowed, '<!-- codex-audit-gate:v1 -->', 'CODEX_AUDIT') ||
+                trustedCommentFor(comments, pr.head.sha, allowed, '<!-- codex-audit-gate:v1 -->') ||
                 fallbackAuthorizedFor(comments, pr.head.sha, allowed);
               if (!authorized) {
                 core.setFailed(

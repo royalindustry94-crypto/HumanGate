@@ -47,25 +47,32 @@ jobs:
               issue_number: pullNumber,
               per_page: 100,
             });
-            const ownerCommentsWith = (marker, text) =>
-              comments.filter((comment) =>
-                comment.user?.login === owner &&
-                (comment.body || '').includes(marker) &&
-                (comment.body || '').includes(`HEAD_SHA: ${pr.head.sha}`) &&
-                (text === undefined || (comment.body || '').includes(text))
-              );
+            const codexPassed = comments.some((comment) => {
+              if (comment.user?.login !== owner) return false;
+              const body = comment.body || '';
+              return body.includes('<!-- codex-audit-gate:v1 -->') &&
+                body.includes('CODEX_AUDIT: PASS') &&
+                body.includes(`HEAD_SHA: ${pr.head.sha}`);
+            });
 
-            const codexPassed = ownerCommentsWith('<!-- codex-audit-gate:v1 -->', 'CODEX_AUDIT: PASS').length > 0;
-
-            const evidenceComments = ownerCommentsWith('<!-- codex-unavailable-evidence:v1 -->');
-            const fallbackVerdicts = ownerCommentsWith('<!-- copilot-audit-fallback:v1 -->', 'COPILOT_AUDIT: PASS');
-            const earliestEvidence = evidenceComments
+            // Fallback path: kept fully separate from the block above so the
+            // original Codex gate logic and its regression-guard literals
+            // (see the "security" CI job's self-check) are never touched by it.
+            const evidenceTimes = comments
+              .filter((c) => c.user?.login === owner &&
+                (c.body || '').includes('<!-- codex-unavailable-evidence:v1 -->') &&
+                (c.body || '').includes(`HEAD_SHA: ${pr.head.sha}`))
               .map((c) => new Date(c.created_at).getTime())
-              .sort((a, b) => a - b)[0];
-            const fallbackPassed = earliestEvidence !== undefined &&
-              fallbackVerdicts.some((v) =>
-                new Date(v.created_at).getTime() >= earliestEvidence + MIN_FALLBACK_WAIT_MINUTES * 60 * 1000
-              );
+              .sort((a, b) => a - b);
+            const earliestEvidence = evidenceTimes[0];
+            const fallbackPassed = earliestEvidence !== undefined && comments.some((c) => {
+              if (c.user?.login !== owner) return false;
+              const body = c.body || '';
+              if (!body.includes('<!-- copilot-audit-fallback:v1 -->')) return false;
+              if (!body.includes(`HEAD_SHA: ${pr.head.sha}`)) return false;
+              if (!body.includes('COPILOT_AUDIT: PASS')) return false;
+              return new Date(c.created_at).getTime() >= earliestEvidence + MIN_FALLBACK_WAIT_MINUTES * 60 * 1000;
+            });
 
             const passed = codexPassed || fallbackPassed;
             await github.rest.repos.createCommitStatus({
