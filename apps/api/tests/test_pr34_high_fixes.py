@@ -142,6 +142,65 @@ def test_c2_non_local_rejects_default_postgres_password(environment: str):
         )
 
 
+@pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
+def test_c2_non_local_rejects_same_owner_and_runtime_identity(environment: str):
+    with pytest.raises(ValidationError, match="owner identity"):
+        Settings(
+            **_base_settings_kwargs(
+                environment=environment,
+                database_url=(
+                    "postgresql://postgres:rotated-owner-password@127.0.0.1:5432/content_orchestrator_test"
+                ),
+                app_database_url=(
+                    "postgresql://postgres:rotated-runtime-password@127.0.0.1:5432/content_orchestrator_test"
+                ),
+            )
+        )
+
+
+@pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
+def test_c2_non_local_rejects_reused_owner_runtime_password(environment: str):
+    with pytest.raises(ValidationError, match="reuse the DATABASE_URL password"):
+        Settings(
+            **_base_settings_kwargs(
+                environment=environment,
+                database_url=(
+                    "postgresql://postgres:shared-secret-password@127.0.0.1:5432/content_orchestrator_test"
+                ),
+                app_database_url=(
+                    "postgresql://app_runtime:shared-secret-password@127.0.0.1:5432/content_orchestrator_test"
+                ),
+            )
+        )
+
+
+@pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
+@pytest.mark.parametrize(
+    "database_url,app_database_url",
+    [
+        (
+            "postgresql://postgres@127.0.0.1:5432/content_orchestrator_test",
+            "postgresql://app_runtime:rotated-test-password@127.0.0.1:5432/content_orchestrator_test",
+        ),
+        (
+            "postgresql://postgres:rotated-owner-password@127.0.0.1:5432/content_orchestrator_test",
+            "postgresql://app_runtime@127.0.0.1:5432/content_orchestrator_test",
+        ),
+    ],
+)
+def test_c2_non_local_rejects_passwordless_urls(
+    environment: str, database_url: str, app_database_url: str
+):
+    with pytest.raises(ValidationError, match="missing a password"):
+        Settings(
+            **_base_settings_kwargs(
+                environment=environment,
+                database_url=database_url,
+                app_database_url=app_database_url,
+            )
+        )
+
+
 async def _seed_workspace_item(session):
     user_id = uuid.uuid4()
     await session.execute(

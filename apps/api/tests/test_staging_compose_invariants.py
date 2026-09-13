@@ -51,3 +51,33 @@ def test_staging_compose_keeps_owner_and_runtime_credentials_separate():
     assert runtime_lines
     assert "POSTGRES_PASSWORD" not in runtime_lines[0]
     assert "APP_RUNTIME_PASSWORD" in runtime_lines[0]
+
+
+def test_staging_compose_hard_sets_environment_to_staging():
+    """Documented `cp .env.example .env` sets ENVIRONMENT=development.
+
+    Interpolating that value would mark Settings as local and skip the
+    default-password / owner-runtime separation guards. Staging services
+    must pin ENVIRONMENT: staging with no ${ENVIRONMENT...} fallback.
+    """
+    text = _staging_compose_text()
+    assert "${ENVIRONMENT" not in text
+    assert text.count("ENVIRONMENT: staging") >= 2
+    api_block = text.split("  api:", 1)[1].split("\n  worker:", 1)[0]
+    worker_block = text.split("  worker:", 1)[1].split("\n  web:", 1)[0]
+    assert "ENVIRONMENT: staging" in api_block
+    assert "ENVIRONMENT: staging" in worker_block
+
+
+def test_documented_staging_env_cannot_resolve_to_development():
+    """Rendered-equivalent: even with the documented .env.example value
+    exported, the compose file has no ENVIRONMENT interpolation to pick it
+    up. A docker compose config render would still emit staging.
+    """
+    example_env = (_REPO_ROOT / ".env.example").read_text()
+    assert "ENVIRONMENT=development" in example_env
+    text = _staging_compose_text()
+    assert "ENVIRONMENT: ${ENVIRONMENT" not in text
+    assert "ENVIRONMENT: development" not in text
+    assert "ENVIRONMENT: dev" not in text
+    assert "ENVIRONMENT: staging" in text

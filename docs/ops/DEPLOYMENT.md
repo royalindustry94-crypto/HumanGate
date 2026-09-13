@@ -16,15 +16,23 @@ Required for API boot:
 | `DATABASE_URL` | Owner/migration connection (Alembic) |
 | `APP_DATABASE_URL` | Runtime connection as `app_runtime` (RLS). Non-local environments reject the `app_runtime`/`postgres` default passwords |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Staging Compose owner role — required, no defaults |
-| `APP_RUNTIME_USER` / `APP_RUNTIME_PASSWORD` | Staging Compose least-privileged runtime role — required, separate from owner |
+| `APP_RUNTIME_USER` / `APP_RUNTIME_PASSWORD` | Staging Compose least-privileged runtime role — required, distinct from owner user and password |
 | `SUPABASE_JWT_SECRET` | Verifies Supabase-issued JWTs — must be a real, random secret >= 32 bytes (P0-1, 2026-09-13 audit); the API refuses to boot with a blank, short, known-placeholder, or committed repository/CI test secret outside `ENVIRONMENT=test` |
 | `SUPABASE_JWT_ISSUER` | Required when `AUTH_MODE=supabase` outside `ENVIRONMENT=test`. `AUTH_MODE=local` defaults to and verifies `content-orchestrator-local`. Issuer-less tokens are rejected. |
 
 Staging Compose does **not** publish Postgres on the host. It interpolates
 required owner and runtime secrets (`POSTGRES_*` and `APP_RUNTIME_*`) with
-`${VAR:?required}` — unset values fail closed. Known defaults
-(`postgres` / `app_runtime` passwords) are rejected at API startup in every
-non-local environment, including `staging`.
+`${VAR:?required}` — unset values fail closed. API and worker services
+hard-set `ENVIRONMENT: staging` so a copied `.env.example`
+(`ENVIRONMENT=development`) cannot mark the process local and skip those
+checks. Known defaults (`postgres` / `app_runtime` passwords), blank
+passwords, and reused owner/runtime identities or secrets are rejected at
+API startup in every non-local environment, including `staging`.
+
+After `alembic upgrade head`, the API entrypoint rotates the runtime role
+to `APP_RUNTIME_PASSWORD` using PostgreSQL `format(%I, %L)` (no raw-SQL
+concatenation). Do not rely on migration 0001's local `app_runtime`
+password in staging.
 
 If a previous staging deploy used `postgres/postgres` or
 `app_runtime/app_runtime`, treat those credentials as compromised: rotate
@@ -178,7 +186,8 @@ and `web` wait on that condition.
 - Migrations use `DATABASE_URL` (owner). They create the `app_runtime`
   role (password `app_runtime` in the local/dev migration) and the
   `auth.users` shim when absent — see
-  `docs/milestone-2-identity-and-access.md` §6.
+  `docs/milestone-2-identity-and-access.md` §6. Staging compose then
+  rotates that role to `APP_RUNTIME_PASSWORD` before the API listens.
 - Against managed Supabase, if `CREATE ROLE` is denied, create
   `app_runtime` once in the SQL editor, then run Alembic for the rest.
 - CI also runs a migration replay: `alembic downgrade base && alembic upgrade head`.

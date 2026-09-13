@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import ClassVar, TypedDict
+from urllib.parse import unquote
 
 from pydantic import Field, PostgresDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -183,29 +184,62 @@ class Settings(BaseSettings):
     def is_local_environment(self) -> bool:
         return self.environment.strip().lower() in self._LOCAL_ENVIRONMENTS
 
+    @staticmethod
+    def _dsn_credentials(url: PostgresDsn) -> tuple[str, str]:
+        hosts = url.hosts()
+        if not hosts:
+            raise ValueError("database URL has no host")
+        host = hosts[0]
+        username = (host.get("username") or "").strip()
+        raw_password = host.get("password")
+        password = unquote(raw_password) if raw_password else ""
+        return username, password
+
     @model_validator(mode="after")
     def _validate_database_credentials(self) -> Settings:
         """P0-2 (2026-09-13): known default Postgres passwords are only
         legal on the local docker-compose.yml path. Staging and every
         other non-local environment must supply rotated owner and
         runtime secrets. Owner (`DATABASE_URL`) and least-privileged
-        runtime (`APP_DATABASE_URL`) stay separate connections.
+        runtime (`APP_DATABASE_URL`) stay separate connections — the
+        owner/superuser role bypasses FORCE RLS.
         """
         if self.is_local_environment:
             return self
-        checks = (
-            ("DATABASE_URL", self.database_url),
-            ("APP_DATABASE_URL", self.app_database_url),
+        owner_user, owner_password = self._dsn_credentials(self.database_url)
+        runtime_user, runtime_password = self._dsn_credentials(self.app_database_url)
+        for label, username, password in (
+            ("DATABASE_URL", owner_user, owner_password),
+            ("APP_DATABASE_URL", runtime_user, runtime_password),
+        ):
+            if not username:
+                raise ValueError(
+                    f"{label} is missing a role name in ENVIRONMENT={self.environment!r}"
+                )
+            if not password.strip():
+                raise ValueError(
+                    f"{label} is missing a password in ENVIRONMENT={self.environment!r}; "
+                    "blank or passwordless URLs are rejected outside local environments"
+                )
+            if password.strip().lower() in self._KNOWN_DEFAULT_DB_PASSWORDS:
+                raise ValueError(
+                    f"{label} still uses a known default database password "
+                    f"in ENVIRONMENT={self.environment!r}; rotate the "
+                    "credential and update the URL before starting"
+                )
+        if owner_user.casefold() == runtime_user.casefold():
+            raise ValueError(
+                "APP_DATABASE_URL must not reuse the DATABASE_URL owner identity; "
+                "the owner/superuser role bypasses FORCE RLS"
+            )
+        same_password = owner_password == runtime_password or (
+            owner_password.casefold() == runtime_password.casefold()
         )
-        for label, url in checks:
-            for host in url.hosts():
-                password = (host.get("password") or "").strip().lower()
-                if password in self._KNOWN_DEFAULT_DB_PASSWORDS:
-                    raise ValueError(
-                        f"{label} still uses a known default database password "
-                        f"in ENVIRONMENT={self.environment!r}; rotate the "
-                        "credential and update the URL before starting"
-                    )
+        if same_password:
+            raise ValueError(
+                "APP_DATABASE_URL must not reuse the DATABASE_URL password; "
+                "owner and runtime credentials stay separate"
+            )
         return self
 
     # Known-weak/placeholder JWT signing secrets seen in the wild (docs,

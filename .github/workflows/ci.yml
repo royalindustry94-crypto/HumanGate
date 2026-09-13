@@ -277,6 +277,10 @@ jobs:
           assert "${APP_RUNTIME_PASSWORD:?required}" in staging
           assert "postgresql://postgres:postgres@" not in staging
           assert "postgresql://app_runtime:app_runtime@" not in staging
+          assert "${ENVIRONMENT" not in staging
+          assert staging.count("ENVIRONMENT: staging") >= 2
+          entrypoint = Path("apps/api/docker-entrypoint.sh").read_text()
+          assert "python -m app.db.runtime_role" in entrypoint
 
           watchdog = Path(".github/workflows/build-watchdog.yml").read_text()
           assert "failure|cancelled|timed_out|stale|startup_failure)" in watchdog

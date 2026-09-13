@@ -4,6 +4,9 @@
 #   APP_RUNTIME_USER, APP_RUNTIME_PASSWORD
 # Owner/migration and runtime credentials stay separate. Never reuse
 # postgres/postgres or app_runtime/app_runtime here.
+# API/worker hard-set ENVIRONMENT: staging (do not inherit development
+# from .env.example). The API entrypoint rotates the runtime role after
+# migrations.
 #
 # Usage (from repo root, with a filled non-default .env):
 #   docker compose -f docker-compose.staging.yml up --build
@@ -34,7 +37,10 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:?required}:${POSTGRES_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:?required}
       APP_DATABASE_URL: postgresql://${APP_RUNTIME_USER:?required}:${APP_RUNTIME_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:?required}
-      ENVIRONMENT: ${ENVIRONMENT:-staging}
+      # Hard-set. Do not interpolate ENVIRONMENT from .env / .env.example
+      # (those files default to development and would bypass non-local
+      # credential checks, OpenAPI lockdown, and AUTH_MODE staging rules).
+      ENVIRONMENT: staging
       RUN_MIGRATIONS: "1"
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["http://localhost:8080"]}
     ports:
@@ -65,7 +71,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:?required}:${POSTGRES_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:?required}
       API_BASE_URL: http://api:8000
-      ENVIRONMENT: ${ENVIRONMENT:-staging}
+      ENVIRONMENT: staging
       HEALTH_CHECK_INTERVAL_SECONDS: ${HEALTH_CHECK_INTERVAL_SECONDS:-300}
       HEARTBEAT_INTERVAL_SECONDS: ${HEARTBEAT_INTERVAL_SECONDS:-10}
     depends_on:
