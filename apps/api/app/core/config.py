@@ -18,6 +18,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Minted by AUTH_MODE=local (see app/services/local_auth.py) and required on
 # every verified local token. Shared so issuance and verification cannot drift.
 LOCAL_JWT_ISSUER = "content-orchestrator-local"
+# Migrations grant schema/table privileges to this role only. Non-local
+# environments must use it as APP_DATABASE_URL — an arbitrary login with
+# CONNECT cannot run the application under FORCE RLS.
+CANONICAL_RUNTIME_ROLE = "app_runtime"
 
 # Fixed secret used only by API tests/CI under ENVIRONMENT=test. Listed in
 # the known-weak set so a production/staging/development process cannot boot
@@ -227,6 +231,12 @@ class Settings(BaseSettings):
                     f"in ENVIRONMENT={self.environment!r}; rotate the "
                     "credential and update the URL before starting"
                 )
+        if runtime_user.casefold() != CANONICAL_RUNTIME_ROLE:
+            raise ValueError(
+                "APP_DATABASE_URL must use the canonical "
+                f"{CANONICAL_RUNTIME_ROLE} role; migrations grant application "
+                "privileges to that identity only"
+            )
         if owner_user.casefold() == runtime_user.casefold():
             raise ValueError(
                 "APP_DATABASE_URL must not reuse the DATABASE_URL owner identity; "

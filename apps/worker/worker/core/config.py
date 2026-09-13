@@ -25,11 +25,11 @@ class WorkerSettings(BaseSettings):
     log_level: str = Field(default="INFO")
     service_name: str = Field(default="content-orchestrator-worker")
 
-    # Retained for local tooling / legacy direct-DB helpers; the WS3 run
-    # loop uses the HTTP API and does not require DATABASE_URL at runtime
-    # when only credential auth is configured. Still required so existing
-    # test_config and .env.example stay valid.
-    database_url: PostgresDsn
+    # Optional. The WS3 run loop uses the HTTP API and does not need a
+    # database connection. Staging Compose must not inject DATABASE_URL
+    # (that DSN is the owner/migration credential and bypasses FORCE RLS).
+    # Local tooling may still set it; production/staging workers should not.
+    database_url: PostgresDsn | None = None
 
     # How often the health-check loop runs, per the "API Health Monitor"
     # background agent in the spec. Configurable, not hardcoded to 9 minutes.

@@ -7,9 +7,10 @@ runs from the API entrypoint after ``alembic upgrade head`` and applies
 that password using PostgreSQL ``format(%I, %L)`` so the role name and
 secret are never concatenated into raw SQL.
 
-The role name must match ``ROLE_NAME_RE`` before any catalog statement
-runs. Callers pass already-parsed credentials; this module does not read
-secrets from argv.
+The role name must be the canonical ``app_runtime`` identity (the only
+role the migration chain grants) and must match ``ROLE_NAME_RE`` before
+any catalog statement runs. Callers pass already-parsed credentials;
+this module does not read secrets from argv.
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ from collections.abc import Awaitable, Callable
 
 import asyncpg
 from sqlalchemy.engine.url import make_url
+
+from app.core.config import CANONICAL_RUNTIME_ROLE
 
 ROLE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _KNOWN_DEFAULT_PASSWORDS = frozenset({"postgres", "app_runtime"})
@@ -39,6 +42,10 @@ def parse_runtime_credentials(dsn: str) -> tuple[str, str]:
         raise RuntimeRoleError("APP_DATABASE_URL is missing a role name")
     if not ROLE_NAME_RE.fullmatch(username):
         raise RuntimeRoleError("APP_DATABASE_URL role name is not a safe Postgres identifier")
+    if username != CANONICAL_RUNTIME_ROLE:
+        raise RuntimeRoleError(
+            f"APP_DATABASE_URL must use the canonical {CANONICAL_RUNTIME_ROLE} role"
+        )
     if not password:
         raise RuntimeRoleError("APP_DATABASE_URL is missing a password")
     if password.strip().lower() in _KNOWN_DEFAULT_PASSWORDS:
@@ -73,6 +80,10 @@ async def provision_runtime_role(
     """Create or rotate ``runtime_user`` using the owner connection."""
     if not ROLE_NAME_RE.fullmatch(runtime_user):
         raise RuntimeRoleError("runtime role name is not a safe Postgres identifier")
+    if runtime_user != CANONICAL_RUNTIME_ROLE:
+        raise RuntimeRoleError(
+            f"only the canonical {CANONICAL_RUNTIME_ROLE} role may be provisioned"
+        )
     if not runtime_password:
         raise RuntimeRoleError("runtime role password is required")
     if runtime_password.strip().lower() in _KNOWN_DEFAULT_PASSWORDS:

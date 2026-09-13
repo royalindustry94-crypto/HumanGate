@@ -143,16 +143,30 @@ def test_c2_non_local_rejects_default_postgres_password(environment: str):
 
 
 @pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
+def test_c2_non_local_rejects_non_canonical_runtime_role(environment: str):
+    with pytest.raises(ValidationError, match="canonical"):
+        Settings(
+            **_base_settings_kwargs(
+                environment=environment,
+                app_database_url=(
+                    "postgresql://other_runtime:rotated-runtime-password@"
+                    "127.0.0.1:5432/content_orchestrator_test"
+                ),
+            )
+        )
+
+
+@pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
 def test_c2_non_local_rejects_same_owner_and_runtime_identity(environment: str):
     with pytest.raises(ValidationError, match="owner identity"):
         Settings(
             **_base_settings_kwargs(
                 environment=environment,
                 database_url=(
-                    "postgresql://postgres:rotated-owner-password@127.0.0.1:5432/content_orchestrator_test"
+                    "postgresql://app_runtime:rotated-owner-password@127.0.0.1:5432/content_orchestrator_test"
                 ),
                 app_database_url=(
-                    "postgresql://postgres:rotated-runtime-password@127.0.0.1:5432/content_orchestrator_test"
+                    "postgresql://app_runtime:rotated-runtime-password@127.0.0.1:5432/content_orchestrator_test"
                 ),
             )
         )

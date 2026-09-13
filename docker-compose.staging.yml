@@ -1,12 +1,13 @@
 # Staging stack. Does not publish Postgres on the host network.
 # Required secrets have no defaults — Compose fails closed if they are unset:
 #   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
-#   APP_RUNTIME_USER, APP_RUNTIME_PASSWORD
+#   APP_RUNTIME_PASSWORD
+# Runtime login is hard-set to app_runtime (the role migrations grant).
 # Owner/migration and runtime credentials stay separate. Never reuse
 # postgres/postgres or app_runtime/app_runtime here.
 # API/worker hard-set ENVIRONMENT: staging (do not inherit development
 # from .env.example). The API entrypoint rotates the runtime role after
-# migrations.
+# migrations. The worker is HTTP-only and must not receive owner DB secrets.
 #
 # Usage (from repo root, with a filled non-default .env):
 #   docker compose -f docker-compose.staging.yml up --build
@@ -36,7 +37,7 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:?required}:${POSTGRES_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:?required}
-      APP_DATABASE_URL: postgresql://${APP_RUNTIME_USER:?required}:${APP_RUNTIME_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:?required}
+      APP_DATABASE_URL: postgresql://app_runtime:${APP_RUNTIME_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:?required}
       # Hard-set. Do not interpolate ENVIRONMENT from .env / .env.example
       # (those files default to development and would bypass non-local
       # credential checks, OpenAPI lockdown, and AUTH_MODE staging rules).
@@ -66,14 +67,15 @@ services:
       context: ./apps/worker
       dockerfile: Dockerfile
     restart: unless-stopped
-    env_file:
-      - .env
+    # Worker-only environment. Do not inherit the repo env file or owner
+    # database credentials; this process talks to the API over HTTP.
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:?required}:${POSTGRES_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:?required}
       API_BASE_URL: http://api:8000
       ENVIRONMENT: staging
       HEALTH_CHECK_INTERVAL_SECONDS: ${HEALTH_CHECK_INTERVAL_SECONDS:-300}
       HEARTBEAT_INTERVAL_SECONDS: ${HEARTBEAT_INTERVAL_SECONDS:-10}
+      WORKER_CREDENTIAL: ${WORKER_CREDENTIAL:-}
+      WORKER_ID: ${WORKER_ID:-}
     depends_on:
       api:
         condition: service_healthy

@@ -52,7 +52,7 @@ topic (optional script), approve/reject at the Review Gate.
 Full stack (API + worker + web + Postgres):
 
 ```bash
-# Requires rotated POSTGRES_* and APP_RUNTIME_* secrets in .env (no defaults).
+# Requires rotated POSTGRES_* and APP_RUNTIME_PASSWORD secrets in .env (no defaults).
 docker compose -f docker-compose.staging.yml up --build
 ```
 
