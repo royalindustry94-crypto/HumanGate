@@ -29,11 +29,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import or_, select, tuple_
+from sqlalchemy import func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models.assignments import StageAssignment
+from app.models.backpressure import ProviderConcurrencyBudget
 from app.models.claim_audit import StageClaimAudit
 from app.models.enums import (
     ClaimOutcome,
@@ -223,6 +224,25 @@ async def claim_assignment(
     from sqlalchemy import text as sa_text
 
     batch = get_settings().claim_candidate_batch_size
+    # The scan must not stop before every saturated pair has been excluded, or
+    # an assignment sitting behind them is reported as `capacity` while it is
+    # actually claimable. Each pass retires at most one (workspace, provider)
+    # pair, so `range(batch)` alone caps the scan at `batch` distinct saturated
+    # pairs -- 33 saturated budgets ahead of the eligible row reproduced the
+    # very false-capacity result M-2 set out to fix. Allow at least one pass per
+    # budget that could possibly be saturated, plus one to claim on.
+    budget_scope = [ProviderConcurrencyBudget.max_concurrent > 0]
+    if worker.workspace_id is not None:
+        budget_scope.append(ProviderConcurrencyBudget.workspace_id == worker.workspace_id)
+    budget_count = int(
+        (
+            await session.execute(
+                select(func.count(ProviderConcurrencyBudget.id)).where(*budget_scope)
+            )
+        ).scalar_one()
+        or 0
+    )
+    max_passes = max(batch, budget_count + 1)
     effective = effective_priority_expr(
         StageAssignment.priority, StageAssignment.created_at, now=now
     )
@@ -239,7 +259,7 @@ async def claim_assignment(
     assignment: StageAssignment | None = None
     saw_provider_budget_block = False
 
-    for _ in range(batch):
+    for _ in range(max_passes):
         await session.execute(sa_text("SAVEPOINT claim_candidate"))
         where = [
             StageAssignment.status == StageAssignmentStatus.PENDING,

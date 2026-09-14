@@ -201,3 +201,48 @@ def test_evicted_key_is_admitted_rather_than_blocked():
 def test_rejects_nonsense_key_cap(bad_cap):
     with pytest.raises(ValueError, match="max_tracked_keys"):
         InMemoryRateLimiter(max_requests=1, window_seconds=1, max_tracked_keys=bad_cap)
+
+
+def test_admissions_at_the_cap_do_not_resweep_or_sort_every_request():
+    """Copilot follow-up to H-2: the mitigation must not become the bottleneck.
+
+    Previously hitting the cap triggered a full map rebuild *and* a sort of
+    every tracked key on each admission -- O(K log K) per request under exactly
+    the rotating-source-IP pattern the cap exists to survive. Eviction is now
+    O(1) off the ordered map, and the sweep is time-based only.
+    """
+    limiter = InMemoryRateLimiter(max_requests=5, window_seconds=1000, max_tracked_keys=50)
+    sweeps = {"n": 0}
+    real_sweep = limiter._sweep
+
+    def counting_sweep(now):
+        sweeps["n"] += 1
+        return real_sweep(now)
+
+    limiter._sweep = counting_sweep  # type: ignore[method-assign]
+
+    # 500 distinct keys, all inside one window, well past the cap.
+    for index in range(500):
+        limiter.check(f"ip-{index}", now=float(index))
+
+    assert limiter.tracked_keys <= 50
+    assert sweeps["n"] <= 1, (
+        f"sweep ran {sweeps['n']} times for 500 admissions in one window; "
+        "the cap must not retrigger a full rebuild per request"
+    )
+
+
+def test_eviction_order_survives_a_window_reset():
+    """A key whose window resets becomes the newest, not the oldest.
+
+    Plain dict assignment keeps the original insertion slot, which would make
+    a just-refreshed key the next eviction victim.
+    """
+    limiter = InMemoryRateLimiter(max_requests=1, window_seconds=10, max_tracked_keys=3)
+    limiter.check("a", now=0.0)
+    limiter.check("b", now=1.0)
+    # "a" resets well after "b" started, so it is now the most recent window.
+    limiter.check("a", now=20.0)
+    limiter.check("c", now=21.0)
+    limiter.check("d", now=22.0)
+    assert "a" in limiter._windows, "a was refreshed most recently and must outlive b"

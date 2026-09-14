@@ -11,6 +11,7 @@ import asyncio
 import logging
 import time
 from datetime import UTC, datetime
+from typing import cast
 
 import httpx
 
@@ -144,7 +145,13 @@ async def _fetch_github_status() -> GitHubOut:
             # Issued concurrently (audit H-4). Sequentially these five calls
             # put worst-case request latency at 5 x the timeout; gathered, the
             # ceiling is one timeout.
-            commits_resp, prs_resp, merged_resp, actions_resp, branch_resp = await asyncio.gather(
+            #
+            # return_exceptions=True is load-bearing: a bare gather propagates
+            # the first failure immediately while the other four requests are
+            # still in flight, and leaving this `async with` then closes the
+            # client out from under them. Settling every request first means a
+            # single upstream failure cannot strand work on a closed client.
+            settled = await asyncio.gather(
                 client.get(
                     f"{_API}/repos/{repo}/commits",
                     params={"sha": branch_name, "per_page": 10},
@@ -167,6 +174,13 @@ async def _fetch_github_status() -> GitHubOut:
                     params={"status": "completed", "per_page": 30},
                 ),
                 client.get(f"{_API}/repos/{repo}/branches/{branch_name}"),
+                return_exceptions=True,
+            )
+            first_error = next((item for item in settled if isinstance(item, BaseException)), None)
+            if first_error is not None:
+                raise first_error
+            commits_resp, prs_resp, merged_resp, actions_resp, branch_resp = cast(
+                "list[httpx.Response]", settled
             )
 
             if commits_resp.status_code >= 400:

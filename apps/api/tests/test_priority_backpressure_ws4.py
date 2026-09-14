@@ -771,3 +771,60 @@ async def test_null_provider_candidates_survive_saturated_pair_exclusion(ctx):
 
     assert r.json()["outcome"] == "granted"
     assert r.json()["assignment"]["id"] == str(unbudgeted)
+
+
+@pytest.mark.asyncio
+async def test_more_saturated_pairs_than_the_candidate_batch_still_reaches_the_claimable_row(
+    ctx, monkeypatch
+):
+    """Copilot follow-up to M-2: the scan bound must not cause false capacity.
+
+    Excluding whole (workspace, provider) pairs fixed the row-by-row rescan,
+    but the loop was still capped at `claim_candidate_batch_size` passes and
+    each pass retires only one pair. With more saturated budgets than that cap,
+    ranked above the eligible assignment, the loop ran out of passes and
+    reported `capacity` while a claimable row existed. The bound is now derived
+    from how many budgets could actually be saturated.
+
+    The batch size is shrunk rather than seeding 33 providers so the test stays
+    fast; the failure mode is identical.
+    """
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("CLAIM_CANDIDATE_BATCH_SIZE", "2")
+    get_settings.cache_clear()
+    try:
+        assert get_settings().claim_candidate_batch_size == 2
+        saturated_providers = ["openai", "anthropic", "gemini"]
+        assert len(saturated_providers) > get_settings().claim_candidate_batch_size
+
+        for provider in saturated_providers:
+            r = await ctx["client"].put(
+                f"/workspaces/{ctx['ws']}/provider-budgets/{provider}",
+                headers=ctx["headers"],
+                json={"max_concurrent": 1},
+            )
+            assert r.status_code == 200, r.text
+            # Saturate it with one in-flight assignment...
+            inflight = await _seed_assignment(ctx["ws"], provider=provider)
+            async with AsyncSessionLocal() as s:
+                a = await s.get(StageAssignment, inflight)
+                a.status = StageAssignmentStatus.DISPATCHED
+                a.dispatched_at = datetime.now(UTC)
+                await s.commit()
+            # ...and rank a blocked candidate above the claimable one.
+            await _seed_assignment(ctx["ws"], provider=provider, priority=99)
+
+        claimable = await _seed_assignment(ctx["ws"], provider="unbudgeted", priority=1)
+
+        prov = await _provision(ctx["client"], ctx["headers"], ctx["ws"])
+        wh = await _bring_online(ctx["client"], prov)
+        r = await ctx["client"].post("/workers/claim", headers=wh, json={})
+
+        assert r.json()["outcome"] == "granted", (
+            "with more saturated pairs than the candidate batch, the scan must "
+            "still reach the claimable assignment instead of reporting capacity"
+        )
+        assert r.json()["assignment"]["id"] == str(claimable)
+    finally:
+        get_settings.cache_clear()

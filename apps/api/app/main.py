@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.routes.auth import router as auth_router
 from app.api.routes.billing import router as billing_router
@@ -71,6 +72,28 @@ app.add_middleware(
 )
 
 app.add_middleware(RequestIDMiddleware)
+
+
+async def _unhandled_exception_handler(request: Request, exc: Exception) -> Response:
+    """Attach the correlation id to the 500 an unhandled error produces.
+
+    `RequestIDMiddleware` cannot do this itself. Starlette's
+    ServerErrorMiddleware sits *outside* every user middleware, so when
+    `call_next` raises, the 500 it generates never passes back through the
+    middleware stack and the header was silently dropped on exactly the
+    requests that most need correlating (audit L-3, completed after Copilot
+    review). ServerErrorMiddleware re-raises after this handler runs, so the
+    traceback still reaches the server log.
+    """
+    request_id = getattr(request.state, "request_id", None)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "internal server error"},
+        headers={"X-Request-ID": request_id} if request_id else None,
+    )
+
+
+app.add_exception_handler(Exception, _unhandled_exception_handler)
 
 # Rate limiting is process-local (see app/core/rate_limit.py) and
 # deliberately not attached under ENVIRONMENT=test: the test session

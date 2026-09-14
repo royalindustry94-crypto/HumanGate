@@ -37,7 +37,32 @@ set +a
 : "${OPS_PREVIEW_PASSWORD:?Set OPS_PREVIEW_PASSWORD in .env for the local preview}"
 export OPS_PREVIEW_EMAIL OPS_PREVIEW_PASSWORD
 
-export ENVIRONMENT="${ENVIRONMENT:-preview}"
+# --- BEGIN environment resolution (behaviour pinned by test_preview_script_security.py) ---
+# FORCED, not defaulted. `${ENVIRONMENT:-preview}` was not enough: the block
+# above copies .env.example -- which sets ENVIRONMENT=development -- and sources
+# it, so the variable is already set and `:-` never substitutes. That left this
+# publicly reachable deployment running as a "local" environment, with the
+# database-credential validator inert and /docs, /redoc and /openapi.json
+# published. Any local-ish value inherited from the template is discarded here;
+# a deliberate non-local override (staging, production) is still honoured.
+case "${ENVIRONMENT:-}" in
+  "" | development | Development | DEVELOPMENT | dev | DEV | test | TEST | local | LOCAL)
+    ENVIRONMENT=preview
+    ;;
+esac
+export ENVIRONMENT
+# --- END environment resolution ---
+
+# Belt and braces: if a future edit reintroduces a local value here, refuse to
+# serve rather than silently waive the checks.
+case "${ENVIRONMENT}" in
+  development | dev | test | local)
+    echo "refusing to start: ENVIRONMENT=${ENVIRONMENT} waives database-credential" >&2
+    echo "validation and publishes OpenAPI docs on a publicly reachable deployment" >&2
+    exit 1
+    ;;
+esac
+
 export AUTH_MODE="${AUTH_MODE:-local}"
 WEB_PORT="${PORT:-5000}"
 PGHOST_ADDR="${PGHOST_ADDR:-127.0.0.1}"

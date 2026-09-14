@@ -11,7 +11,9 @@ the same pin published `/docs` and `/openapi.json`.
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -79,12 +81,80 @@ def test_replit_deployment_entry_is_the_preview_launcher() -> None:
     assert _replit_deployment_script() == "scripts/run_ops_preview_replit.sh"
 
 
+def _resolve_environment(preset: str | None) -> str:
+    """Run the launcher's real environment-resolution block under bash.
+
+    Extracted between its BEGIN/END markers and executed, rather than
+    string-matched. The original version of this test asserted on the literal
+    `ENVIRONMENT="${ENVIRONMENT:-preview}"` and so never modelled the case that
+    actually mattered: the launcher copies `.env.example` (ENVIRONMENT=
+    development) and sources it, leaving the variable already set so `:-` never
+    substituted. The public deployment kept running as a local environment.
+    """
+    raw = (REPOSITORY_ROOT / _replit_deployment_script()).read_text()
+    block = raw.split("# --- BEGIN environment resolution", 1)[1]
+    block = block.split("# --- END environment resolution", 1)[0]
+    block = block.split("\n", 1)[1]
+    env = dict(os.environ)
+    env.pop("ENVIRONMENT", None)
+    if preset is not None:
+        env["ENVIRONMENT"] = preset
+    # S603: the command is this repository's own launcher, run under bash with
+    # a fixed argv; `preset` only ever reaches it as an environment value.
+    result = subprocess.run(  # noqa: S603
+        ["bash", "-c", block + '\nprintf "%s" "$ENVIRONMENT"'],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+@pytest.mark.parametrize(
+    "preset",
+    [
+        None,
+        # The exact value .env.example ships, which defeated the previous fix.
+        "development",
+        "dev",
+        "test",
+        "local",
+        "DEVELOPMENT",
+    ],
+)
+def test_local_environment_values_are_discarded_by_the_deployment_launcher(preset) -> None:
+    resolved = _resolve_environment(preset)
+    assert resolved not in Settings._LOCAL_ENVIRONMENTS
+    assert resolved not in TOKENLESS_METRICS_ENVIRONMENTS
+    assert openapi_route_kwargs(resolved) == {
+        "docs_url": None,
+        "redoc_url": None,
+        "openapi_url": None,
+    }, f"ENVIRONMENT={resolved!r} would publish OpenAPI docs on a public deployment"
+
+
+def test_a_deliberate_non_local_environment_is_still_honoured() -> None:
+    """Forcing must not clobber a real operator override."""
+    assert _resolve_environment("staging") == "staging"
+
+
+def test_env_example_ships_a_local_environment_that_must_be_overridden() -> None:
+    """Pins the precondition the fix exists for.
+
+    If .env.example ever stops shipping a local ENVIRONMENT this test should be
+    revisited -- but the launcher must keep forcing regardless, since the file
+    is operator-editable.
+    """
+    env_example = (REPOSITORY_ROOT / ".env.example").read_text()
+    shipped = re.search(r"^ENVIRONMENT=(\S+)", env_example, re.MULTILINE)
+    assert shipped is not None
+    assert shipped.group(1) in Settings._LOCAL_ENVIRONMENTS
+
+
 def test_deployment_launcher_does_not_pin_a_local_environment() -> None:
     """A local ENVIRONMENT waives database-credential validation entirely."""
-    launcher = _executable_lines(_replit_deployment_script())
-    default = re.search(r'ENVIRONMENT="\$\{ENVIRONMENT:-([a-z]+)\}"', launcher)
-    assert default is not None, "deployment launcher must set an explicit ENVIRONMENT default"
-    chosen = default.group(1)
+    chosen = _resolve_environment(None)
 
     assert chosen not in Settings._LOCAL_ENVIRONMENTS, (
         f"deployment launcher defaults ENVIRONMENT={chosen!r}, which "

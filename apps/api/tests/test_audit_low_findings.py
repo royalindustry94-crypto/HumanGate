@@ -134,3 +134,60 @@ async def test_readiness_withholds_db_role_without_the_metrics_token(client, mon
         assert "db_user" not in wrong.json()
     finally:
         get_settings.cache_clear()
+
+
+# --- L-3 completion: the correlation id must reach the 500 response too ---
+
+
+@pytest.mark.asyncio
+async def test_unhandled_error_response_carries_the_request_id():
+    """Starlette's ServerErrorMiddleware builds the 500 outside every user
+    middleware, so RequestIDMiddleware could log the id but never attach it to
+    the response. Both halves must hold on the failing path."""
+    import httpx
+    from fastapi import FastAPI, Request, Response
+    from fastapi.responses import JSONResponse
+    from httpx import ASGITransport
+
+    from app.core.audit import RequestIDMiddleware
+
+    probe = FastAPI()
+    probe.add_middleware(RequestIDMiddleware)
+
+    async def handler(request: Request, exc: Exception) -> Response:
+        request_id = getattr(request.state, "request_id", None)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "internal server error"},
+            headers={"X-Request-ID": request_id} if request_id else None,
+        )
+
+    probe.add_exception_handler(Exception, handler)
+
+    @probe.get("/boom")
+    async def boom():
+        raise RuntimeError("kaboom")
+
+    @probe.get("/fine")
+    async def fine():
+        return {"ok": True}
+
+    transport = ASGITransport(app=probe, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://probe") as client:
+        ok = await client.get("/fine")
+        assert ok.status_code == 200
+        assert ok.headers.get("X-Request-ID")
+
+        failed = await client.get("/boom")
+        assert failed.status_code == 500
+        assert failed.headers.get("X-Request-ID"), (
+            "the 500 produced by an unhandled error must still be correlatable"
+        )
+        assert failed.headers["X-Request-ID"] != ok.headers["X-Request-ID"]
+
+
+def test_app_registers_an_unhandled_exception_handler():
+    """Pins that the real app wires the handler, not just this probe."""
+    from app.main import app
+
+    assert Exception in app.exception_handlers
