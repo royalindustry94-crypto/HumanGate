@@ -84,9 +84,17 @@ class AutomationOwnershipLostError(AutomationControlPlaneError):
 
 
 def _owner_id() -> str:
-    if configured := os.getenv("AUTOMATION_OWNER_ID"):
-        return configured
-    return f"{settings.service_name}-automation:{socket.gethostname()}"
+    configured = os.getenv("AUTOMATION_OWNER_ID") or f"{settings.service_name}-automation"
+    return _replica_owner_id(configured)
+
+
+def _replica_owner_id(
+    configured_owner_id: str,
+    *,
+    hostname: str | None = None,
+    pid: int | None = None,
+) -> str:
+    return f"{configured_owner_id}@{hostname or socket.gethostname()}:{pid or os.getpid()}"
 
 
 def _lease_seconds(interval_seconds: float) -> int:
@@ -454,7 +462,15 @@ class AutomationService:
         *,
         lease_seconds: int,
     ) -> None:
+        async def _execute_tick() -> dict[str, int] | None:
+            return await spec.tick()
+
         tick_done = asyncio.Event()
+        tick_task: asyncio.Task[dict[str, int] | None] = asyncio.create_task(
+            _execute_tick(),
+            name=f"automation-tick:{spec.name}",
+        )
+        tick_task.add_done_callback(lambda _task: tick_done.set())
         heartbeat_task = asyncio.create_task(
             self._heartbeat_until_tick_completes(
                 spec,
@@ -464,8 +480,21 @@ class AutomationService:
             name=f"automation-heartbeat:{spec.name}",
         )
         try:
-            result = await spec.tick()
+            done, _pending = await asyncio.wait(
+                {tick_task, heartbeat_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if heartbeat_task in done:
+                heartbeat_exc = heartbeat_task.exception()
+                if heartbeat_exc is not None:
+                    tick_task.cancel()
+                    await asyncio.gather(tick_task, return_exceptions=True)
+                    raise heartbeat_exc
+            result = await tick_task
         except asyncio.CancelledError:
+            tick_task.cancel()
+            heartbeat_task.cancel()
+            await asyncio.gather(tick_task, heartbeat_task, return_exceptions=True)
             raise
         except Exception as exc:  # noqa: BLE001
             tick_done.set()
@@ -512,7 +541,15 @@ class AutomationService:
                     await session.rollback()
                     raise
             if acquired:
-                await self._run_owned_tick(spec, lease_seconds=lease_seconds)
+                try:
+                    await self._run_owned_tick(spec, lease_seconds=lease_seconds)
+                except AutomationOwnershipLostError:
+                    logger.warning(
+                        "%s automation lease lost; returning to standby",
+                        spec.name,
+                        extra={"owner_id": self.owner_id},
+                    )
+                    acquired = False
             try:
                 await asyncio.wait_for(
                     stop_event.wait(),
@@ -605,6 +642,12 @@ def public_automation_health_snapshot(
         "outbox_relay": _public_loop(snapshot["outbox_relay"]),
         "scheduler": _public_loop(snapshot["scheduler"]),
     }
+
+
+async def automation_process_healthcheck(*, owner_id: str | None = None) -> dict[str, str]:
+    async with AsyncSessionLocal() as session:
+        await session.execute(select(1))
+    return {"status": "ok", "owner_id": owner_id or _owner_id()}
 
 
 async def main() -> None:

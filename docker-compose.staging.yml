@@ -104,7 +104,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import asyncio; from app.automation import _owner_id, automation_health_snapshot; snapshot = asyncio.run(automation_health_snapshot()); owner = _owner_id(); running = set(snapshot['tasks_running']); expected = {'maintenance', 'outbox_relay', 'scheduler'}; assert running == expected, snapshot; assert all(snapshot[name]['owner_id'] == owner for name in expected), snapshot",
+          "import asyncio; from app.automation import automation_process_healthcheck; assert asyncio.run(automation_process_healthcheck())['status'] == 'ok'",
         ]
       interval: 15s
       timeout: 10s

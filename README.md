@@ -63,6 +63,8 @@ docker compose -f docker-compose.staging.yml up --build
 The staging stack keeps the FastAPI/Vercel API stateless. Long-running
 automation moves to the dedicated `automation` service, which runs
 `python -m app.automation` continuously under `restart: unless-stopped`.
+Production uses the separate `docker-compose.production-automation.yml`
+manifest on a durable host beside the Vercel API.
 
 ## Auth
 

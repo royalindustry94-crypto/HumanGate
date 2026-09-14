@@ -1,0 +1,45 @@
+# Durable production automation service. Deploy this on a persistent VM/container
+# host alongside the Vercel API so scheduler/outbox/maintenance keep running even
+# though the API itself stays stateless.
+#
+# Usage (from repo root on the durable host):
+#   cp .env.example .env.production
+#   # set DATABASE_URL, APP_DATABASE_URL, SUPABASE_JWT_SECRET,
+#   # SUPABASE_JWT_ISSUER, and any interval overrides
+#   docker compose --env-file .env.production -f docker-compose.production-automation.yml up -d --build
+
+services:
+  automation:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?required}
+      APP_DATABASE_URL: ${APP_DATABASE_URL:?required}
+      ENVIRONMENT: production
+      RUN_MIGRATIONS: "0"
+      AUTH_MODE: supabase
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:?required}
+      SUPABASE_JWT_ISSUER: ${SUPABASE_JWT_ISSUER:?required}
+      AUTOMATION_OWNER_ID: ${AUTOMATION_OWNER_ID:-humangate-automation}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      OUTBOX_RELAY_INTERVAL_SECONDS: ${OUTBOX_RELAY_INTERVAL_SECONDS:-2}
+      ASSIGNMENT_REAPER_INTERVAL_SECONDS: ${ASSIGNMENT_REAPER_INTERVAL_SECONDS:-15}
+      SCHEDULER_INTERVAL_SECONDS: ${SCHEDULER_INTERVAL_SECONDS:-2}
+      WORKER_OFFLINE_SWEEP_INTERVAL_SECONDS: ${WORKER_OFFLINE_SWEEP_INTERVAL_SECONDS:-30}
+    command: ["python", "-m", "app.automation"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import asyncio; from app.automation import automation_process_healthcheck; assert asyncio.run(automation_process_healthcheck())['status'] == 'ok'",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s

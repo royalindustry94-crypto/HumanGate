@@ -178,7 +178,7 @@ def test_rendered_worker_env_excludes_owner_secrets():
     assert rendered["API_BASE_URL"] == "http://api:8000"
 
 
-def test_staging_automation_service_runs_continuously_and_stays_owner_aware():
+def test_staging_automation_service_runs_continuously_with_process_liveness_healthcheck():
     text = _staging_compose_text()
     automation = _service_block(text, "automation")
     assert "restart: unless-stopped" in automation
@@ -187,5 +187,5 @@ def test_staging_automation_service_runs_continuously_and_stays_owner_aware():
     env_keys = {line.split(":", 1)[0] for line in _service_environment_lines(automation)}
     assert {"DATABASE_URL", "APP_DATABASE_URL", "ENVIRONMENT", "RUN_MIGRATIONS"} <= env_keys
     assert "healthcheck:" in automation
-    assert "_owner_id" in automation
-    assert "automation_health_snapshot" in automation
+    assert "automation_process_healthcheck" in automation
+    assert "automation_health_snapshot" not in automation

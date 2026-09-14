@@ -1,8 +1,9 @@
-# Deployment (staging stack)
+# Deployment
 
-This document covers building and running the containerized staging stack.
-Local day-to-day development still uses `docker compose up -d postgres` plus
-processes on the host (see root `README.md`).
+This document covers both the containerized staging stack and the durable
+production automation service. Local day-to-day development still uses
+`docker compose up -d postgres` plus processes on the host (see root
+`README.md`).
 
 ## Prerequisites
 
@@ -32,22 +33,19 @@ owner/runtime identities or secrets are rejected at API startup in every
 non-local environment, including `staging`.
 
 The worker service does **not** load `.env` and does not receive
-`DATABASE_URL` or `POSTGRES_PASSWORD`. It talks to the API over HTTP.
-The separate `automation` service runs the scheduler, outbox relay, and
+`DATABASE_URL` or `POSTGRES_PASSWORD`. It talks to the API over HTTP. The
+separate `automation` service runs the scheduler, outbox relay, and
 maintenance loops directly from the API package; the FastAPI/Vercel API no
 longer owns those persistent tasks.
 
-Staging/production-equivalent automation runtime:
+Automation runtime split:
 
-- `docker-compose.staging.yml` runs `python -m app.automation` as its own
-  continuously running `automation` service.
-- `restart: unless-stopped` fail-closes through the container runtime if the
-  automation process exits after bounded supervision retries.
-- The automation healthcheck is owner-aware: it calls
-  `automation_health_snapshot()` inside the automation container and only
-  reports healthy when the current container still owns all active leases.
+- `docker-compose.staging.yml` is the full staging rehearsal stack.
+- `docker-compose.production-automation.yml` is the durable production
+  manifest for the continuously running `automation` service that runs
+  alongside the Vercel API on a persistent VM/container host.
 - The API remains stateless and only serves HTTP; it does not start or own the
-  long-lived scheduler/outbox/maintenance loops.
+  long-lived scheduler/outbox/maintenance loops in any environment.
 
 After `alembic upgrade head`, the API entrypoint rotates the runtime role
 to `APP_RUNTIME_PASSWORD` using PostgreSQL `format(%I, %L)` (no raw-SQL
@@ -93,6 +91,66 @@ docker build -t co-api ./apps/api
 docker build -t co-worker ./apps/worker
 docker build -t co-web ./apps/web
 ```
+
+## Production automation service (durable host beside Vercel)
+
+Deploy `docker-compose.production-automation.yml` on a persistent VM or
+container host that can reach the same managed Postgres instance as the Vercel
+API. This is the production control-plane worker for scheduler, outbox relay,
+and maintenance.
+
+Required production secrets/config on that host:
+
+| Variable | Purpose |
+|----------|---------|
+| `DATABASE_URL` | Owner/migration DSN for the managed production Postgres |
+| `APP_DATABASE_URL` | Runtime DSN as `app_runtime` for lease + work execution |
+| `SUPABASE_JWT_SECRET` | Production JWT verification secret (same project secret as the Vercel API) |
+| `SUPABASE_JWT_ISSUER` | Production Supabase issuer (`https://<project>.supabase.co/auth/v1`) |
+| `AUTOMATION_OWNER_ID` | Optional shared human-readable prefix; the process appends replica identity automatically |
+
+Rollout:
+
+```bash
+cp .env.example .env.production
+# fill production DATABASE_URL / APP_DATABASE_URL / SUPABASE_* secrets
+docker compose --env-file .env.production -f docker-compose.production-automation.yml up -d --build
+docker compose -f docker-compose.production-automation.yml ps
+```
+
+Runtime behavior:
+
+- `restart: unless-stopped` restarts the automation process if bounded loop
+  supervision exits fail-closed.
+- The container healthcheck uses `automation_process_healthcheck()`, so a
+  healthy standby or mixed-ownership replica stays live while the API's
+  operational surfaces (`/health/automation` and the authenticated automation
+  diagnostics view) continue reporting missing/stale lease ownership.
+- Lease owner IDs are unique per replica even when every host receives the
+  same `AUTOMATION_OWNER_ID` prefix, so `/workspaces/{id}/operations/automation`
+  can identify the current live owner precisely.
+
+Monitoring:
+
+1. Check the durable worker locally with
+   `docker compose -f docker-compose.production-automation.yml ps` and
+   `docker compose -f docker-compose.production-automation.yml logs --tail=200 automation`.
+2. Check system ownership via the Vercel API:
+   `curl -sf https://<api>/health/automation`
+3. Check authenticated diagnostics for exact owner IDs / last errors through
+   `GET /workspaces/{workspace_id}/operations/automation`.
+
+Rollback:
+
+```bash
+docker compose -f docker-compose.production-automation.yml down
+# restore the previous known-good checkout/image on the durable host
+docker compose --env-file .env.production -f docker-compose.production-automation.yml up -d --build
+```
+
+Roll back application code/config **before** downgrading migration `0057`; the
+automation service must be stopped first so nothing is still reading or writing
+`automation_leases`.
 
 ## Python dependency locks (API/worker)
 
@@ -191,9 +249,10 @@ curl -sf http://localhost:8080/api/health/live
 On-call: [`ON_CALL.md`](./ON_CALL.md).
 
 Compose marks `api` healthy only after `/health/live` succeeds; `worker`,
-`automation`, and `web` wait on that condition. Compose marks `automation`
-healthy only after its owner-aware lease check confirms that this container is
-the live owner of the maintenance, outbox, and scheduler loops.
+`automation`, and `web` wait on that condition. Both staging and production
+mark `automation` healthy when the local process can still reach Postgres; loop
+leadership and stale/missing ownership are surfaced separately via
+`/health/automation` and the authenticated operations diagnostics route.
 
 ## Migrations
 

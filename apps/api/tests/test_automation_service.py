@@ -15,6 +15,7 @@ from app.automation import (
     AutomationLoopSpec,
     AutomationService,
     automation_health_snapshot,
+    automation_process_healthcheck,
     release_owned_automation_loops,
     try_claim_automation_loop,
 )
@@ -239,6 +240,100 @@ async def test_long_running_tick_renews_lease_and_blocks_takeover(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_lost_lease_cancels_inflight_tick_and_allows_takeover(monkeypatch):
+    monkeypatch.setattr(automation_mod, "_lease_seconds", lambda _interval: 1)
+    original_renew = automation_mod.renew_owned_automation_loop
+    tick_started = asyncio.Event()
+    tick_cancelled = asyncio.Event()
+    takeover_complete = asyncio.Event()
+    winner_ticked = asyncio.Event()
+    owner_a_finished = False
+
+    async def owner_a_tick() -> dict[str, int]:
+        nonlocal owner_a_finished
+        tick_started.set()
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            tick_cancelled.set()
+            raise
+        owner_a_finished = True
+        return {"work_count": 1}
+
+    async def owner_b_tick() -> dict[str, int]:
+        winner_ticked.set()
+        return {"work_count": 1}
+
+    async def forced_loss(*args, owner_id: str, loop_name: str, lease_seconds: int, **kwargs):
+        if owner_id != "owner-a":
+            return await original_renew(
+                *args,
+                owner_id=owner_id,
+                loop_name=loop_name,
+                lease_seconds=lease_seconds,
+                **kwargs,
+            )
+        async with AsyncSessionLocal() as session:
+            row = await session.get(AutomationLease, loop_name, with_for_update=True)
+            assert row is not None
+            now = kwargs.get("now") or datetime.now(UTC)
+            row.owner_id = "owner-b"
+            row.owner_started_at = now
+            row.last_heartbeat_at = now
+            row.lease_expires_at = now + timedelta(seconds=lease_seconds)
+            await session.commit()
+        takeover_complete.set()
+        return False
+
+    monkeypatch.setattr(automation_mod, "renew_owned_automation_loop", forced_loss)
+    stop_owner_a = asyncio.Event()
+    stop_owner_b = asyncio.Event()
+    service_a = AutomationService(
+        owner_id="owner-a",
+        loop_specs=(AutomationLoopSpec("scheduler", 0.2, owner_a_tick),),
+        standby_poll_seconds=0.01,
+    )
+    service_b = AutomationService(
+        owner_id="owner-b",
+        loop_specs=(AutomationLoopSpec("scheduler", 0.5, owner_b_tick),),
+        standby_poll_seconds=0.01,
+    )
+    task_a = asyncio.create_task(service_a.run(stop_owner_a))
+    task_b = asyncio.create_task(service_b.run(stop_owner_b))
+    try:
+        async def _tick_started() -> bool:
+            return tick_started.is_set()
+
+        async def _takeover_complete() -> bool:
+            return takeover_complete.is_set()
+
+        async def _tick_cancelled() -> bool:
+            return tick_cancelled.is_set()
+
+        async def _winner_ticked() -> bool:
+            return winner_ticked.is_set()
+
+        async def _winner_recorded() -> bool:
+            return (await automation_health_snapshot())["scheduler"]["ticks"] == 1
+
+        await _wait_for(_tick_started)
+        await _wait_for(_takeover_complete)
+        await _wait_for(_tick_cancelled)
+        await _wait_for(_winner_ticked)
+        await _wait_for(_winner_recorded)
+        snapshot = await automation_health_snapshot()
+        assert snapshot["scheduler"]["owner_id"] == "owner-b"
+        assert snapshot["scheduler"]["ticks"] == 1
+        assert snapshot["scheduler"]["last_error"] is None
+        assert owner_a_finished is False
+    finally:
+        stop_owner_a.set()
+        stop_owner_b.set()
+        await asyncio.wait_for(task_a, timeout=5)
+        await asyncio.wait_for(task_b, timeout=5)
+
+
+@pytest.mark.asyncio
 async def test_claim_failures_restart_then_fail_closed(monkeypatch):
     async def failing_claim(*args, **kwargs):
         raise RuntimeError("database unavailable")
@@ -295,6 +390,32 @@ async def test_tick_errors_are_sanitized_in_health():
 
 
 @pytest.mark.asyncio
+async def test_process_healthcheck_stays_ok_while_global_automation_is_degraded():
+    now = datetime.now(UTC)
+    async with AsyncSessionLocal() as session:
+        scheduler = await session.get(AutomationLease, "scheduler")
+        maintenance = await session.get(AutomationLease, "maintenance")
+        assert scheduler is not None
+        assert maintenance is not None
+        scheduler.owner_id = "other-owner"
+        scheduler.owner_started_at = now
+        scheduler.last_heartbeat_at = now
+        scheduler.lease_expires_at = now + timedelta(minutes=1)
+        maintenance.owner_id = "stale-owner"
+        maintenance.owner_started_at = now - timedelta(minutes=2)
+        maintenance.last_heartbeat_at = now - timedelta(minutes=2)
+        maintenance.lease_expires_at = now - timedelta(seconds=1)
+        await session.commit()
+
+    snapshot = await automation_health_snapshot()
+    assert snapshot["status"] == "degraded"
+    assert await automation_process_healthcheck(owner_id="local-owner") == {
+        "status": "ok",
+        "owner_id": "local-owner",
+    }
+
+
+@pytest.mark.asyncio
 async def test_shutdown_release_only_clears_active_current_owner_rows():
     now = datetime.now(UTC)
     async with AsyncSessionLocal() as session:
@@ -333,3 +454,40 @@ async def test_shutdown_release_only_clears_active_current_owner_rows():
 def test_automation_service_rejects_empty_loop_specs():
     with pytest.raises(ValueError, match="requires at least one loop"):
         AutomationService(loop_specs=())
+
+
+@pytest.mark.asyncio
+async def test_same_configured_owner_prefix_still_fences_two_replicas():
+    counts: dict[str, int] = {}
+    stop_event = asyncio.Event()
+    owner_a = automation_mod._replica_owner_id("shared-owner", hostname="replica-a", pid=1)
+    owner_b = automation_mod._replica_owner_id("shared-owner", hostname="replica-b", pid=1)
+
+    async def tick(name: str) -> dict[str, int]:
+        counts[name] = counts.get(name, 0) + 1
+        stop_event.set()
+        return {"work_count": 1}
+
+    service_a = AutomationService(
+        owner_id=owner_a,
+        loop_specs=(AutomationLoopSpec("scheduler", 0.2, lambda: tick("owner-a")),),
+        standby_poll_seconds=0.01,
+    )
+    service_b = AutomationService(
+        owner_id=owner_b,
+        loop_specs=(AutomationLoopSpec("scheduler", 0.2, lambda: tick("owner-b")),),
+        standby_poll_seconds=0.01,
+    )
+
+    await asyncio.wait_for(
+        asyncio.gather(
+            asyncio.create_task(service_a.run(stop_event)),
+            asyncio.create_task(service_b.run(stop_event)),
+        ),
+        timeout=5,
+    )
+
+    assert owner_a != owner_b
+    assert owner_a.startswith("shared-owner@")
+    assert owner_b.startswith("shared-owner@")
+    assert sum(counts.values()) == 1
