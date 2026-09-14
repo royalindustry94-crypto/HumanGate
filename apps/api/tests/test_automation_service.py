@@ -65,7 +65,13 @@ async def test_automation_service_starts_stops_and_releases_leases():
                 break
             await asyncio.sleep(0.1)
         assert set(seen) == {"maintenance", "outbox_relay", "scheduler"}
-        snapshot = await automation_health_snapshot()
+        while True:
+            snapshot = await automation_health_snapshot()
+            if snapshot["scheduler"]["ticks"] >= 1:
+                break
+            if asyncio.get_running_loop().time() >= deadline:
+                break
+            await asyncio.sleep(0.1)
         assert set(snapshot["tasks_running"]) == {"maintenance", "outbox_relay", "scheduler"}
         assert snapshot["scheduler"]["owner_id"] == "test-owner"
         assert snapshot["scheduler"]["ticks"] >= 1

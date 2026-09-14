@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -80,16 +80,16 @@ async def release_owned_automation_loops(
     now: datetime | None = None,
 ) -> None:
     now = now or datetime.now(UTC)
-    result = await session.execute(
-        select(AutomationLease)
+    await session.execute(
+        update(AutomationLease)
         .where(AutomationLease.owner_id == owner_id)
-        .with_for_update(skip_locked=True)
+        .values(
+            owner_id=None,
+            owner_started_at=None,
+            lease_expires_at=None,
+            last_heartbeat_at=now,
+        )
     )
-    for row in result.scalars().all():
-        row.owner_id = None
-        row.owner_started_at = None
-        row.lease_expires_at = None
-        row.last_heartbeat_at = now
 
 
 async def _record_success(
@@ -245,9 +245,16 @@ class AutomationService:
         try:
             await stop_event.wait()
         finally:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            stop_event.set()
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=max(spec.interval_seconds for spec in self.loop_specs) + 5.0,
+                )
+            except TimeoutError:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
             async with AsyncSessionLocal() as session:
                 await release_owned_automation_loops(session, owner_id=self.owner_id)
                 await session.commit()
