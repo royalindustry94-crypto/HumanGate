@@ -319,6 +319,7 @@ async def test_mission_control_requires_admin(client, new_user):
     for endpoint in (
         "activity",
         "health",
+        "automation",
         "cost-control",
         "worker-timeline",
         "content-command",
@@ -329,6 +330,44 @@ async def test_mission_control_requires_admin(client, new_user):
             headers=outsider_headers,
         )
         assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_mission_control_scheduler_health_is_not_green_when_lease_is_stale(client, new_user):
+    _user_id, _token, headers = new_user
+    workspace = await client.post("/workspaces", headers=headers, json={"name": "Stale Automation"})
+    assert workspace.status_code == 201
+    workspace_id = workspace.json()["id"]
+    now = datetime.now(UTC)
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text(
+                """
+                UPDATE automation_leases
+                SET owner_id = 'stale-owner',
+                    owner_started_at = :started,
+                    last_heartbeat_at = :heartbeat,
+                    lease_expires_at = :expired,
+                    last_ok_at = :ok_at,
+                    last_error = NULL
+                WHERE loop_name = 'scheduler'
+                """
+            ),
+            {
+                "started": now - timedelta(minutes=5),
+                "heartbeat": now - timedelta(minutes=3),
+                "expired": now - timedelta(seconds=1),
+                "ok_at": now,
+            },
+        )
+        await session.commit()
+
+    response = await client.get(f"/workspaces/{workspace_id}/operations/health", headers=headers)
+    assert response.status_code == 200
+    scheduler = next(item for item in response.json()["indicators"] if item["key"] == "scheduler")
+    assert scheduler["status"] == "red"
+    assert "stale" in scheduler["detail"].lower()
 
 
 @pytest.mark.asyncio

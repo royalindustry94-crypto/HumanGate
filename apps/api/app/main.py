@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,142 +44,13 @@ logger = logging.getLogger(__name__)
 consumers.register_all()
 
 
-@dataclass
-class AutomationRuntimeState:
-    """Process-local liveness for background automation loops."""
-
-    started_at: datetime | None = None
-    maintenance_ticks: int = 0
-    maintenance_last_ok_at: datetime | None = None
-    maintenance_last_error: str | None = None
-    outbox_ticks: int = 0
-    outbox_last_ok_at: datetime | None = None
-    outbox_last_error: str | None = None
-    scheduler_ticks: int = 0
-    scheduler_last_ok_at: datetime | None = None
-    scheduler_last_error: str | None = None
-    scheduler_jobs_leased: int = 0
-    tasks_running: list[str] = field(default_factory=list)
-
-
-automation_state = AutomationRuntimeState()
-
-
-async def _outbox_relay_loop() -> None:
-    """Dispatch pending outbox events (including review decisions)."""
-    from app.db.session import AsyncSessionLocal
-    from app.orchestration import relay
-
-    while True:
-        await asyncio.sleep(settings.outbox_relay_interval_seconds)
-        try:
-            async with AsyncSessionLocal() as session:
-                await relay.poll_and_dispatch(session)
-                await session.commit()
-            automation_state.outbox_ticks += 1
-            automation_state.outbox_last_ok_at = datetime.now(UTC)
-            automation_state.outbox_last_error = None
-        except Exception as exc:  # noqa: BLE001 — tick must survive transient DB errors
-            automation_state.outbox_last_error = str(exc)
-            logger.exception("outbox relay tick failed")
-
-
-async def _scheduler_loop() -> None:
-    """Lease due job_schedule rows and dispatch stage work."""
-    from app.db.session import AsyncSessionLocal
-    from app.orchestration import scheduler
-
-    while True:
-        await asyncio.sleep(settings.scheduler_interval_seconds)
-        try:
-            async with AsyncSessionLocal() as session:
-                leased = await scheduler.poll_and_lease(
-                    session, batch_size=settings.scheduler_batch_size
-                )
-                for job in leased:
-                    await scheduler.process_leased_job(session, job)
-                reaped = await scheduler.reap_expired_leases(session)
-                await session.commit()
-            automation_state.scheduler_ticks += 1
-            automation_state.scheduler_jobs_leased += len(leased)
-            automation_state.scheduler_last_ok_at = datetime.now(UTC)
-            automation_state.scheduler_last_error = None
-            if leased or reaped:
-                logger.info(
-                    "scheduler tick",
-                    extra={"leased": len(leased), "reaped": reaped},
-                )
-        except Exception as exc:  # noqa: BLE001
-            automation_state.scheduler_last_error = str(exc)
-            logger.exception("scheduler tick failed")
-
-
-async def _orchestration_maintenance_loop() -> None:
-    """Maintenance tick: offline sweep + lease reaping (WS3) and
-    queue-depth back-pressure evaluation (WS4).
-    """
-    from app.db.session import AsyncSessionLocal
-    from app.models.enums import RecoveryReason
-    from app.orchestration.backpressure import evaluate_all_active_workspaces
-    from app.orchestration.recovery import reap_expired_leases, reap_worker_assignments
-    from app.services.workers import mark_stale_workers_offline
-
-    while True:
-        await asyncio.sleep(settings.assignment_reaper_interval_seconds)
-        try:
-            async with AsyncSessionLocal() as session:
-                flipped = await mark_stale_workers_offline(
-                    session, offline_after_seconds=settings.worker_offline_after_seconds
-                )
-                reaped_offline = 0
-                for worker_id in flipped:
-                    outcomes = await reap_worker_assignments(
-                        session, worker_id, reason=RecoveryReason.WORKER_OFFLINE
-                    )
-                    reaped_offline += len(outcomes)
-                expired = await reap_expired_leases(session)
-                bp_snapshots = await evaluate_all_active_workspaces(session)
-                await session.commit()
-            automation_state.maintenance_ticks += 1
-            automation_state.maintenance_last_ok_at = datetime.now(UTC)
-            automation_state.maintenance_last_error = None
-            bp_changed = sum(1 for s in bp_snapshots if s.changed)
-            if flipped or expired or reaped_offline or bp_changed:
-                logger.info(
-                    "maintenance tick",
-                    extra={
-                        "workers_flipped": len(flipped),
-                        "assignments_reaped_offline": reaped_offline,
-                        "assignments_reaped_expired": len(expired),
-                        "backpressure_transitions": bp_changed,
-                    },
-                )
-        except Exception as exc:  # noqa: BLE001 — tick must survive transient DB errors
-            automation_state.maintenance_last_error = str(exc)
-            logger.exception("orchestration maintenance tick failed")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(
         "service starting",
         extra={"service": settings.service_name, "environment": settings.environment},
     )
-    background_tasks: list[asyncio.Task] = []
-    automation_state.started_at = datetime.now(UTC)
-    automation_state.tasks_running = []
-    if settings.environment != "test":
-        background_tasks.append(asyncio.create_task(_orchestration_maintenance_loop()))
-        background_tasks.append(asyncio.create_task(_outbox_relay_loop()))
-        background_tasks.append(asyncio.create_task(_scheduler_loop()))
-        automation_state.tasks_running = ["maintenance", "outbox_relay", "scheduler"]
-    app.state.automation = automation_state
     yield
-    for task in background_tasks:
-        task.cancel()
-    if background_tasks:
-        await asyncio.gather(*background_tasks, return_exceptions=True)
-    automation_state.tasks_running = []
     logger.info("service shutting down", extra={"service": settings.service_name})
 
 

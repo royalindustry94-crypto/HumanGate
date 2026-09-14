@@ -222,6 +222,20 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
+          def service_block(text: str, service: str) -> str:
+              body = []
+              capture = False
+              for line in text.splitlines():
+                  if not capture:
+                      if line == f"  {service}:":
+                          capture = True
+                      continue
+                  if line.startswith("  ") and not line.startswith("    "):
+                      break
+                  body.append(line)
+              assert capture, f"missing service block: {service}"
+              return "\n".join(body)
+
           workflow = Path(".github/workflows/claude.yml").read_text()
           expected_group = (
               "group: claude-lead-"
@@ -277,11 +291,19 @@ jobs:
           assert "postgresql://postgres:postgres@" not in staging
           assert "postgresql://app_runtime:app_runtime@" not in staging
           assert "${ENVIRONMENT" not in staging
-          assert staging.count("ENVIRONMENT: staging") >= 2
-          worker = staging.split("  worker:", 1)[1].split("\n  web:", 1)[0]
+          assert staging.count("ENVIRONMENT: staging") >= 3
+          worker = service_block(staging, "worker")
           assert "\n    env_file:" not in worker
           assert "DATABASE_URL" not in worker
           assert "POSTGRES_PASSWORD" not in worker
+          automation = service_block(staging, "automation")
+          assert 'restart: unless-stopped' in automation
+          assert 'command: ["python", "-m", "app.automation"]' in automation
+          assert "\n    ports:" not in automation
+          assert "healthcheck:" in automation
+          assert "automation_process_healthcheck" in automation
+          assert "_owner_id" not in automation
+          assert "automation_health_snapshot" not in automation
           entrypoint = Path("apps/api/docker-entrypoint.sh").read_text()
           assert "python -m app.db.runtime_role" in entrypoint
 

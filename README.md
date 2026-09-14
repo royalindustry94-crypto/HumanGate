@@ -36,6 +36,10 @@ alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 
 # separate terminal
+cd apps/api
+python -m app.automation
+
+# separate terminal
 cd apps/worker
 pip install -e ".[dev]" -c constraints-prod.txt
 python -m worker.main
@@ -55,6 +59,12 @@ Full stack (API + worker + web + Postgres):
 # Requires rotated POSTGRES_* and APP_RUNTIME_PASSWORD secrets in .env (no defaults).
 docker compose -f docker-compose.staging.yml up --build
 ```
+
+The staging stack keeps the FastAPI/Vercel API stateless. Long-running
+automation moves to the dedicated `automation` service, which runs
+`python -m app.automation` continuously under `restart: unless-stopped`.
+Production uses the separate `docker-compose.production-automation.yml`
+manifest on a durable host beside the Vercel API.
 
 ## Auth
 

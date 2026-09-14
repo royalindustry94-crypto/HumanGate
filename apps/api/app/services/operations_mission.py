@@ -17,6 +17,7 @@ from typing import cast
 from sqlalchemy import CursorResult, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.automation import AutomationHealthSnapshot
 from app.core.config import get_settings
 from app.models.assignments import StageAssignment
 from app.models.billing import BillingWebhookEvent
@@ -258,7 +259,7 @@ async def system_health(
     session: AsyncSession,
     workspace_id: uuid.UUID,
     *,
-    automation: dict | None = None,
+    automation: AutomationHealthSnapshot | None = None,
 ) -> SystemHealthOut:
     now = datetime.now(UTC)
     settings = get_settings()
@@ -419,16 +420,59 @@ async def system_health(
         )
     )
 
-    auto = automation or {}
+    auto: AutomationHealthSnapshot = automation or cast(
+        AutomationHealthSnapshot,
+        {
+            "status": "idle",
+            "started_at": None,
+            "tasks_running": [],
+            "maintenance": {
+                "status": "idle",
+                "owner_id": None,
+                "owner_started_at": None,
+                "lease_expires_at": None,
+                "last_heartbeat_at": None,
+                "ticks": 0,
+                "last_ok_at": None,
+                "last_error": None,
+                "active": False,
+            },
+            "outbox_relay": {
+                "status": "idle",
+                "owner_id": None,
+                "owner_started_at": None,
+                "lease_expires_at": None,
+                "last_heartbeat_at": None,
+                "ticks": 0,
+                "last_ok_at": None,
+                "last_error": None,
+                "active": False,
+            },
+            "scheduler": {
+                "status": "idle",
+                "owner_id": None,
+                "owner_started_at": None,
+                "lease_expires_at": None,
+                "last_heartbeat_at": None,
+                "ticks": 0,
+                "last_ok_at": None,
+                "last_error": None,
+                "active": False,
+                "jobs_leased": 0,
+            },
+        },
+    )
     scheduler = auto.get("scheduler") or {}
-    if settings.environment == "test":
-        sch_status, sch_detail = "amber", "Scheduler idle in test environment"
-    elif scheduler.get("last_error"):
+    if scheduler.get("last_error"):
         sch_status, sch_detail = "red", str(scheduler["last_error"])
-    elif scheduler.get("last_ok_at") or (
-        auto.get("tasks_running") and "scheduler" in auto.get("tasks_running", [])
-    ):
+    elif scheduler.get("status") == "running" and scheduler.get("active"):
         sch_status, sch_detail = "green", f"Scheduler ticks={scheduler.get('ticks', 0)}"
+    elif scheduler.get("status") == "stale":
+        sch_status, sch_detail = "red", "Scheduler lease stale"
+    elif settings.environment == "test":
+        sch_status, sch_detail = "amber", "Scheduler idle in test environment"
+    elif auto.get("tasks_running") and "scheduler" in auto.get("tasks_running", []):
+        sch_status, sch_detail = "amber", "Scheduler transitioning"
     else:
         sch_status, sch_detail = "amber", "Scheduler state unavailable"
     indicators.append(
