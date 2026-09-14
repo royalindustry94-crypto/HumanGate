@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -89,31 +89,31 @@ async def update_workspace_spend_cap(
 
 async def spend_snapshot(session: AsyncSession, *, workspace_id: uuid.UUID) -> dict:
     cap = await get_workspace_spend_cap(session, workspace_id=workspace_id)
-    daily_used = await controller._spend_committed_plus_reserved(
+    daily_used = await controller.spend_committed_plus_reserved(
         session,
         workspace_id=workspace_id,
         provider=None,
-        since=controller._utc_day_start(),
+        since=controller.utc_day_start(),
     )
-    monthly_used = await controller._spend_committed_plus_reserved(
+    monthly_used = await controller.spend_committed_plus_reserved(
         session,
         workspace_id=workspace_id,
         provider=None,
-        since=controller._utc_month_start(),
+        since=controller.utc_month_start(),
     )
-    reserved = (
+    # Summed in SQL, not in Python. This previously fetched every open
+    # reservation row with no LIMIT and added them up in application memory --
+    # unbounded work on a spend-control path (audit H-3).
+    reserved_total = Decimal(
         (
             await session.execute(
-                select(SpendReservation.estimated_cost_usd).where(
+                select(func.coalesce(func.sum(SpendReservation.estimated_cost_usd), 0)).where(
                     SpendReservation.workspace_id == workspace_id,
                     SpendReservation.status == ReservationStatus.RESERVED,
                 )
             )
-        )
-        .scalars()
-        .all()
+        ).scalar_one()
     )
-    reserved_total = sum((Decimal(str(v)) for v in reserved), Decimal("0"))
     log_count = (
         await session.execute(
             select(SpendLog.id).where(SpendLog.workspace_id == workspace_id).limit(1)
