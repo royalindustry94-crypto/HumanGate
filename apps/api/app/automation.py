@@ -652,7 +652,10 @@ async def automation_process_healthcheck(
 ) -> dict[str, str]:
     async with AsyncSessionLocal() as session:
         await session.execute(select(1))
-    return {"status": "ok", "local_owner_id": local_owner_id or _owner_id()}
+    payload = {"status": "ok"}
+    if local_owner_id is not None:
+        payload["local_owner_id"] = local_owner_id
+    return payload
 
 
 async def main() -> None:
