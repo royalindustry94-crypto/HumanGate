@@ -19,6 +19,7 @@ import httpx
 logger = logging.getLogger("worker.client")
 
 CAPABILITY_PROTOCOL_VERSION = 1
+EXECUTABLE_STAGES = frozenset({"scripting", "idea"})
 
 # Bounded retries for a claim whose HTTP response is lost in transit
 # (timeout/connection reset) — not for HTTP error statuses, which
@@ -59,7 +60,7 @@ class ReferenceWorkerClient:
         `worker_id` the provisioned identity.
         """
         self.name = name
-        self.supported_stages = supported_stages
+        self.supported_stages = _supported_executable_stages(supported_stages)
         self.max_concurrency = max_concurrency
         self.workspace_id = workspace_id
         self.executor = executor
@@ -292,3 +293,14 @@ class ReferenceWorkerClient:
             result=result,
             error_message=error,
         )
+
+
+def _supported_executable_stages(stages: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for stage in stages:
+        candidate = str(stage or "").strip().lower()
+        if candidate in EXECUTABLE_STAGES and candidate not in seen:
+            normalized.append(candidate)
+            seen.add(candidate)
+    return normalized

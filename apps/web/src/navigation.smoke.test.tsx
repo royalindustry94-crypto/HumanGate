@@ -119,6 +119,35 @@ vi.mock("./api", () => ({
     cost_today_usd: "0", last_error: "RESEARCH PROVIDER NOT CONFIGURED", schedule_enabled: false,
     research_data_state: "not_connected",
   })),
+  getStrategySummary: vi.fn(async () => ({
+    provider_state: "not_configured", status: "not_run", current_strategy: null, last_run: null,
+    next_run_at: null, opportunities_received: 0, briefs_created: 0, briefs_passed: 0,
+    briefs_blocked: 0, cost_today_usd: "0", last_error: "STRATEGY PROVIDER NOT CONFIGURED",
+    schedule_enabled: false, business_context_state: "incomplete", performance_data_state: "no_data",
+  })),
+  createStrategyRun: vi.fn(async () => ({})),
+  listStrategyBriefs: vi.fn(async () => []),
+  getStrategyBriefDetail: vi.fn(async () => ({})),
+  auditStrategyBrief: vi.fn(async () => ({})),
+  sendStrategyBriefToWriter: vi.fn(async () => ({})),
+  getContentDepartmentSummary: vi.fn(async () => ({
+    provider_state: "not_configured", status: "not_run", current_run: null, last_run: null,
+    creative_directions: 0, packages_ready: 0, packages_blocked: 0, packages_in_progress: 0,
+    claims_unverified: 0, cost_today_usd: "0", last_error: "CONTENT PROVIDER NOT CONFIGURED",
+    schedule_enabled: false, business_context_state: "incomplete", performance_data_state: "no_data",
+  })),
+  createContentDepartmentRun: vi.fn(async () => ({})),
+  listContentPackages: vi.fn(async () => []),
+  getContentPackageDetail: vi.fn(async () => ({})),
+  getProducerGate: vi.fn(async () => ({})),
+  getProductionSummary: vi.fn(async () => ({
+    provider_state: "not_configured", production_jobs: 0, active_jobs: 0, final_artifacts: 0,
+    media_qa_passed: 0, media_qa_blocked: 0, repair_required: 0, compliance_ready: 0,
+    provider_cost_usd: "0", last_error: "PRODUCTION PROVIDER NOT CONFIGURED",
+    real_provider_mode: false, test_fixture_mode: true,
+  })),
+  createProductionRun: vi.fn(async () => ({})),
+  listProductionRuns: vi.fn(async () => []),
   listOpportunities: vi.fn(async () => []),
   createResearchRun: vi.fn(async () => ({})),
   getOpportunityDetail: vi.fn(async () => ({})),
@@ -392,6 +421,120 @@ describe("dashboard navigation smoke test", () => {
     expect(await screen.findByText(/We couldn’t load this view|We couldn't load this view/i)).toBeDefined();
     // Shell still intact.
     expect(screen.getAllByText("The Business Manager").length).toBeGreaterThan(0);
+  });
+
+  it("disables unavailable execution actions so the UI matches fail-closed backend state", async () => {
+    const api = await import("./api");
+    (api.listOpportunities as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "opp-1",
+        research_run_id: "run-1",
+        title: "Opportunity",
+        topic: "Evidence-backed planning",
+        summary: "Summary",
+        proposed_angle: "Angle",
+        target_audience: "operators",
+        target_platform: "short_video",
+        suggested_format: "explainer",
+        discovered_at: "2026-08-07T00:00:00Z",
+        source_count: 2,
+        confidence: "0.70",
+        freshness: "fresh",
+        risk: "low",
+        status: "pending_audit",
+        created_by_worker: "scout",
+        component_scores: {},
+        score_reasoning: {},
+        strategist_state: "eligible",
+        audit_gate_status: "pass",
+        performance_data_state: "no_data",
+        test_data: true,
+      },
+    ]);
+    (api.listStrategyBriefs as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "brief-1",
+        strategy_run_id: "run-1",
+        objective: "Objective",
+        target_audience: "operators",
+        target_platform: "short_video",
+        content_format: "explainer",
+        creative_angle: "Angle",
+        core_message: "Message",
+        hook_direction: "Hook",
+        cta_direction: "CTA",
+        business_goal: "Goal",
+        success_metric: "Metric",
+        commercial_goal: "Commercial",
+        estimated_complexity: "low",
+        risk_level: "low",
+        evidence_summary: "Evidence",
+        reasoning: "Reasoning",
+        confidence: "0.60",
+        priority: "medium_priority",
+        component_scores: {},
+        score_reasoning: {},
+        recommended_length: null,
+        recommended_posting_window: null,
+        required_assets: [],
+        production_requirements: [],
+        rights_requirements: [],
+        compliance_requirements: [],
+        estimated_provider_usage: {},
+        estimated_cost_range: {},
+        cost_state: "known",
+        capability_state: "configured",
+        business_context_state: "complete",
+        performance_data_state: "no_data",
+        structural_fingerprint: "fp",
+        repetition_state: "clear",
+        repetition_reasons: [],
+        audit_gate_status: "pass",
+        writer_handoff_state: "eligible",
+        created_by_worker: "writer",
+        status: "pass",
+        test_data: true,
+      },
+    ]);
+    (api.listContentPackages as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "pkg-1",
+        content_department_run_id: "cdr-1",
+        creative_direction_id: "dir-1",
+        strategy_brief_id: "brief-1",
+        content_item_id: "item-1",
+        content_version_id: "ver-1",
+        prior_content_version_id: null,
+        revision_reason: null,
+        writer_worker_id: "writer",
+        provider: "not_configured",
+        model: null,
+        prompt_version: "writer-v1",
+        input_references: {},
+        package_fields: {},
+        status: "writer_provider_not_configured",
+        audit_gate_status: "pass",
+        producer_handoff_state: "eligible",
+        invalidated_at: null,
+        test_data: true,
+      },
+    ]);
+
+    renderShell();
+    await screen.findByRole("heading", { name: "Home" });
+    const nav = screen.getByRole("navigation", { name: /primary navigation/i });
+
+    fireEvent.click(within(nav).getByRole("button", { name: /^Opportunities$/i }));
+    expect((await screen.findByRole("button", { name: "Run research" })).hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(within(nav).getByRole("button", { name: /^Strategy$/i }));
+    expect((await screen.findByRole("button", { name: "Record strategy request" })).hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(within(nav).getByRole("button", { name: /^Content Department$/i }));
+    expect((await screen.findByRole("button", { name: "Record content request" })).hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(within(nav).getByRole("button", { name: /^Producer$/i }));
+    expect((await screen.findByRole("button", { name: "Request production" })).hasAttribute("disabled")).toBe(true);
   });
 
   it("auto-refreshes the current dashboard view on an interval", async () => {

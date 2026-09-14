@@ -163,6 +163,11 @@ async def test_manual_run_is_truthful_when_content_provider_not_configured(clien
     assert summary.json()["packages_ready"] == 0
     assert summary.json()["claims_unverified"] == 0
     assert summary.json()["business_context_state"] == "incomplete"
+    packages = await client.get(
+        f"/workspaces/{workspace_id}/content-department/packages", headers=headers
+    )
+    assert packages.status_code == 200
+    assert packages.json() == []
 
 
 @pytest.mark.asyncio

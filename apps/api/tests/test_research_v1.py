@@ -60,6 +60,11 @@ async def test_manual_run_is_truthful_when_provider_not_configured(client, new_u
     assert summary.status_code == 200
     assert summary.json()["research_data_state"] == "not_connected"
     assert summary.json()["opportunities_found"] == 0
+    opportunities = await client.get(
+        f"/workspaces/{workspace_id}/research/opportunities", headers=headers
+    )
+    assert opportunities.status_code == 200
+    assert opportunities.json() == []
 
 
 @pytest.mark.asyncio

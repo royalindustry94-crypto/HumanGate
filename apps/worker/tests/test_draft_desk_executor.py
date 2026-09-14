@@ -31,3 +31,11 @@ async def test_review_stage_rejected():
     ok, _result, err = await draft_desk_executor({"stage": "review", "topic": "x"})
     assert ok is False
     assert "human" in err.lower() or "review" in err.lower()
+
+
+@pytest.mark.asyncio
+async def test_unknown_stage_rejected():
+    ok, result, err = await draft_desk_executor({"stage": "voiceover", "topic": "x"})
+    assert ok is False
+    assert result is None
+    assert "unsupported" in err.lower()
