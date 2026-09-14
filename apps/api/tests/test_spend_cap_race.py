@@ -131,10 +131,21 @@ async def test_concurrent_read_committed_race_recovers_and_leaves_both_sessions_
     the other never conflicts at all. A regression in the recovery path or in
     post-savepoint session state would pass both.
 
+    The interleaving is FORCED, not raced. An earlier version launched two
+    coroutines and retried ten times hoping the scheduler would overlap them,
+    falling back to `pytest.skip` -- so CI could report success while the only
+    test covering this branch quietly did nothing. Here the loser is held at its
+    flush until the winner has committed, which is the exact ordering the branch
+    exists for:
+
+        loser:  SELECT (miss) ............... flush -> unique violation
+        winner:        SELECT (miss) -> INSERT -> COMMIT
+
     `get_workspace_spend_cap` is called *only* in the recovery branch, so
-    counting it is an exact probe for "the race actually happened" -- this test
-    refuses to pass vacuously.
+    counting it stays as an assertion that the branch really ran.
     """
+    from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+
     real_lookup = spend.get_workspace_spend_cap
     recoveries = {"n": 0}
 
@@ -144,8 +155,26 @@ async def test_concurrent_read_committed_race_recovers_and_leaves_both_sessions_
 
     monkeypatch.setattr(spend, "get_workspace_spend_cap", counting_lookup)
 
-    async def racer(workspace_id: uuid.UUID, actor: uuid.UUID):
+    loser_at_flush = asyncio.Event()
+    winner_committed = asyncio.Event()
+    real_flush = _AsyncSession.flush
+
+    async def gated_flush(self, *args, **kwargs):
+        # Only the tagged loser session is held; every other flush in the
+        # process is untouched.
+        if getattr(self, "_hg_race_role", None) == "loser":
+            self._hg_race_role = None  # hold once, at the contended INSERT
+            loser_at_flush.set()
+            await winner_committed.wait()
+        return await real_flush(self, *args, **kwargs)
+
+    monkeypatch.setattr(_AsyncSession, "flush", gated_flush)
+
+    workspace_id, actor = await _bare_workspace()
+
+    async def loser():
         async with AsyncSessionLocal() as session:
+            session._hg_race_role = "loser"
             cap = await spend.ensure_default_spend_cap(
                 session, workspace_id=workspace_id, actor_id=actor
             )
@@ -156,20 +185,26 @@ async def test_concurrent_read_committed_race_recovers_and_leaves_both_sessions_
             await session.commit()
             return cap_id, count
 
-    # Both coroutines yield at their first await, so both reach the existence
-    # SELECT before either flushes. Retried a bounded number of times because
-    # scheduling is not contractually guaranteed.
-    for _attempt in range(10):
-        workspace_id, actor = await _bare_workspace()
-        results = await asyncio.gather(racer(workspace_id, actor), racer(workspace_id, actor))
-        if recoveries["n"]:
-            break
-    else:
-        pytest.skip("could not schedule the concurrent race in this environment")
+    loser_task = asyncio.create_task(loser())
+    # The loser has now read (and missed) and is parked at its INSERT.
+    await asyncio.wait_for(loser_at_flush.wait(), timeout=10)
 
-    (first_id, first_count), (second_id, second_count) = results
-    assert first_id == second_id, "both callers must end up with the same cap"
-    assert first_count == second_count == 1, "sessions stayed usable; exactly one cap row"
+    async with AsyncSessionLocal() as winner:
+        cap = await spend.ensure_default_spend_cap(
+            winner, workspace_id=workspace_id, actor_id=actor
+        )
+        winner_id = cap.id
+        await winner.commit()
+    winner_committed.set()
+
+    loser_id, loser_count = await asyncio.wait_for(loser_task, timeout=10)
+
+    assert recoveries["n"] == 1, (
+        "the IntegrityError recovery branch did not run, so this test would "
+        "pass against a regression in it"
+    )
+    assert loser_id == winner_id, "both callers must end up with the same cap"
+    assert loser_count == 1, "the loser's session stayed usable; exactly one cap row"
 
     async with AsyncSessionLocal() as check:
         assert await _cap_count(check, workspace_id) == 1, "no duplicate cap committed"

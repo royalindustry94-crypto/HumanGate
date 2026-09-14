@@ -30,11 +30,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import or_, select, tuple_
+from sqlalchemy import and_, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
+from sqlalchemy.sql import ColumnElement
 
 from app.core.config import get_settings
 from app.models.assignments import StageAssignment
+from app.models.backpressure import ProviderConcurrencyBudget
 from app.models.claim_audit import StageClaimAudit
 from app.models.enums import (
     ClaimOutcome,
@@ -52,16 +55,60 @@ from app.orchestration.provider_budgets import has_provider_capacity
 
 logger = logging.getLogger(__name__)
 
+# Self-join alias: the in-flight count below counts stage_assignments rows for
+# the SAME (workspace_id, provider) as the candidate row, so it needs its own
+# name to correlate against the outer StageAssignment.
+_InFlight = aliased(StageAssignment)
+
 # Diagnostic threshold on the candidate scan -- deliberately NOT a bound.
 #
 # Every fixed bound tried here was wrong in the same way: the scan stopped with
-# `saw_provider_budget_block` still true and a claimable row still behind the
-# retired pairs, so the caller was told `capacity` when work was available
-# (audit M-2 / review C3). The number of distinct (workspace_id, provider)
-# pairs is arbitrary per-tenant data, so no constant can be derived from it.
-# The scan therefore terminates only on candidate exhaustion; crossing this
-# many passes is logged once, as an observation, and the scan continues.
+# a claimable row still behind the skipped ones, so the caller was told
+# `capacity` when work was available (audit M-2 / review C3). The scan
+# terminates only on candidate exhaustion; crossing this many passes is logged
+# once, as an observation, and the scan continues.
 _CLAIM_SCAN_REPORT_AFTER = 10_000
+
+
+def _saturated_provider_pair() -> ColumnElement[bool]:
+    """`has_provider_capacity`'s rule as a correlated SQL predicate.
+
+    True for a candidate row whose (workspace_id, provider) budget is at or
+    over its limit. Kept deliberately in lockstep with that function:
+
+      * a null or blank provider is never saturated (it returns True early);
+      * a provider with no budget row is never saturated (missing budget means
+        no limit -- the module documents this fail-open);
+      * otherwise saturated iff in-flight DISPATCHED/ACKNOWLEDGED count
+        >= max_concurrent.
+
+    Expressing it here lets the candidate query skip saturated rows in the
+    database instead of walking them one at a time and feeding the retired
+    pairs back as an ever-growing bind-parameter list.
+    """
+    inflight = (
+        select(func.count(_InFlight.id))
+        .where(
+            _InFlight.workspace_id == StageAssignment.workspace_id,
+            _InFlight.provider == StageAssignment.provider,
+            _InFlight.status.in_(
+                [StageAssignmentStatus.DISPATCHED, StageAssignmentStatus.ACKNOWLEDGED]
+            ),
+        )
+        .scalar_subquery()
+    )
+    return and_(
+        StageAssignment.provider.is_not(None),
+        StageAssignment.provider != "",
+        exists(
+            select(ProviderConcurrencyBudget.workspace_id).where(
+                ProviderConcurrencyBudget.workspace_id == StageAssignment.workspace_id,
+                ProviderConcurrencyBudget.provider == StageAssignment.provider,
+                inflight >= ProviderConcurrencyBudget.max_concurrent,
+            )
+        ),
+    )
+
 
 # Back-compat module aliases; prefer Settings at call sites.
 CLAIM_HEARTBEAT_MAX_AGE_SECONDS = 90
@@ -236,37 +283,40 @@ async def claim_assignment(
 
     from sqlalchemy import text as sa_text
 
-    # Candidate exhaustion is the ONLY termination condition for this scan.
+    # Saturated (workspace_id, provider) pairs are excluded IN SQL, not
+    # accumulated in Python.
     #
-    # Each pass either claims a row, finds no candidate at all, or retires
-    # exactly one (workspace_id, provider) pair. The candidate query excludes
-    # every retired pair, so a returned row's pair is by construction one not
-    # yet in `saturated`: the list grows by a distinct pair each pass, and the
-    # pending set holds finitely many distinct pairs. The loop is therefore
-    # bounded by the data itself and needs no synthetic cap.
+    # The previous shape retired one pair per pass into a list and fed it back
+    # as `tuple_(...).notin_(saturated)`. That list was bounded by nothing but
+    # the data: each pair adds two bind parameters, so ~32k saturated pairs
+    # exceeded PostgreSQL's 65535-parameter limit and failed the claim
+    # outright, and long before that a global worker paid one candidate query
+    # plus a budget lock and an in-flight COUNT per pair on every poll.
     #
-    # Neither `range(batch)` nor `range(10_000)` was safe: both stop with
-    # `saw_provider_budget_block` still true and a claimable row still behind
-    # the retired pairs, which is exactly the false-`capacity` bug this scan
-    # exists to avoid. Deriving the bound from a COUNT of
-    # provider_concurrency_budgets only moved the problem -- that count is a
-    # READ COMMITTED snapshot taken before the scan, so budgets committed
-    # mid-claim could outrun it, and for a global worker it scanned every
-    # tenant's budgets on every poll, including no-work polls.
+    # `_saturated_provider_pair` expresses has_provider_capacity's own rule as
+    # a correlated NOT EXISTS, so the candidate query returns a row that is
+    # already known to be under budget. There is nothing left to accumulate:
+    # no synthetic loop cap (which would reintroduce the C3 false `capacity`),
+    # and no unbounded parameter list either.
     effective = effective_priority_expr(
         StageAssignment.priority, StageAssignment.created_at, now=now
     )
-    # Saturated (workspace_id, provider) pairs discovered during this claim. A
-    # candidate is skipped precisely because its provider budget is exhausted,
-    # and that verdict applies to every sibling row sharing the pair, so
-    # excluding the pair retires all of them at once instead of re-discovering
-    # the same full provider once per pending row (audit M-2).
-    saturated: list[tuple[uuid.UUID, str]] = []
-    assignment: StageAssignment | None = None
-    saw_provider_budget_block = False
+    base_where = [
+        StageAssignment.status == StageAssignmentStatus.PENDING,
+        StageAssignment.stage.in_(list(worker.supported_stages)),
+    ]
+    if worker.workspace_id is not None:
+        base_where.append(StageAssignment.workspace_id == worker.workspace_id)
 
+    assignment: StageAssignment | None = None
     scan_passes = 0
 
+    # The loop exists ONLY for the lost-race case below, not to walk saturated
+    # pairs, so it still has no iteration bound. It terminates because a failed
+    # locked re-check means some concurrent transaction committed an in-flight
+    # row for that pair, which the next pass's NOT EXISTS then sees and
+    # excludes; if instead an assignment completed, the pair really does have
+    # capacity again and retrying is the correct answer, not a spin.
     while True:
         scan_passes += 1
         if scan_passes == _CLAIM_SCAN_REPORT_AFTER:
@@ -274,73 +324,50 @@ async def claim_assignment(
             # into a stop would hand the caller a false `capacity`.
             logger.warning(
                 "claim candidate scan is unusually long",
-                extra={
-                    "worker_id": str(worker.id),
-                    "saturated_pairs": len(saturated),
-                    "passes": scan_passes,
-                },
+                extra={"worker_id": str(worker.id), "passes": scan_passes},
             )
         await session.execute(sa_text("SAVEPOINT claim_candidate"))
-        where = [
-            StageAssignment.status == StageAssignmentStatus.PENDING,
-            StageAssignment.stage.in_(list(worker.supported_stages)),
-        ]
-        if worker.workspace_id is not None:
-            where.append(StageAssignment.workspace_id == worker.workspace_id)
-        if saturated:
-            # `provider IS NULL` is checked first and kept: has_provider_capacity
-            # always grants capacity to a null/blank provider, so such rows are
-            # never saturated -- and a bare NOT IN would silently drop them,
-            # since `NULL NOT IN (...)` is NULL, not true.
-            where.append(
-                or_(
-                    StageAssignment.provider.is_(None),
-                    tuple_(StageAssignment.workspace_id, StageAssignment.provider).notin_(
-                        saturated
-                    ),
-                )
-            )
         candidate = await session.execute(
             select(StageAssignment)
-            .where(*where)
+            .where(*base_where, ~_saturated_provider_pair())
             .order_by(effective.desc(), StageAssignment.created_at.asc())
             .limit(1)
-            .with_for_update(skip_locked=True)
+            .with_for_update(skip_locked=True, of=StageAssignment)
         )
         row = candidate.scalar_one_or_none()
         if row is None:
             await session.execute(sa_text("RELEASE SAVEPOINT claim_candidate"))
             break
-        # Scope the budget check to the candidate assignment's own workspace
-        # (always set — StageAssignment is workspace-scoped) rather than the
-        # worker's, since worker_registry.workspace_id is a nullable pin
-        # (None for a worker serving all workspaces), not a guarantee.
+        # The SQL filter above is unlocked, so two claimers can both see the
+        # same last slot. Re-check under has_provider_capacity's FOR UPDATE on
+        # the budget row, which serializes them; the loser retries.
+        #
+        # Scope the check to the candidate assignment's own workspace (always
+        # set -- StageAssignment is workspace-scoped) rather than the worker's,
+        # since worker_registry.workspace_id is a nullable pin (None for a
+        # worker serving all workspaces), not a guarantee.
         if not await has_provider_capacity(
             session, workspace_id=row.workspace_id, provider=row.provider
         ):
-            saw_provider_budget_block = True
-            # Read both before the rollback below, so nothing depends on the
-            # ORM state of `row` surviving it.
-            #
-            # has_provider_capacity grants capacity unconditionally for a
-            # null/blank provider, so reaching here means row.provider is set.
-            # Narrowed rather than asserted so an unexpected null stops the
-            # scan instead of looping over the same row until `batch` runs out.
-            blocked_pair = (row.workspace_id, row.provider)
             # Release the assignment (+ budget) lock so other claimers can
             # proceed on sibling pending rows.
             await session.execute(sa_text("ROLLBACK TO SAVEPOINT claim_candidate"))
             await session.execute(sa_text("RELEASE SAVEPOINT claim_candidate"))
-            blocked_workspace_id, blocked_provider = blocked_pair
-            if not blocked_provider:
-                break
-            saturated.append((blocked_workspace_id, blocked_provider))
             continue
         assignment = row
         await session.execute(sa_text("RELEASE SAVEPOINT claim_candidate"))
         break
 
     if assignment is None:
+        # Distinguish "nothing pending" from "everything pending is provider-
+        # blocked". The filtered query above conflates the two, and the outcome
+        # is not cosmetic: CAPACITY tells the worker to back off and retry,
+        # NO_WORK tells it the queue is empty. One extra existence query, only
+        # on the path that is already returning empty-handed.
+        any_candidate = (
+            await session.execute(select(StageAssignment.id).where(*base_where).limit(1))
+        ).scalar_one_or_none()
+        saw_provider_budget_block = any_candidate is not None
         reason = (
             "provider budget exhausted" if saw_provider_budget_block else "no eligible assignment"
         )

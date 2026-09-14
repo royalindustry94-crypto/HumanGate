@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -81,20 +82,53 @@ def test_replit_deployment_entry_is_the_preview_launcher() -> None:
     assert _replit_deployment_script() == "scripts/run_ops_preview_replit.sh"
 
 
-def _resolve_environment(preset: str | None) -> str:
-    """Run the launcher's real environment-resolution block under bash.
+def _resolve_environment(
+    preset: str | None, *, tmp_path: Path | None = None, existing_env: bool = False
+) -> str:
+    """Run the launcher's REAL prefix -- .env handling included -- under bash.
 
-    Extracted between its BEGIN/END markers and executed, rather than
-    string-matched. The original version of this test asserted on the literal
-    `ENVIRONMENT="${ENVIRONMENT:-preview}"` and so never modelled the case that
-    actually mattered: the launcher copies `.env.example` (ENVIRONMENT=
-    development) and sources it, leaving the variable already set so `:-` never
-    substituted. The public deployment kept running as a local environment.
+    Everything from the top of the script through the END marker is executed,
+    in a throwaway root seeded with the repository's own `.env.example`. That
+    span, not the marked block alone, is what decides ENVIRONMENT on a real
+    boot, and each narrower version of this helper hid a live bug:
+
+      * asserting on the literal `ENVIRONMENT="${ENVIRONMENT:-preview}"` missed
+        that the launcher sources `.env.example` (ENVIRONMENT=development)
+        first, so `:-` never substituted and the public deployment ran as a
+        local environment; then
+      * executing only the marked block missed that `set -a; source .env`
+        assigns every key in the template, clobbering an ENVIRONMENT=staging
+        supplied by the deployment platform before the block ever sees it.
+
+    Both passed a test while the shipped script did the wrong thing, so this
+    runs the whole prefix instead.
     """
     raw = (REPOSITORY_ROOT / _replit_deployment_script()).read_text()
-    block = raw.split("# --- BEGIN environment resolution", 1)[1]
-    block = block.split("# --- END environment resolution", 1)[0]
-    block = block.split("\n", 1)[1]
+    prefix = raw.split("# --- END environment resolution", 1)[0]
+
+    root = Path(tempfile.mkdtemp()) if tmp_path is None else tmp_path
+    (root / "scripts").mkdir(parents=True, exist_ok=True)
+    # ROOT is derived from `dirname "$0"/..`, so a stand-in script path here
+    # points the launcher at this throwaway tree rather than the repository.
+    stand_in = root / "scripts" / "run_ops_preview_replit.sh"
+    stand_in.write_text(prefix + '\nprintf "%s" "$ENVIRONMENT"\n')
+
+    # The real template with its credential blanks filled in. ENVIRONMENT is
+    # left exactly as shipped -- that is the value under test -- but the
+    # OPS_PREVIEW_ blanks must be populated or `set -a; source` assigns the
+    # empty strings over the caller's and the `:?` guards abort the run before
+    # the resolution block is ever reached.
+    template = (REPOSITORY_ROOT / ".env.example").read_text()
+    template = template.replace(
+        "OPS_PREVIEW_EMAIL=", "OPS_PREVIEW_EMAIL=ops@example.invalid"
+    ).replace("OPS_PREVIEW_PASSWORD=", "OPS_PREVIEW_PASSWORD=not-a-real-password")
+    (root / ".env.example").write_text(template)
+    if existing_env:
+        # Steady state: the operator already has a .env (created from the
+        # template, ENVIRONMENT left at its default). No copy happens, but
+        # sourcing still assigns that ENVIRONMENT over the platform's.
+        (root / ".env").write_text(template)
+
     env = dict(os.environ)
     env.pop("ENVIRONMENT", None)
     if preset is not None:
@@ -102,7 +136,7 @@ def _resolve_environment(preset: str | None) -> str:
     # S603: the command is this repository's own launcher, run under bash with
     # a fixed argv; `preset` only ever reaches it as an environment value.
     result = subprocess.run(  # noqa: S603
-        ["bash", "-c", block + '\nprintf "%s" "$ENVIRONMENT"'],
+        ["bash", str(stand_in)],
         capture_output=True,
         text=True,
         env=env,
@@ -147,9 +181,24 @@ def test_local_environment_values_are_discarded_by_the_deployment_launcher(prese
     }, f"ENVIRONMENT={resolved!r} would publish OpenAPI docs on a public deployment"
 
 
-def test_a_deliberate_non_local_environment_is_still_honoured() -> None:
-    """Forcing must not clobber a real operator override."""
-    assert _resolve_environment("staging") == "staging"
+@pytest.mark.parametrize("override", ["staging", "production"])
+@pytest.mark.parametrize("existing_env", [False, True], ids=["fresh-boot", "existing-dotenv"])
+def test_a_deliberate_non_local_environment_is_still_honoured(
+    override: str, existing_env: bool
+) -> None:
+    """Forcing must not clobber a real operator override.
+
+    Run through the whole prefix, in both shapes the launcher can meet:
+
+      * fresh boot -- no `.env`, so the template is copied and sourced; and
+      * steady state -- a `.env` already exists (made from that template, its
+        ENVIRONMENT left at the default) and is sourced as-is.
+
+    The second is the one that actually bites a deployment: `set -a; source
+    .env` assigns the file's ENVIRONMENT over the platform-supplied one, so a
+    deliberate `staging` silently became `development` and then `preview`.
+    """
+    assert _resolve_environment(override, existing_env=existing_env) == override
 
 
 def test_env_example_ships_a_local_environment_that_must_be_overridden() -> None:

@@ -24,6 +24,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Capture a deliberate operator override BEFORE sourcing .env. `set -a; source
+# .env` assigns every key in the file, and the template copied just above sets
+# ENVIRONMENT=development, so an ENVIRONMENT=staging supplied by the deployment
+# platform would otherwise be silently clobbered on any boot where .env does
+# not already exist. Restored in the resolution block below.
+_hg_env_preset="${ENVIRONMENT:-}"
+
 if [[ ! -f .env ]]; then
   cp .env.example .env
 fi
@@ -55,6 +62,11 @@ export OPS_PREVIEW_EMAIL OPS_PREVIEW_PASSWORD
 # TOKENLESS_METRICS_ENVIRONMENTS; test_preview_script_security.py derives its
 # cases from those constants, so adding a new local environment name to the
 # application fails that test until this list covers it.
+# Restore the pre-source override first, so `staging` supplied by the platform
+# beats `development` inherited from the template.
+if [[ -n "${_hg_env_preset:-}" ]]; then
+  ENVIRONMENT="$_hg_env_preset"
+fi
 _hg_env="$(printf '%s' "${ENVIRONMENT:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
 case "$_hg_env" in
   "" | development | dev | test | local | ci)
@@ -62,7 +74,7 @@ case "$_hg_env" in
     ;;
 esac
 export ENVIRONMENT
-unset _hg_env
+unset _hg_env _hg_env_preset
 # --- END environment resolution ---
 
 # Belt and braces: if a future edit reintroduces a local value here, refuse to

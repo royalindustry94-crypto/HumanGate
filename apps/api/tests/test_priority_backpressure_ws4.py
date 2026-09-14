@@ -774,39 +774,37 @@ async def test_null_provider_candidates_survive_saturated_pair_exclusion(ctx):
 
 
 @pytest.mark.asyncio
-async def test_saturated_pair_scan_crosses_its_diagnostic_threshold_and_still_grants(
-    ctx, monkeypatch, caplog
-):
-    """Copilot follow-up to M-2/C3: no fixed scan bound may cause false capacity.
+@pytest.mark.parametrize("pair_count", [3, 9])
+async def test_saturated_pair_cost_is_flat_and_the_claimable_row_is_still_reached(ctx, pair_count):
+    """Copilot rounds 3-4 on M-2/C3: saturated pairs must cost nothing to skip.
 
-    Excluding whole (workspace, provider) pairs fixed the row-by-row rescan,
-    but the loop was still capped -- first at `claim_candidate_batch_size`, then
-    at a flat 10,000. Each pass retires exactly one pair, so with more saturated
-    budgets than the cap ranked above the eligible assignment, the scan ran out
-    of passes with `saw_provider_budget_block` still true and reported
-    `capacity` while a claimable row existed.
+    History of this one regression. Excluding whole (workspace, provider) pairs
+    fixed the row-by-row rescan, but the scan then walked one pair per pass and
+    fed the retired pairs back as `tuple_(...).notin_(saturated)`:
 
-    This drives the boundary directly instead of inferring it from a setting the
-    scan no longer reads: `_CLAIM_SCAN_REPORT_AFTER` is lowered below the number
-    of saturated pairs, so the scan MUST cross it. Seeding 10,001 provider
-    budgets would exercise the identical code path at unusable cost; lowering
-    the constant keeps the boundary real and the test fast. The caplog assertion
-    pins that the threshold was genuinely crossed -- without it this test would
-    silently degrade into the same never-reaches-the-bound case Copilot flagged.
+      * capped at `claim_candidate_batch_size`, then at a flat 10,000, it
+        stopped with a claimable row still behind the retired pairs and
+        reported `capacity` -- the false-capacity bug (C3); and
+      * uncapped, the pair list was bounded by nothing but the data. Each pair
+        contributes two bind parameters, so ~32k saturated pairs blow through
+        PostgreSQL's 65535-parameter limit, and long before that every pair
+        costs a candidate query plus a budget lock and an in-flight COUNT.
 
-    Against any bounding implementation (`for _ in range(_CLAIM_SCAN_REPORT_AFTER)`)
-    this fails with outcome == "capacity".
+    Both die the same way: the exclusion moved into SQL, so nothing
+    accumulates. This asserts that directly -- the statement count for a claim
+    must not grow with the number of saturated pairs. Tripling the pairs while
+    the cost stays flat is the observable difference between an in-SQL
+    exclusion and any Python-side accumulation, at a size that runs fast.
+
+    Against the accumulating implementation the statement count rises with
+    `pair_count` and this fails; against any capped one, `granted` fails.
     """
-    import logging
+    from sqlalchemy import event
 
-    from app.orchestration import claiming
+    from app.db.session import AsyncSessionLocal as _Sessions
 
-    saturated_providers = ["openai", "anthropic", "gemini"]
-    # Strictly below the pair count, so the scan cannot finish without crossing.
-    monkeypatch.setattr(claiming, "_CLAIM_SCAN_REPORT_AFTER", 2)
-    assert claiming._CLAIM_SCAN_REPORT_AFTER < len(saturated_providers)
-
-    for provider in saturated_providers:
+    providers = [f"prov{n}" for n in range(pair_count)]
+    for provider in providers:
         r = await ctx["client"].put(
             f"/workspaces/{ctx['ws']}/provider-budgets/{provider}",
             headers=ctx["headers"],
@@ -827,27 +825,43 @@ async def test_saturated_pair_scan_crosses_its_diagnostic_threshold_and_still_gr
 
     prov = await _provision(ctx["client"], ctx["headers"], ctx["ws"])
     wh = await _bring_online(ctx["client"], prov)
-    with caplog.at_level(logging.WARNING, logger=claiming.__name__):
+
+    statements: list[str] = []
+
+    def _record(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    engine = _Sessions.kw["bind"].sync_engine
+    event.listen(engine, "before_cursor_execute", _record)
+    try:
         r = await ctx["client"].post("/workers/claim", headers=wh, json={})
+    finally:
+        event.remove(engine, "before_cursor_execute", _record)
 
     assert r.json()["outcome"] == "granted", (
-        "with more saturated pairs than the scan's diagnostic threshold, the "
-        "scan must still reach the claimable assignment instead of reporting "
-        "capacity -- the threshold is an observation, not a bound"
+        "with more saturated pairs than any plausible cap, the scan must still "
+        "reach the claimable assignment instead of reporting capacity"
     )
     assert r.json()["assignment"]["id"] == str(claimable)
-    assert any("claim candidate scan is unusually long" in m for m in caplog.messages), (
-        "the scan did not actually cross its threshold, so this test would "
-        "pass against a bounded implementation too"
+
+    candidate_scans = [st for st in statements if "FOR UPDATE" in st and "SKIP LOCKED" in st]
+    assert len(candidate_scans) == 1, (
+        f"{pair_count} saturated pairs produced {len(candidate_scans)} candidate "
+        "scans; saturated pairs must be excluded in SQL, not walked one per pass"
+    )
+    # The exclusion must not be carried as a per-pair parameter list either.
+    scan = candidate_scans[0]
+    assert "NOT IN" not in scan.upper(), (
+        "the candidate query still carries an IN-list of retired pairs, which "
+        "grows two bind parameters per pair until it exceeds PostgreSQL's limit"
     )
 
 
 def test_the_scan_threshold_is_not_used_as_a_loop_bound() -> None:
-    """Belt and braces on the above: the constant must never bound iteration.
+    """The diagnostic threshold must never bound iteration.
 
     A future edit could reintroduce `for _ in range(_CLAIM_SCAN_REPORT_AFTER)`,
-    and with the threshold patched low the behavioural test above would catch
-    it -- but only while that test survives. Pin the shape too.
+    which would restore the C3 false-capacity case. Pin the shape.
     """
     import inspect
 
