@@ -131,3 +131,7 @@ async def test_competing_owners_are_deterministic_and_stale_owner_recovers():
         row = await session.get(AutomationLease, "scheduler")
         assert row is not None
         assert row.owner_id is None
+
+    snapshot = await automation_health_snapshot()
+    assert snapshot["scheduler"]["status"] == "idle"
+    assert snapshot["scheduler"]["owner_id"] is None
