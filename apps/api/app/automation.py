@@ -94,7 +94,10 @@ def _replica_owner_id(
     hostname: str | None = None,
     pid: int | None = None,
 ) -> str:
-    return f"{configured_owner_id}@{hostname or socket.gethostname()}:{pid or os.getpid()}"
+    return (
+        f"{configured_owner_id}@{hostname if hostname is not None else socket.gethostname()}:"
+        f"{pid if pid is not None else os.getpid()}"
+    )
 
 
 def _lease_seconds(interval_seconds: float) -> int:
