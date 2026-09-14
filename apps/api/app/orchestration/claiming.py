@@ -279,18 +279,22 @@ async def claim_assignment(
             session, workspace_id=row.workspace_id, provider=row.provider
         ):
             saw_provider_budget_block = True
+            # Read both before the rollback below, so nothing depends on the
+            # ORM state of `row` surviving it.
+            #
             # has_provider_capacity grants capacity unconditionally for a
             # null/blank provider, so reaching here means row.provider is set.
             # Narrowed rather than asserted so an unexpected null stops the
             # scan instead of looping over the same row until `batch` runs out.
-            blocked_provider = row.provider
+            blocked_pair = (row.workspace_id, row.provider)
             # Release the assignment (+ budget) lock so other claimers can
             # proceed on sibling pending rows.
             await session.execute(sa_text("ROLLBACK TO SAVEPOINT claim_candidate"))
             await session.execute(sa_text("RELEASE SAVEPOINT claim_candidate"))
+            blocked_workspace_id, blocked_provider = blocked_pair
             if not blocked_provider:
                 break
-            saturated.append((row.workspace_id, blocked_provider))
+            saturated.append((blocked_workspace_id, blocked_provider))
             continue
         assignment = row
         await session.execute(sa_text("RELEASE SAVEPOINT claim_candidate"))
