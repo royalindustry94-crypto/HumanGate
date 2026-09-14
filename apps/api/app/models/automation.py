@@ -11,10 +11,10 @@ from datetime import datetime
 from sqlalchemy import DateTime, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin
+from app.db.base import Base, TimestampMixin, VersionMixin
 
 
-class AutomationLease(Base, TimestampMixin):
+class AutomationLease(Base, TimestampMixin, VersionMixin):
     __tablename__ = "automation_leases"
 
     loop_name: Mapped[str] = mapped_column(Text, primary_key=True)

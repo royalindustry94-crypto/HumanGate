@@ -356,6 +356,8 @@ async def automation_health_snapshot() -> dict:
         payload["status"] == "stale" or payload["last_error"] for payload in payloads.values()
     ):
         status = "degraded"
+    elif tasks_running:
+        status = "degraded"
     else:
         status = "idle"
     return {

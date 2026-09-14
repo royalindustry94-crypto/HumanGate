@@ -29,6 +29,7 @@ def upgrade() -> None:
             last_heartbeat_at timestamptz,
             last_ok_at timestamptz,
             last_error text,
+            version integer NOT NULL DEFAULT 1,
             tick_count integer NOT NULL DEFAULT 0,
             work_count integer NOT NULL DEFAULT 0,
             created_at timestamptz NOT NULL DEFAULT now(),
@@ -42,7 +43,15 @@ def upgrade() -> None:
         VALUES ('maintenance'), ('outbox_relay'), ('scheduler');
         """
     )
+    op.execute(
+        """
+        CREATE TRIGGER automation_leases_set_version
+        BEFORE UPDATE ON automation_leases
+        FOR EACH ROW EXECUTE FUNCTION set_version_and_updated_at();
+        """
+    )
 
 
 def downgrade() -> None:
+    op.execute("DROP TRIGGER IF EXISTS automation_leases_set_version ON automation_leases;")
     op.execute("DROP TABLE IF EXISTS automation_leases;")
