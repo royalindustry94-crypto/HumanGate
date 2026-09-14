@@ -1,12 +1,51 @@
 # Technical Debt Register
 
-**Repository:** Content Orchestrator  
-**Updated:** 2026-09-09 (Phase 0/1 recovery audit — reconciled against merged `main`)  
-**Current reference:** `main` @ `2ca92f8` (PR #94 and PR #95 merged 2026-09-09T13:19 UTC; superseded the prior unmerged `claude/project-builder-handover-k95wpm` reference below)
+**Repository:** HumanGate (renamed from Content Orchestrator, PR #127, 2026-09-13; historical entries below predate the rename and are left as originally written)  
+**Updated:** 2026-09-14 (docs-reconciliation pass — independently re-probed against protected `main`, not carried forward from the 2026-09-09/10 prose below where they conflict)  
+**Current reference:** `main` @ `dfacbbd1f941c98e9c437d828575acd35bf7d96c` (`CODEX_BASELINE: PASS` posted on coordination issue #90, 2026-09-14T15:02:54Z; exact-head CI run [34858778445](https://github.com/royalindustry94-crypto/HumanGate/actions/runs/34858778445) green on all 6 required jobs — `api`, `worker`, `web`, `docker-build`, `browser-smoke`, `security`). Supersedes the `2ca92f8` reference throughout the rest of this document.
 
 Severity: CRITICAL · HIGH · MEDIUM · LOW · INFO
 
 Do not mark HIGH/CRITICAL resolved without exact commit/PR evidence, regression coverage where applicable, and an independent re-probe.
+
+**2026-09-14 verified facts (superseding stale figures elsewhere in this document):**
+
+| Fact | Prior doc claim | Independently re-verified now |
+|---|---|---|
+| Alembic head | `0054` | **`0057`** — single true head confirmed by walking every `revision`/`down_revision` pair in `apps/api/alembic/versions/` (59 files; the three parallel `0031_*` leaves merge cleanly into `0032_merge_p1`, so there is no dangling parallel head) |
+| API coverage floor (CI gate) | 75% | **79%** (`.github/workflows/ci.yml:55` — `pytest --cov=app --cov-fail-under=79`; raised by TD-031, already recorded below, just not reflected in this header before now) |
+| Open pull requests | "~30 open PRs... remain from earlier multi-agent lanes" (`EXECUTIVE_STATUS_REPORT.md`, 2026-09-09) | **0** — `mcp__github__list_pull_requests(state=open)` returns an empty list as of this pass. That claim is stale/incorrect; the founder-directed cleanup it recommended has evidently already happened by another path. |
+| P0-1..P0-4 (issue #126) | Not yet triaged in this register | **All four CLOSED** — see new section immediately below |
+
+---
+
+## Closed — 2026-09-14 P0 remediation (issue #126)
+
+An external audit opened issue #126 (`CODEX_BASELINE: CHANGES_REQUESTED` against baseline `895398a`) with four Critical production blockers, none previously tracked in this register. All four are now independently verified closed on protected `main`, per Codex's own `CODEX_BASELINE: PASS` posted on issue #90 (2026-09-14T15:02:54Z and 15:03:39Z) and re-confirmed directly in this pass (exact-head CI green, PRs merged).
+
+| ID | Finding | Fix PR | Status |
+|---|---|---|---|
+| P0-1 | JWT secret/claims did not fail closed (`config.py`/`security.py`: no strength check, issuer unvalidated, `sub` only checked for presence) | #129 | **CLOSED** |
+| P0-2 | Staging PostgreSQL exposed default `postgres/postgres` and `app_runtime/app_runtime` credentials, host port `5432` published | #130 | **CLOSED** |
+| P0-3 | Scheduler/outbox-relay/maintenance loops lived in FastAPI `lifespan`, incompatible with Vercel's stateless function model | #137 (migration `0057_automation_runtime_ownership.py`) | **CLOSED** |
+| P0-4 | Worker executor returned generic success for unimplemented stages; unavailable capabilities appeared runnable | #140 | **CLOSED** |
+
+Issue #126 itself is **closed** (`state_reason: completed`, 2026-09-14T15:03:10Z). Its own text carries a **follow-up warnings** list explicitly deferred to post-P0 triage — not yet independently severity-assessed by any pass, including this one (this pass is docs-reconciliation only, no code changed): "Health-detail exposure, distributed rate limiting, worker concurrency/lease renewal, dashboard N+1/polling/export pagination, concurrent last-admin mutation, browser security headers/session design, oversized modules/duplicated business logic, and stronger CI security supply-chain gates." Recorded below as TD-089 through TD-096 so they carry IDs and don't get lost between issue #126 (closed) and this register; each needs its own read-the-code investigation before a severity/fix can be assigned — do not treat the labels below as pre-judged severities.
+
+### TD-089 — Health-detail exposure — **OPEN / UNTRIAGED**
+### TD-090 — Rate limiting is per-instance, not distributed — **OPEN / UNTRIAGED**
+### TD-091 — Worker concurrency / lease-renewal follow-up — **OPEN / UNTRIAGED**
+### TD-092 — Operations Dashboard N+1 / polling / export pagination — **OPEN / UNTRIAGED**
+### TD-093 — Concurrent last-admin mutation — **OPEN / UNTRIAGED**
+### TD-094 — Browser security headers / session design — **OPEN / UNTRIAGED**
+### TD-095 — Oversized modules / duplicated business logic — **OPEN / UNTRIAGED**
+### TD-096 — CI security supply-chain gates could go further — **OPEN / UNTRIAGED**
+
+| Field | Value |
+|---|---|
+| Evidence | Named verbatim in issue #126's "Follow-up warnings" paragraph (closed 2026-09-14). No file/line-level evidence has been gathered for any of these eight items by this pass — that is explicitly out of scope for this docs-reconciliation task. |
+| Recommendation | Each needs a dedicated read-the-code pass (matching this register's own standard: no HIGH/CRITICAL without exact evidence) before it can be prioritized, assigned a real severity, or closed. Do not infer severity from ordering above — the list is copied in the order issue #126 stated it, not a ranking. |
+| Effort | Unknown until triaged |
 
 ---
 
@@ -54,6 +93,7 @@ None currently open. TD-070 (below) closed 2026-09-09.
 | What's actually missing, in build order | (1) Real provider API key config — either plain `Settings`/`WorkerSettings` fields, or wiring up the already-migrated but entirely-unused `ProviderCredential` BYOK table (needs an encryption helper + CRUD route + decrypt-at-call lookup built from scratch — none exists today). (2) A minimal provider abstraction/registry — none exists; the only extension point today is the single hardwired `StageExecutor` callable. (3) One new worker executor modeled on `draft_desk.py`'s `execute_stage(context) -> (bool, dict|None, str)` contract, wrapping a real HTTP call. (4) Call-level retry/backoff/timeout around that HTTP call — the existing retry machinery is stage-level only; no HTTP-call-level retry library (e.g. `tenacity`) is a dependency yet. (5) A real per-request cost estimator (token/character-based) to replace the flat `default_stage_estimate_usd=0.01` fed into `reserve_spend`/`commit_spend` — the hook points already exist (`dispatcher.py:270,497`), only the estimator function is missing. (6) Flipping each department's hardcoded `provider_not_configured` short-circuit to a real dispatch branch. (7) New test infrastructure — zero HTTP-mocking scaffolding exists anywhere in the repo (`respx`/`vcr`/`tenacity` are not dependencies); needs a mocked-provider contract-test suite covering the reserve→call(success/429/5xx/timeout)→commit/release/idempotency matrix. (8) `orchestration/retry.py`'s retryable-error marker list may need provider-specific transient-error strings added. |
 | Recommendation | Text-generation is the fastest realistic first path — Draft Desk already proves the exact worker I/O contract a real single-shot LLM call needs; production/media and compliance require multi-step external calls and are architecturally harder, so defer those. Activate one provider at a time, not built here — needs a Founder decision on which provider, a real API key, and a spend-cap figure the Founder is comfortable with before any cost-bearing call is made. |
 | Effort | L |
+| **2026-09-14 re-verification** | Independently re-grepped `main` @ `dfacbbd`: every department service still hardcodes `provider_not_configured`/`blocked_provider_not_configured`; `ProviderCredential` still appears only under `apps/api/app/models/` (zero service/route/encryption usages). Still accurately OPEN, nothing has changed since 2026-09-08. Out of scope for this docs-only pass per explicit task instruction — not started. |
 
 ### TD-085 — No reconciliation against Stripe's source of truth for a permanently-lost webhook — **OPEN**
 
@@ -64,6 +104,7 @@ None currently open. TD-070 (below) closed 2026-09-09.
 | Risk | A workspace can stay entitled indefinitely after Stripe has actually cancelled/downgraded it, with no self-healing path short of another unrelated webhook happening to arrive for the same subscription. |
 | Recommendation | A periodic reconciliation job calling `stripe.Subscription.list`/`retrieve` per workspace with a stale `stripe_subscription_id`, or at minimum an ops alert on `billing_webhook_events` gaps vs. Stripe's own dashboard delivery log. Deliberately not built as part of this pass — this is new scheduled infrastructure, not a bug fix, and belongs on the BILLING-001 go-live checklist rather than shipped unprompted against a currently-disabled feature. |
 | Effort | M |
+| **2026-09-14 re-verification** | `billing_enabled: bool = Field(default=False)` still the default in `apps/api/app/core/config.py`; `stripe.` calls remain confined to `apps/api/app/services/billing.py` only. Still accurately OPEN. Out of scope for this docs-only pass per explicit task instruction (no Stripe live calls) — not started. |
 
 ---
 
@@ -357,9 +398,14 @@ The following previously resolved controls remain closed unless new evidence sho
 
 ## Current burn-down priority
 
-1. ~~TD-072…TD-082, TD-085…TD-088 through PR #94; get it merged to `main`~~ — **DONE.** PR #94 and PR #95 merged 2026-09-09; re-verified against merged `main` in this recovery audit (see evidence above). Codex's Section 1 gate should be re-run against `main` @ `2ca92f8` to close the loop formally.
+1. ~~TD-072…TD-082, TD-085…TD-088 through PR #94; get it merged to `main`~~ — **DONE.** PR #94 and PR #95 merged 2026-09-09; re-verified against merged `main` in the 2026-09-09 recovery audit.
 2. ~~**TD-070 / issue #50:** technically protect `main`~~ — **DONE.** `main` verified `protected: true` live.
-3. Select one revenue-producing private-beta workflow and verify it end-to-end in the managed environment.
-4. Activate cost-bearing providers one at a time with spend, retry, idempotency and Human Review controls — see TD-041's build-order gap list.
+3. ~~**P0-1..P0-4** (issue #126): JWT fail-closed, staging PostgreSQL exposure, durable automation ownership, unsupported-execution fail-closed~~ — **DONE 2026-09-14.** PRs #129/#130/#137/#140 merged; `CODEX_BASELINE: PASS` at `dfacbbd1f941c98e9c437d828575acd35bf7d96c`. See the new section above.
+4. **Next up (ranked, not yet started by this pass):**
+   a. Triage TD-089…TD-096 (issue #126's follow-up warnings) — read-the-code investigation to assign real severities; **concurrent last-admin mutation (TD-093)** and **health-detail exposure (TD-089)** look likely to be the highest-signal items by category (authz/integrity and info-disclosure respectively) but this is a preliminary read of the one-line issue text, not a verified ranking.
+   b. Re-verify managed-Supabase Alembic parity — `main` is now at `0057`; the last independently confirmed managed-DB head (TD-071's 2026-09-10 update) was `0055`. Two migrations' worth of drift is unconfirmed on the managed project.
+   c. issue #68 (Founder Studio Test): functional PASS already achieved locally (2026-09-10) and a live public URL is confirmed reachable (2026-09-11, `https://royalindustry9.vercel.app`); the one remaining step is a human/mobile click-through of that live URL — not a coding task.
+5. Select one revenue-producing private-beta workflow and verify it end-to-end in the managed environment.
+6. Activate cost-bearing providers one at a time with spend, retry, idempotency and Human Review controls — see TD-041's build-order gap list (PROVIDER-001, still deferred).
 5. Raise coverage/security/observability depth based on measured risk, not feature-count pressure.
 6. Housekeeping (low priority, not blocking): ~30 open PRs and dozens of stale branches remain from earlier multi-agent lanes, mostly superseded by the now-merged audited baseline (`main` @ `2ca92f8`). Per `coordination hub #90`, none should be closed/merged/absorbed without an explicit Founder decision — flagged here for Founder triage, not acted on unilaterally.
