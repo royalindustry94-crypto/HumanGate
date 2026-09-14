@@ -647,10 +647,12 @@ def public_automation_health_snapshot(
     }
 
 
-async def automation_process_healthcheck(*, owner_id: str | None = None) -> dict[str, str]:
+async def automation_process_healthcheck(
+    *, local_owner_id: str | None = None
+) -> dict[str, str]:
     async with AsyncSessionLocal() as session:
         await session.execute(select(1))
-    return {"status": "ok", "owner_id": owner_id or _owner_id()}
+    return {"status": "ok", "local_owner_id": local_owner_id or _owner_id()}
 
 
 async def main() -> None:

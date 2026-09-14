@@ -409,9 +409,9 @@ async def test_process_healthcheck_stays_ok_while_global_automation_is_degraded(
 
     snapshot = await automation_health_snapshot()
     assert snapshot["status"] == "degraded"
-    assert await automation_process_healthcheck(owner_id="local-owner") == {
+    assert await automation_process_healthcheck(local_owner_id="local-owner") == {
         "status": "ok",
-        "owner_id": "local-owner",
+        "local_owner_id": "local-owner",
     }
 
 
