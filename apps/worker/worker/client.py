@@ -84,7 +84,7 @@ class ReferenceWorkerClient:
                 "capabilities": {
                     "protocol_version": CAPABILITY_PROTOCOL_VERSION,
                     "providers": [],
-                    "features": self.supported_stages,
+                    "features": [],
                 },
                 "worker_version": self.worker_version,
                 "max_concurrency": self.max_concurrency,

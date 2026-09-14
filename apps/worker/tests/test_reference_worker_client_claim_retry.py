@@ -102,4 +102,4 @@ async def test_register_advertises_only_executable_supported_stages():
 
     assert client.supported_stages == ["scripting", "idea"]
     assert http.post.call_args.kwargs["json"]["supported_stages"] == ["scripting", "idea"]
-    assert http.post.call_args.kwargs["json"]["capabilities"]["features"] == ["scripting", "idea"]
+    assert http.post.call_args.kwargs["json"]["capabilities"]["features"] == []
