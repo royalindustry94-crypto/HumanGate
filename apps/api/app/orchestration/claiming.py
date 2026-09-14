@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -226,7 +226,16 @@ async def claim_assignment(
     effective = effective_priority_expr(
         StageAssignment.priority, StageAssignment.created_at, now=now
     )
-    skipped_ids: list[uuid.UUID] = []
+    # Saturated (workspace_id, provider) pairs discovered during this claim.
+    # Previously each skipped candidate was excluded by its own id, so the
+    # NOT IN list grew on every iteration and the loop could re-query up to
+    # `batch` times -- each time re-discovering that the same provider was
+    # still full (audit M-2). A candidate is skipped precisely because its
+    # provider budget is exhausted, and that verdict applies to every sibling
+    # row sharing the pair, so excluding the pair retires all of them at once.
+    # The loop now terminates in at most (distinct saturated pairs + 1) passes,
+    # and the exclusion set is bounded by the provider count, not the queue.
+    saturated: list[tuple[uuid.UUID, str]] = []
     assignment: StageAssignment | None = None
     saw_provider_budget_block = False
 
@@ -238,8 +247,19 @@ async def claim_assignment(
         ]
         if worker.workspace_id is not None:
             where.append(StageAssignment.workspace_id == worker.workspace_id)
-        if skipped_ids:
-            where.append(StageAssignment.id.notin_(skipped_ids))
+        if saturated:
+            # `provider IS NULL` is checked first and kept: has_provider_capacity
+            # always grants capacity to a null/blank provider, so such rows are
+            # never saturated -- and a bare NOT IN would silently drop them,
+            # since `NULL NOT IN (...)` is NULL, not true.
+            where.append(
+                or_(
+                    StageAssignment.provider.is_(None),
+                    tuple_(StageAssignment.workspace_id, StageAssignment.provider).notin_(
+                        saturated
+                    ),
+                )
+            )
         candidate = await session.execute(
             select(StageAssignment)
             .where(*where)
@@ -259,11 +279,18 @@ async def claim_assignment(
             session, workspace_id=row.workspace_id, provider=row.provider
         ):
             saw_provider_budget_block = True
-            skipped_ids.append(row.id)
+            # has_provider_capacity grants capacity unconditionally for a
+            # null/blank provider, so reaching here means row.provider is set.
+            # Narrowed rather than asserted so an unexpected null stops the
+            # scan instead of looping over the same row until `batch` runs out.
+            blocked_provider = row.provider
             # Release the assignment (+ budget) lock so other claimers can
             # proceed on sibling pending rows.
             await session.execute(sa_text("ROLLBACK TO SAVEPOINT claim_candidate"))
             await session.execute(sa_text("RELEASE SAVEPOINT claim_candidate"))
+            if not blocked_provider:
+                break
+            saturated.append((row.workspace_id, blocked_provider))
             continue
         assignment = row
         await session.execute(sa_text("RELEASE SAVEPOINT claim_candidate"))
