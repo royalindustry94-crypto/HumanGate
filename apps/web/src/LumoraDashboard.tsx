@@ -1028,6 +1028,7 @@ function ResearchView({
   };
 
   const current = data.summary.current_research ?? data.summary.last_run;
+  const executionUnavailable = data.summary.provider_state === "not_configured";
   return (
     <div className="research-view stack">
       <section className="research-hero surface">
@@ -1045,8 +1046,8 @@ function ResearchView({
           <p className="research-limits">Default limits: 5 searches · 5 provider calls · 4,000 tokens · $0.00 preview budget · 3 attempts.</p>
         </div>
         <form className="research-command__form" onSubmit={(event) => void runResearch(event)}>
-          <input aria-label="Research objective" maxLength={1000} onChange={(event) => setObjective(event.target.value)} placeholder="Describe the opportunity or demand signal to investigate" required value={objective} />
-          <button className="button button--primary" disabled={busy} type="submit">{busy ? "Recording…" : "Run research"}</button>
+          <input aria-label="Research objective" disabled={executionUnavailable} maxLength={1000} onChange={(event) => setObjective(event.target.value)} placeholder="Describe the opportunity or demand signal to investigate" required value={objective} />
+          <button className="button button--primary" disabled={busy || executionUnavailable} type="submit">{busy ? "Recording…" : "Run research"}</button>
         </form>
         {data.summary.provider_state === "not_configured" ? <p className="research-not-configured" role="status">RESEARCH PROVIDER NOT CONFIGURED — no external research call, spend, or fabricated opportunity will be created.</p> : null}
         {notice ? <p className="research-notice" role="status">{notice}</p> : null}
@@ -1140,6 +1141,10 @@ function StrategyView({
   const [loadingDetail, setLoadingDetail] = useState<string | null>(null);
   const eligibleOpportunities = data.opportunities.filter((item) => item.audit_gate_status === "pass");
   const current = data.summary.current_strategy ?? data.summary.last_run;
+  const executionUnavailable = (
+    data.summary.provider_state === "not_configured"
+    || data.summary.business_context_state !== "complete"
+  );
 
   const toggleOpportunity = (opportunityId: string) => {
     setSelectedIds((currentIds) => currentIds.includes(opportunityId)
@@ -1232,8 +1237,8 @@ function StrategyView({
           <p className="research-limits">Default limits: up to 5 approved opportunities · 5 provider calls · 4,000 tokens · $0.00 preview budget · 3 attempts.</p>
         </div>
         <form className="strategy-command__form" onSubmit={(event) => void runStrategy(event)}>
-          <input aria-label="Strategy objective" maxLength={1000} onChange={(event) => setObjective(event.target.value)} placeholder="What business outcome should this strategy support?" required value={objective} />
-          <fieldset className="strategy-opportunity-picker">
+          <input aria-label="Strategy objective" disabled={executionUnavailable} maxLength={1000} onChange={(event) => setObjective(event.target.value)} placeholder="What business outcome should this strategy support?" required value={objective} />
+          <fieldset className="strategy-opportunity-picker" disabled={executionUnavailable}>
             <legend>Research Auditor PASS opportunities</legend>
             {eligibleOpportunities.length ? eligibleOpportunities.map((opportunity) => (
               <label key={opportunity.id}>
@@ -1242,7 +1247,7 @@ function StrategyView({
               </label>
             )) : <p>No Research Auditor PASS opportunities are available in this workspace.</p>}
           </fieldset>
-          <button className="button button--primary" disabled={busy || eligibleOpportunities.length === 0} type="submit">{busy ? "Recording…" : "Record strategy request"}</button>
+          <button className="button button--primary" disabled={busy || executionUnavailable || eligibleOpportunities.length === 0} type="submit">{busy ? "Recording…" : "Record strategy request"}</button>
         </form>
         {data.summary.provider_state === "not_configured" ? <p className="research-not-configured" role="status">STRATEGY PROVIDER NOT CONFIGURED — no external strategy call, spend, prediction, or fabricated brief will be created.</p> : null}
         {data.summary.business_context_state !== "complete" ? <p className="strategy-context" role="status">BUSINESS CONTEXT INCOMPLETE — no workspace objective, audience rules, or capability profile is configured.</p> : null}
@@ -1334,6 +1339,10 @@ function ContentDepartmentView({
   const [loadingDetail, setLoadingDetail] = useState<string | null>(null);
   const approvedBriefs = data.briefs.filter((brief) => brief.audit_gate_status === "pass");
   const current = data.summary.current_run ?? data.summary.last_run;
+  const executionUnavailable = (
+    data.summary.provider_state === "not_configured"
+    || data.summary.business_context_state !== "complete"
+  );
 
   const runContentDepartment = async (event: FormEvent) => {
     event.preventDefault();
@@ -1406,12 +1415,12 @@ function ContentDepartmentView({
         <form className="content-department-command__form" onSubmit={(event) => void runContentDepartment(event)}>
           <label>
             <span>Strategy Auditor PASS brief</span>
-            <select aria-label="Strategy Auditor PASS brief" onChange={(event) => setSelectedBriefId(event.target.value)} value={selectedBriefId}>
+            <select aria-label="Strategy Auditor PASS brief" disabled={executionUnavailable} onChange={(event) => setSelectedBriefId(event.target.value)} value={selectedBriefId}>
               <option value="">Select an approved strategy brief</option>
               {approvedBriefs.map((brief) => <option key={brief.id} value={brief.id}>{brief.objective}</option>)}
             </select>
           </label>
-          <button className="button button--primary" disabled={busy || approvedBriefs.length === 0} type="submit">{busy ? "Recording…" : "Record content request"}</button>
+          <button className="button button--primary" disabled={busy || executionUnavailable || approvedBriefs.length === 0} type="submit">{busy ? "Recording…" : "Record content request"}</button>
         </form>
         {data.summary.provider_state === "not_configured" ? <p className="research-not-configured" role="status">CONTENT PROVIDER NOT CONFIGURED — no Creative Direction, content version, claim, audit, provider cost, or fabricated package will be created.</p> : null}
         {data.summary.business_context_state !== "complete" ? <p className="strategy-context" role="status">BUSINESS CONTEXT INCOMPLETE — brand rules, audience constraints, and capability policy are not assumed.</p> : null}
@@ -1533,6 +1542,7 @@ function ProducerView({
   const [actionError, setActionError] = useState<string | null>(null);
   const auditedPackages = data.packages.filter((item) => item.audit_gate_status === "pass");
   const currentJob = data.jobs[0] ?? null;
+  const executionUnavailable = data.summary.provider_state === "not_configured";
 
   const runProducer = async (event: FormEvent) => {
     event.preventDefault();
@@ -1576,11 +1586,11 @@ function ProducerView({
           <p className="producer-limits">Default limits: 5 provider calls · 2 render calls · $0.00 preview budget · 3 attempts · 2 repair cycles.</p>
         </div>
         <form className="producer-command__form" onSubmit={(event) => void runProducer(event)}>
-          <select aria-label="Audited Content Package" onChange={(event) => setSelectedPackageId(event.target.value)} value={selectedPackageId}>
+          <select aria-label="Audited Content Package" disabled={executionUnavailable} onChange={(event) => setSelectedPackageId(event.target.value)} value={selectedPackageId}>
             <option value="">{auditedPackages.length ? "Select an independently audited package" : "No independently audited packages available"}</option>
             {auditedPackages.map((item) => <option key={item.id} value={item.id}>Package {item.id.slice(0, 8)} · {item.status.replaceAll("_", " ")}</option>)}
           </select>
-          <button className="button button--primary" disabled={busy || !selectedPackageId} type="submit">{busy ? "Recording…" : "Request production"}</button>
+          <button className="button button--primary" disabled={busy || executionUnavailable || !selectedPackageId} type="submit">{busy ? "Recording…" : "Request production"}</button>
         </form>
         {data.summary.provider_state === "not_configured" ? <p className="producer-not-configured" role="status">PRODUCTION PROVIDER NOT CONFIGURED — no asset generation, media rendering, external storage write, spend, callback, or fabricated artifact will be created.</p> : null}
         {notice ? <p className="producer-notice" role="status">{notice}</p> : null}

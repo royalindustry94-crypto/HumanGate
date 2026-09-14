@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+EXECUTABLE_STAGES = frozenset({"scripting", "idea"})
+
 
 async def draft_desk_executor(assignment_context: dict) -> tuple[bool, dict | None, str]:
     """Async adapter around the shared Draft Desk generation rules.
@@ -10,7 +12,7 @@ async def draft_desk_executor(assignment_context: dict) -> tuple[bool, dict | No
     equivalent implementation so it can run without importing the API
     package. Keep outputs aligned with apps/api/app/services/draft_desk.py.
     """
-    stage = str(assignment_context.get("stage") or "")
+    stage = str(assignment_context.get("stage") or "").strip().lower()
     topic = str(assignment_context.get("topic") or "").strip()
     target_length = assignment_context.get("target_length_seconds")
     try:
@@ -21,7 +23,7 @@ async def draft_desk_executor(assignment_context: dict) -> tuple[bool, dict | No
     if stage == "review":
         return False, None, "review stage is human-gated; workers must not execute it"
 
-    if stage in {"scripting", "idea"}:
+    if stage in EXECUTABLE_STAGES:
         if not topic:
             return False, None, "draft_desk requires topic in assignment context"
         cleaned = " ".join(topic.split())
@@ -53,13 +55,4 @@ async def draft_desk_executor(assignment_context: dict) -> tuple[bool, dict | No
             "",
         )
 
-    return (
-        True,
-        {
-            "provider": "draft_desk",
-            "stage": stage,
-            "summary": f"Draft Desk completed stage '{stage}' for topic '{topic or 'n/a'}'.",
-            "estimated_cost_usd": "0.01",
-        },
-        "",
-    )
+    return False, None, f"unsupported draft_desk stage '{stage or 'unknown'}'"

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+EXECUTABLE_STAGES = frozenset({"scripting", "idea"})
+
 
 @dataclass(frozen=True)
 class DraftDeskOutput:
@@ -49,7 +51,7 @@ def generate_script_draft(
 
 def execute_stage(context: dict) -> tuple[bool, dict | None, str]:
     """Synchronous stage executor used by the worker (wrapped async)."""
-    stage = str(context.get("stage") or "")
+    stage = str(context.get("stage") or "").strip().lower()
     topic = str(context.get("topic") or "").strip()
     target_length = context.get("target_length_seconds")
     try:
@@ -57,7 +59,7 @@ def execute_stage(context: dict) -> tuple[bool, dict | None, str]:
     except (TypeError, ValueError):
         length = None
 
-    if stage in {"scripting", "idea"}:
+    if stage in EXECUTABLE_STAGES:
         if not topic:
             return False, None, "draft_desk requires topic in assignment context"
         try:
@@ -85,14 +87,4 @@ def execute_stage(context: dict) -> tuple[bool, dict | None, str]:
     if stage == "review":
         return False, None, "review stage is human-gated; workers must not execute it"
 
-    # Other stages: produce an explicit structured artifact rather than {}.
-    return (
-        True,
-        {
-            "provider": "draft_desk",
-            "stage": stage,
-            "summary": f"Draft Desk completed stage '{stage}' for topic '{topic or 'n/a'}'.",
-            "estimated_cost_usd": "0.01",
-        },
-        "",
-    )
+    return False, None, f"unsupported draft_desk stage '{stage or 'unknown'}'"

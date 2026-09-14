@@ -82,3 +82,24 @@ async def test_claim_next_does_not_retry_http_error_status():
         await client.claim_next()
 
     assert http.post.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_register_advertises_only_executable_supported_stages():
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    http = MagicMock()
+    http.post = AsyncMock(return_value=response)
+    client = ReferenceWorkerClient(
+        name="w",
+        supported_stages=["scripting", "voiceover", "review", "idea", "scripting"],
+        http=http,
+        credential="cred-id.secret",
+        worker_id="22222222-2222-2222-2222-222222222222",
+    )
+
+    await client.register()
+
+    assert client.supported_stages == ["scripting", "idea"]
+    assert http.post.call_args.kwargs["json"]["supported_stages"] == ["scripting", "idea"]
+    assert http.post.call_args.kwargs["json"]["capabilities"]["features"] == ["scripting", "idea"]

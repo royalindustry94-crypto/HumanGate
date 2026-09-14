@@ -48,6 +48,8 @@ async def test_audited_package_creates_truthful_provider_not_configured_run(clie
     assert body["status"] == "blocked_provider_not_configured"
     assert body["provider_state"] == "not_configured"
     assert body["actual_cost_usd"] in (0, 0.0, "0", "0.0000")
+    assert body["provider_calls_used"] == 0
+    assert body["render_calls_used"] == 0
     summary = await client.get(f"/workspaces/{workspace_id}/production/summary", headers=headers)
     assert summary.status_code == 200
     assert summary.json()["final_artifacts"] == 0

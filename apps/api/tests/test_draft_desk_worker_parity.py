@@ -32,8 +32,6 @@ from app.services.draft_desk import execute_stage
         {"stage": "idea", "topic": "cold email outreach", "target_length_seconds": 45},
         {"stage": "scripting", "topic": "  extra   whitespace   topic  "},
         {"stage": "review", "topic": "anything"},
-        {"stage": "some_other_stage", "topic": "topic here"},
-        {"stage": "some_other_stage", "topic": ""},
     ],
 )
 @pytest.mark.asyncio
@@ -44,6 +42,27 @@ async def test_api_and_worker_draft_desk_generators_agree(context):
     assert api_success == worker_success
     assert api_error == worker_error
     assert api_result == worker_result
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        {"stage": "some_other_stage", "topic": "topic here"},
+        {"stage": "some_other_stage", "topic": ""},
+        {"stage": "", "topic": "topic here"},
+    ],
+)
+@pytest.mark.asyncio
+async def test_api_and_worker_draft_desk_reject_unsupported_stages(context):
+    api_success, api_result, api_error = execute_stage(dict(context))
+    worker_success, worker_result, worker_error = await draft_desk_executor(dict(context))
+
+    assert api_success is False
+    assert worker_success is False
+    assert api_result is None
+    assert worker_result is None
+    assert api_error == worker_error
+    assert "unsupported" in api_error.lower()
 
 
 @pytest.mark.asyncio
