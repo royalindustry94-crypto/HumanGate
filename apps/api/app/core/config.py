@@ -25,8 +25,9 @@ CANONICAL_RUNTIME_ROLE = "app_runtime"
 
 # Fixed secret used only by API tests/CI under ENVIRONMENT=test. Listed in
 # the known-weak set so a production/staging/development process cannot boot
-# with this publicly committed value.
-REPOSITORY_TEST_JWT_SECRET = "test-supabase-jwt-secret-0123456789abcdef"
+# with this publicly committed value. S105 is suppressed because this is a
+# deny-list entry, not a credential this service authenticates with.
+REPOSITORY_TEST_JWT_SECRET = "test-supabase-jwt-secret-0123456789abcdef"  # noqa: S105
 
 
 class OpenAPIRouteKwargs(TypedDict):

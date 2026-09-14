@@ -26,7 +26,8 @@ def compute_backoff_seconds(
         attempt = 1
     raw = base_seconds * (multiplier ** (attempt - 1))
     capped = min(raw, max_seconds)
-    return random.uniform(0, capped)
+    # Retry jitter only -- spreading reconnects, not generating a secret.
+    return random.uniform(0, capped)  # noqa: S311
 
 
 def next_run_after(

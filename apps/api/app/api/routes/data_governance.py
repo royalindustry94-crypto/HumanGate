@@ -46,6 +46,7 @@ async def export_workspace_data(
         actor=user.id,
         table_count=len(bundle.tables),
         excluded_table_count=len(bundle.excluded_tables),
+        truncated_table_count=len(bundle.truncated_tables),
     )
     return {
         "workspace_id": str(bundle.workspace_id),
@@ -56,6 +57,8 @@ async def export_workspace_data(
         "unattributable_tables": list(bundle.unattributable_tables),
         "unattributable_reason": bundle.unattributable_reason,
         "tables": bundle.tables,
+        "truncated_tables": list(bundle.truncated_tables),
+        "truncation_reason": bundle.truncation_reason,
     }
 
 

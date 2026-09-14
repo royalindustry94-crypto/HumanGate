@@ -149,11 +149,17 @@ async def create_checkout_session(
     settings = get_settings()
     _configure_stripe(settings)
     # _configure_stripe() -> _require_billing_config() already raised BillingError
-    # if any of these were unset; the asserts just carry that guarantee through
-    # to the type checker.
-    assert settings.stripe_price_id_pro is not None
-    assert settings.stripe_checkout_success_url is not None
-    assert settings.stripe_checkout_cancel_url is not None
+    # if any of these were unset; these bindings carry that guarantee through to
+    # the type checker. Written as a real check rather than `assert` because
+    # `python -O` strips asserts, which would let None reach the Stripe call.
+    price_id = settings.stripe_price_id_pro
+    success_url = settings.stripe_checkout_success_url
+    cancel_url = settings.stripe_checkout_cancel_url
+    if price_id is None or success_url is None or cancel_url is None:
+        raise BillingError(
+            "billing_misconfigured",
+            "billing enabled but Stripe price or redirect URLs are unset",
+        )
     billing = await ensure_workspace_billing(session, workspace_id=workspace_id)
 
     if is_entitled(billing, billing_enabled=True):
@@ -193,9 +199,9 @@ async def create_checkout_session(
         checkout = stripe.checkout.Session.create(
             mode="subscription",
             customer=billing.stripe_customer_id,
-            line_items=[{"price": settings.stripe_price_id_pro, "quantity": 1}],
-            success_url=settings.stripe_checkout_success_url,
-            cancel_url=settings.stripe_checkout_cancel_url,
+            line_items=[{"price": price_id, "quantity": 1}],
+            success_url=success_url,
+            cancel_url=cancel_url,
             client_reference_id=str(workspace_id),
             metadata={"workspace_id": str(workspace_id)},
             subscription_data={"metadata": {"workspace_id": str(workspace_id)}},
@@ -549,9 +555,16 @@ async def process_stripe_event(session: AsyncSession, *, event: dict) -> dict:
 def construct_stripe_event(*, payload: bytes, sig_header: str) -> dict:
     settings = get_settings()
     _configure_stripe(settings)
-    assert settings.stripe_webhook_secret is not None
+    # Real check, not `assert`: stripped under `python -O`, a None secret
+    # would reach signature verification on the webhook ingress path.
+    webhook_secret = settings.stripe_webhook_secret
+    if webhook_secret is None:
+        raise BillingError(
+            "billing_misconfigured",
+            "billing enabled but STRIPE_WEBHOOK_SECRET is unset",
+        )
     try:
-        event = stripe.Webhook.construct_event(payload, sig_header, settings.stripe_webhook_secret)
+        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
     except stripe.SignatureVerificationError as exc:
         raise BillingError("invalid_signature", "invalid Stripe webhook signature") from exc
     except Exception as exc:  # noqa: BLE001

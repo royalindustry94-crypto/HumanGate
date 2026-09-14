@@ -26,7 +26,12 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+# "S" (flake8-bandit) matches apps/api — see the note there (audit M-1).
+select = ["E", "F", "I", "UP", "B", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+# S101 is pytest's entire assertion mechanism. Production code is not exempt.
+"tests/*.py" = ["S101"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

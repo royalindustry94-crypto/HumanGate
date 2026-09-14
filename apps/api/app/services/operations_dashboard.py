@@ -68,11 +68,11 @@ LEAD_STATUSES = frozenset(
 )
 
 
-def _enum_value(value: object) -> str:
+def enum_value(value: object) -> str:
     return str(value.value if hasattr(value, "value") else value)
 
 
-def _deployment_info() -> DeploymentInfo:
+def deployment_info() -> DeploymentInfo:
     settings = get_settings()
     deployed_at = None
     if settings.deployment_at:
@@ -92,7 +92,7 @@ def _deployment_info() -> DeploymentInfo:
     )
 
 
-async def _count(session: AsyncSession, stmt) -> int:
+async def count_rows(session: AsyncSession, stmt) -> int:
     value = (await session.execute(stmt)).scalar_one()
     return int(value or 0)
 
@@ -208,7 +208,7 @@ async def _pending_counts_by_stage(
         .group_by(StageAssignment.stage)
     )
     return {
-        _enum_value(stage): int(count or 0) for stage, count in (await session.execute(stmt)).all()
+        enum_value(stage): int(count or 0) for stage, count in (await session.execute(stmt)).all()
     }
 
 
@@ -230,7 +230,7 @@ def _resource_percent(capabilities: dict | None, *keys: str) -> float | None:
     return None
 
 
-async def _spend_totals(session: AsyncSession, workspace_id: uuid.UUID) -> tuple[Decimal, Decimal]:
+async def spend_totals(session: AsyncSession, workspace_id: uuid.UUID) -> tuple[Decimal, Decimal]:
     now = datetime.now(UTC)
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     month_start = day_start.replace(day=1)
@@ -266,37 +266,37 @@ async def executive(session: AsyncSession, workspace_id: uuid.UUID) -> Executive
         )
         .group_by(WorkerRegistration.status)
     )
-    worker_counts = {_enum_value(status): int(count) for status, count in workers.all()}
-    jobs_running = await _count(
+    worker_counts = {enum_value(status): int(count) for status, count in workers.all()}
+    jobs_running = await count_rows(
         session,
         select(func.count(StageAssignment.id)).where(
             StageAssignment.workspace_id == workspace_id,
             StageAssignment.status.in_(active_assignments),
         ),
     )
-    jobs_queued = await _count(
+    jobs_queued = await count_rows(
         session,
         select(func.count(JobSchedule.id)).where(
             JobSchedule.workspace_id == workspace_id,
             JobSchedule.status == JobScheduleStatus.PENDING,
         ),
     )
-    jobs_failed = await _count(
+    jobs_failed = await count_rows(
         session,
         select(func.count(StageAssignment.id)).where(
             StageAssignment.workspace_id == workspace_id,
             StageAssignment.status == StageAssignmentStatus.FAILED,
         ),
     )
-    reviews = await _count(
+    reviews = await count_rows(
         session,
         select(func.count(ReviewGate.id)).where(
             ReviewGate.workspace_id == workspace_id,
             ReviewGate.status == ReviewGateStatus.AWAITING,
         ),
     )
-    spend_today, spend_month = await _spend_totals(session, workspace_id)
-    workspace_exists = await _count(
+    spend_today, spend_month = await spend_totals(session, workspace_id)
+    workspace_exists = await count_rows(
         session,
         select(func.count(Workspace.id)).where(Workspace.id == workspace_id),
     )
@@ -310,7 +310,7 @@ async def executive(session: AsyncSession, workspace_id: uuid.UUID) -> Executive
         spend_today_usd=spend_today,
         spend_month_usd=spend_month,
         active_workspaces=workspace_exists,
-        deployment=_deployment_info(),
+        deployment=deployment_info(),
         generated_at=datetime.now(UTC),
     )
 
@@ -360,12 +360,10 @@ async def workers(session: AsyncSession, workspace_id: uuid.UUID) -> WorkerMonit
         display_status = (
             WorkerStatus.OFFLINE.value
             if liveness == "dead"
-            else ("suspect" if liveness == "suspect" else _enum_value(worker.status))
+            else ("suspect" if liveness == "suspect" else enum_value(worker.status))
         )
         current = (
-            f"{_enum_value(active.stage)} · {active.pipeline_run_id}"
-            if active is not None
-            else None
+            f"{enum_value(active.stage)} · {active.pipeline_run_id}" if active is not None else None
         )
         rows.append(
             WorkerMonitorRow(
@@ -400,28 +398,28 @@ async def pipelines(session: AsyncSession, workspace_id: uuid.UUID) -> PipelineM
         PipelineRunStatus.PAUSED,
         PipelineRunStatus.COMPENSATING,
     ]
-    active = await _count(
+    active = await count_rows(
         session,
         select(func.count(PipelineRun.id)).where(
             PipelineRun.workspace_id == workspace_id,
             PipelineRun.status.in_(active_statuses),
         ),
     )
-    failed = await _count(
+    failed = await count_rows(
         session,
         select(func.count(PipelineRun.id)).where(
             PipelineRun.workspace_id == workspace_id,
             PipelineRun.status == PipelineRunStatus.FAILED,
         ),
     )
-    queued = await _count(
+    queued = await count_rows(
         session,
         select(func.count(JobSchedule.id)).where(
             JobSchedule.workspace_id == workspace_id,
             JobSchedule.status == JobScheduleStatus.PENDING,
         ),
     )
-    retrying = await _count(
+    retrying = await count_rows(
         session,
         select(func.count(func.distinct(JobSchedule.ref_id))).where(
             JobSchedule.workspace_id == workspace_id,
@@ -429,21 +427,21 @@ async def pipelines(session: AsyncSession, workspace_id: uuid.UUID) -> PipelineM
             JobSchedule.status.in_([JobScheduleStatus.PENDING, JobScheduleStatus.LEASED]),
         ),
     )
-    dlq = await _count(
+    dlq = await count_rows(
         session,
         select(func.count(DeadLetterJob.id)).where(
             DeadLetterJob.workspace_id == workspace_id,
             DeadLetterJob.status == DeadLetterStatus.PENDING,
         ),
     )
-    reviews = await _count(
+    reviews = await count_rows(
         session,
         select(func.count(ReviewGate.id)).where(
             ReviewGate.workspace_id == workspace_id,
             ReviewGate.status == ReviewGateStatus.AWAITING,
         ),
     )
-    publish_queue = await _count(
+    publish_queue = await count_rows(
         session,
         select(func.count(PublishJob.id)).where(
             PublishJob.workspace_id == workspace_id,
@@ -451,14 +449,14 @@ async def pipelines(session: AsyncSession, workspace_id: uuid.UUID) -> PipelineM
             PublishJob.status.in_([PublishJobStatus.PENDING, PublishJobStatus.PUBLISHING]),
         ),
     )
-    jobs_completed = await _count(
+    jobs_completed = await count_rows(
         session,
         select(func.count(StageAssignment.id)).where(
             StageAssignment.workspace_id == workspace_id,
             StageAssignment.status == StageAssignmentStatus.COMPLETED,
         ),
     )
-    jobs_failed = await _count(
+    jobs_failed = await count_rows(
         session,
         select(func.count(StageAssignment.id)).where(
             StageAssignment.workspace_id == workspace_id,
@@ -477,8 +475,8 @@ async def pipelines(session: AsyncSession, workspace_id: uuid.UUID) -> PipelineM
     rows = [
         PipelineRow(
             id=run.id,
-            status=_enum_value(run.status),
-            current_stage=_enum_value(run.current_stage),
+            status=enum_value(run.status),
+            current_stage=enum_value(run.current_stage),
             pause_reason=run.pause_reason,
             created_at=run.created_at,
             updated_at=run.updated_at,
@@ -610,7 +608,7 @@ async def update_lead(
     return _lead_out(lead)
 
 
-def _revenue_from_payload(payload: dict) -> Decimal:
+def revenue_from_payload(payload: dict) -> Decimal:
     """Extract paid amount from a Stripe invoice webhook payload (cents → USD)."""
     obj = payload.get("data", {}).get("object", {}) if isinstance(payload, dict) else {}
     if not isinstance(obj, dict):
@@ -621,7 +619,14 @@ def _revenue_from_payload(payload: dict) -> Decimal:
             continue
         try:
             cents = Decimal(str(raw))
-        except Exception:
+        except (ArithmeticError, TypeError, ValueError):
+            # Stripe sent a non-numeric amount for this key; try the next one.
+            # Narrowed from a bare `except Exception` so a genuine programming
+            # error here surfaces instead of silently reporting zero revenue.
+            logger.warning(
+                "operations_unparsable_invoice_amount",
+                extra={"amount_key": key},
+            )
             continue
         if cents >= 0:
             return (cents / Decimal("100")).quantize(Decimal("0.01"))
@@ -740,7 +745,7 @@ async def customers(
             .all()
         )
         for event in events:
-            revenue += _revenue_from_payload(event.payload or {})
+            revenue += revenue_from_payload(event.payload or {})
 
     return CustomersOut(
         beta_users=beta_users,
@@ -838,7 +843,7 @@ async def spend(session: AsyncSession, workspace_id: uuid.UUID) -> SpendOut:
     )
 
 
-async def _build_alerts(session: AsyncSession, workspace_id: uuid.UUID) -> list[OperationsAlert]:
+async def build_alerts(session: AsyncSession, workspace_id: uuid.UUID) -> list[OperationsAlert]:
     now = datetime.now(UTC)
     since = now - timedelta(days=1)
     items: list[OperationsAlert] = []
@@ -863,7 +868,7 @@ async def _build_alerts(session: AsyncSession, workspace_id: uuid.UUID) -> list[
         )
         == "dead"
     )
-    failed_jobs = await _count(
+    failed_jobs = await count_rows(
         session,
         select(func.count(StageAssignment.id)).where(
             StageAssignment.workspace_id == workspace_id,
@@ -871,7 +876,7 @@ async def _build_alerts(session: AsyncSession, workspace_id: uuid.UUID) -> list[
             StageAssignment.updated_at >= since,
         ),
     )
-    pipeline_failed = await _count(
+    pipeline_failed = await count_rows(
         session,
         select(func.count(PipelineRun.id)).where(
             PipelineRun.workspace_id == workspace_id,
@@ -879,14 +884,14 @@ async def _build_alerts(session: AsyncSession, workspace_id: uuid.UUID) -> list[
             PipelineRun.updated_at >= since,
         ),
     )
-    reviews = await _count(
+    reviews = await count_rows(
         session,
         select(func.count(ReviewGate.id)).where(
             ReviewGate.workspace_id == workspace_id,
             ReviewGate.status == ReviewGateStatus.AWAITING,
         ),
     )
-    queue = await _count(
+    queue = await count_rows(
         session,
         select(func.count(JobSchedule.id)).where(
             JobSchedule.workspace_id == workspace_id,
@@ -900,7 +905,7 @@ async def _build_alerts(session: AsyncSession, workspace_id: uuid.UUID) -> list[
             )
         )
     ).scalar_one_or_none() or settings.queue_soft_limit_default
-    failed_webhooks = await _count(
+    failed_webhooks = await count_rows(
         session,
         select(func.count(WebhookEvent.id)).where(
             WebhookEvent.workspace_id == workspace_id,
@@ -908,7 +913,7 @@ async def _build_alerts(session: AsyncSession, workspace_id: uuid.UUID) -> list[
             WebhookEvent.updated_at >= since,
         ),
     )
-    failed_webhooks += await _count(
+    failed_webhooks += await count_rows(
         session,
         select(func.count(BillingWebhookEvent.id)).where(
             BillingWebhookEvent.workspace_id == workspace_id,
@@ -916,21 +921,21 @@ async def _build_alerts(session: AsyncSession, workspace_id: uuid.UUID) -> list[
             BillingWebhookEvent.processed_at >= since,
         ),
     )
-    new_leads = await _count(
+    new_leads = await count_rows(
         session,
         select(func.count(Lead.id)).where(
             Lead.workspace_id == workspace_id,
             Lead.created_at >= since,
         ),
     )
-    customer_signups = await _count(
+    customer_signups = await count_rows(
         session,
         select(func.count(WorkspaceMembership.id)).where(
             WorkspaceMembership.workspace_id == workspace_id,
             WorkspaceMembership.created_at >= since,
         ),
     )
-    spend_today, spend_month = await _spend_totals(session, workspace_id)
+    spend_today, spend_month = await spend_totals(session, workspace_id)
     cap = (
         await session.execute(
             select(SpendCap).where(
@@ -993,7 +998,7 @@ async def _build_alerts(session: AsyncSession, workspace_id: uuid.UUID) -> list[
         f"{failed_jobs} assignment(s) failed in the last 24 hours",
         "critical",
     )
-    ci = _deployment_info()
+    ci = deployment_info()
     ci_failed = int(ci.ci_status not in {"success", "passing", "green", "unavailable"})
     add(
         "failed_ci",
@@ -1057,7 +1062,7 @@ async def _build_alerts(session: AsyncSession, workspace_id: uuid.UUID) -> list[
 
 async def alerts(session: AsyncSession, workspace_id: uuid.UUID) -> AlertsOut:
     now = datetime.now(UTC)
-    items = await _build_alerts(session, workspace_id)
+    items = await build_alerts(session, workspace_id)
     # V1 clients expect the original alert set without the V2 aliases/info noise.
     v1_keys = {
         "worker_offline",
@@ -1076,7 +1081,7 @@ async def alerts(session: AsyncSession, workspace_id: uuid.UUID) -> AlertsOut:
 
 async def notifications(session: AsyncSession, workspace_id: uuid.UUID) -> NotificationsOut:
     now = datetime.now(UTC)
-    items = await _build_alerts(session, workspace_id)
+    items = await build_alerts(session, workspace_id)
     # Prefer the V2 review key in the notification center.
     filtered = [item for item in items if item.key != "review_waiting"]
     return NotificationsOut(notifications=filtered, generated_at=now)

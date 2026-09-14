@@ -67,6 +67,11 @@ from app.schemas.operations_mission import (
     WorkerTimelineRow,
 )
 from app.services import github_status, operations_dashboard
+
+# Shared with operations_dashboard rather than redefined here: both modules
+# previously carried their own copies, which could drift silently and report
+# inconsistent dashboard numbers (audit M-6).
+from app.services.operations_dashboard import count_rows, enum_value
 from app.services.workers import compute_liveness
 
 logger = logging.getLogger(__name__)
@@ -81,14 +86,6 @@ _EVENT_LABELS = {
     event_types.PIPELINE_SUCCEEDED: ("Pipeline succeeded", "info"),
     "operations.action.executed": ("Mission Control action executed", "warning"),
 }
-
-
-def _enum_value(value: object) -> str:
-    return str(value.value if hasattr(value, "value") else value)
-
-
-async def _count(session: AsyncSession, stmt) -> int:
-    return int((await session.execute(stmt)).scalar_one() or 0)
 
 
 def _day_bounds(now: datetime) -> tuple[datetime, datetime, datetime]:
@@ -183,7 +180,7 @@ async def activity_feed(
                 id=f"signup:{membership.id}",
                 kind="customer.signup",
                 title="Customer signup",
-                detail=f"member {membership.user_id} · role {_enum_value(membership.role)}",
+                detail=f"member {membership.user_id} · role {enum_value(membership.role)}",
                 severity="info",
                 occurred_at=membership.created_at,
                 source="workspace_memberships",
@@ -207,7 +204,7 @@ async def activity_feed(
         .scalars()
         .all()
     ):
-        amount = operations_dashboard._revenue_from_payload(payment.payload or {})
+        amount = operations_dashboard.revenue_from_payload(payment.payload or {})
         items.append(
             ActivityItem(
                 id=f"payment:{payment.id}",
@@ -220,7 +217,7 @@ async def activity_feed(
             )
         )
 
-    alerts = await operations_dashboard._build_alerts(session, workspace_id)
+    alerts = await operations_dashboard.build_alerts(session, workspace_id)
     for alert in alerts:
         items.append(
             ActivityItem(
@@ -342,7 +339,7 @@ async def system_health(
             )
         )
 
-    queue = await _count(
+    queue = await count_rows(
         session,
         select(func.count(JobSchedule.id)).where(
             JobSchedule.workspace_id == workspace_id,
@@ -373,7 +370,7 @@ async def system_health(
         HealthIndicator(key="queue", label="Queue Health", status=q_status, detail=q_detail)
     )
 
-    deploy = operations_dashboard._deployment_info()
+    deploy = operations_dashboard.deployment_info()
     github = await github_status.github_status()
     if deploy.ci_status in {"success", "passing", "green"}:
         gh_status, gh_detail = "green", f"Deploy CI {deploy.ci_status}"
@@ -394,7 +391,7 @@ async def system_health(
         )
     )
 
-    failed_webhooks = await _count(
+    failed_webhooks = await count_rows(
         session,
         select(func.count(WebhookEvent.id)).where(
             WebhookEvent.workspace_id == workspace_id,
@@ -402,7 +399,7 @@ async def system_health(
             WebhookEvent.updated_at >= now - timedelta(days=1),
         ),
     )
-    failed_webhooks += await _count(
+    failed_webhooks += await count_rows(
         session,
         select(func.count(BillingWebhookEvent.id)).where(
             BillingWebhookEvent.workspace_id == workspace_id,
@@ -524,7 +521,7 @@ async def cost_control(session: AsyncSession, workspace_id: uuid.UUID) -> CostCo
                 pipeline_run_id=row[0],
                 content_item_id=row[1],
                 topic=row[2],
-                stage=_enum_value(row[3]) if row[3] is not None else None,
+                stage=enum_value(row[3]) if row[3] is not None else None,
                 provider=row[4],
                 cost_usd=Decimal(str(row[5] or 0)),
                 completed_at=row[6],
@@ -562,7 +559,7 @@ async def cost_control(session: AsyncSession, workspace_id: uuid.UUID) -> CostCo
                 pipeline_run_id=None,
                 content_item_id=row[0],
                 topic=row[1],
-                stage=_enum_value(row[2]) if row[2] is not None else None,
+                stage=enum_value(row[2]) if row[2] is not None else None,
                 provider=row[3],
                 cost_usd=Decimal(str(row[4] or 0)),
                 completed_at=row[5],
@@ -644,8 +641,8 @@ async def worker_timeline(session: AsyncSession, workspace_id: uuid.UUID) -> Wor
                 WorkerJobRow(
                     assignment_id=assignment.id,
                     pipeline_run_id=assignment.pipeline_run_id,
-                    stage=_enum_value(assignment.stage),
-                    status=_enum_value(assignment.status),
+                    stage=enum_value(assignment.stage),
+                    status=enum_value(assignment.status),
                     attempt_number=assignment.attempt_number,
                     dispatched_at=assignment.dispatched_at,
                     completed_at=assignment.completed_at,
@@ -673,7 +670,7 @@ async def worker_timeline(session: AsyncSession, workspace_id: uuid.UUID) -> Wor
         display = (
             WorkerStatus.OFFLINE.value
             if liveness == "dead"
-            else ("suspect" if liveness == "suspect" else _enum_value(worker.status))
+            else ("suspect" if liveness == "suspect" else enum_value(worker.status))
         )
         rows.append(
             WorkerTimelineRow(
@@ -681,7 +678,7 @@ async def worker_timeline(session: AsyncSession, workspace_id: uuid.UUID) -> Wor
                 name=worker.name,
                 status=display,
                 current_task=(
-                    f"{_enum_value(active.stage)} · {active.pipeline_run_id}" if active else None
+                    f"{enum_value(active.stage)} · {active.pipeline_run_id}" if active else None
                 ),
                 last_heartbeat_at=worker.last_heartbeat_at,
                 average_execution_seconds=(
@@ -701,7 +698,7 @@ async def content_command_center(
     now = datetime.now(UTC)
 
     async def stage_count(*stages: ContentStage) -> int:
-        return await _count(
+        return await count_rows(
             session,
             select(func.count(ContentItem.id)).where(
                 ContentItem.workspace_id == workspace_id,
@@ -716,14 +713,14 @@ async def content_command_center(
     voiceovers = await stage_count(ContentStage.VOICEOVER)
     videos_rendering = await stage_count(ContentStage.VISUALS, ContentStage.RENDERING)
     ready_for_review = await stage_count(ContentStage.REVIEW, ContentStage.SEO)
-    waiting = await _count(
+    waiting = await count_rows(
         session,
         select(func.count(ReviewGate.id)).where(
             ReviewGate.workspace_id == workspace_id,
             ReviewGate.status == ReviewGateStatus.AWAITING,
         ),
     )
-    publishing = await _count(
+    publishing = await count_rows(
         session,
         select(func.count(PublishJob.id)).where(
             PublishJob.workspace_id == workspace_id,
@@ -732,7 +729,7 @@ async def content_command_center(
         ),
     )
     published = await stage_count(ContentStage.PUBLISHED, ContentStage.SCHEDULED)
-    published += await _count(
+    published += await count_rows(
         session,
         select(func.count(PublishJob.id)).where(
             PublishJob.workspace_id == workspace_id,
@@ -740,7 +737,7 @@ async def content_command_center(
             PublishJob.status == PublishJobStatus.PUBLISHED,
         ),
     )
-    failed = await _count(
+    failed = await count_rows(
         session,
         select(func.count(ContentItem.id)).where(
             ContentItem.workspace_id == workspace_id,
@@ -748,7 +745,7 @@ async def content_command_center(
             ContentItem.status == ContentStatus.FAILED,
         ),
     )
-    failed += await _count(
+    failed += await count_rows(
         session,
         select(func.count(PipelineRun.id)).where(
             PipelineRun.workspace_id == workspace_id,
@@ -934,7 +931,7 @@ async def retry_failed_jobs(
             if assignment is None:
                 continue
             run = await session.get(PipelineRun, assignment.pipeline_run_id)
-            stage_key = _enum_value(assignment.stage)
+            stage_key = enum_value(assignment.stage)
         if run is None or run.workspace_id != workspace_id:
             continue
         if run.status in {PipelineRunStatus.SUCCEEDED, PipelineRunStatus.CANCELLED}:
@@ -976,7 +973,7 @@ async def retry_failed_jobs(
         .all()
     )
     for assignment in failed_assignments:
-        existing = await _count(
+        existing = await count_rows(
             session,
             select(func.count(JobSchedule.id)).where(
                 JobSchedule.workspace_id == workspace_id,
@@ -1002,7 +999,7 @@ async def retry_failed_jobs(
                 id=uuid.uuid4(),
                 workspace_id=workspace_id,
                 job_type=JobType.RETRY,
-                ref_table=_enum_value(assignment.stage),
+                ref_table=enum_value(assignment.stage),
                 ref_id=assignment.pipeline_run_id,
                 run_after=now,
                 attempt=assignment.attempt_number,
@@ -1094,7 +1091,7 @@ async def executive_insights(
     achievements: list[str] = []
     failures: list[str] = []
 
-    completed = await _count(
+    completed = await count_rows(
         session,
         select(func.count(StageAssignment.id)).where(
             StageAssignment.workspace_id == workspace_id,
@@ -1108,7 +1105,7 @@ async def executive_insights(
     if completed:
         achievements.append(f"{completed} stage job(s) completed today")
 
-    published = await _count(
+    published = await count_rows(
         session,
         select(func.count(PublishJob.id)).where(
             PublishJob.workspace_id == workspace_id,
@@ -1119,7 +1116,7 @@ async def executive_insights(
     if published:
         achievements.append(f"{published} publish job(s) completed today")
 
-    new_leads = await _count(
+    new_leads = await count_rows(
         session,
         select(func.count(Lead.id)).where(
             Lead.workspace_id == workspace_id,
@@ -1129,7 +1126,7 @@ async def executive_insights(
     if new_leads:
         achievements.append(f"{new_leads} new lead(s) today")
 
-    failed = await _count(
+    failed = await count_rows(
         session,
         select(func.count(StageAssignment.id)).where(
             StageAssignment.workspace_id == workspace_id,
@@ -1140,7 +1137,7 @@ async def executive_insights(
     if failed:
         failures.append(f"{failed} stage job(s) failed today")
 
-    pipeline_failed = await _count(
+    pipeline_failed = await count_rows(
         session,
         select(func.count(PipelineRun.id)).where(
             PipelineRun.workspace_id == workspace_id,
@@ -1151,14 +1148,14 @@ async def executive_insights(
     if pipeline_failed:
         failures.append(f"{pipeline_failed} pipeline(s) failed today")
 
-    reviews = await _count(
+    reviews = await count_rows(
         session,
         select(func.count(ReviewGate.id)).where(
             ReviewGate.workspace_id == workspace_id,
             ReviewGate.status == ReviewGateStatus.AWAITING,
         ),
     )
-    dlq = await _count(
+    dlq = await count_rows(
         session,
         select(func.count(DeadLetterJob.id)).where(
             DeadLetterJob.workspace_id == workspace_id,
@@ -1176,7 +1173,7 @@ async def executive_insights(
         highest_risk = "Elevated failure rate today"
         next_action = "Inspect AI Pipeline failures and retry recoverable jobs"
     else:
-        spend_today, _ = await operations_dashboard._spend_totals(session, workspace_id)
+        spend_today, _ = await operations_dashboard.spend_totals(session, workspace_id)
         cap = (
             await session.execute(
                 select(SpendCap).where(
