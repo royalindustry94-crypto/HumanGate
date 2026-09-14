@@ -11,7 +11,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.compliance import (
@@ -149,44 +149,48 @@ async def create_compliance_run(
 
 
 async def summary(session: AsyncSession, *, workspace_id: uuid.UUID) -> dict:
-    rows = (
-        (
-            await session.execute(
-                select(ComplianceAudit).where(ComplianceAudit.workspace_id == workspace_id)
+    """Workspace compliance rollup.
+
+    Aggregated in SQL. This previously materialised three whole tables into
+    Python purely to count and sum them, which is unbounded work on a summary
+    endpoint (same class as audit H-3).
+    """
+    audits = (
+        await session.execute(
+            select(
+                func.count(ComplianceAudit.id),
+                func.count(ComplianceAudit.id).filter(ComplianceAudit.status == "pass"),
+                func.coalesce(func.sum(ComplianceAudit.cost_usd), 0),
+            ).where(ComplianceAudit.workspace_id == workspace_id)
+        )
+    ).one()
+    total_audits = int(audits[0] or 0)
+    passed = int(audits[1] or 0)
+    package_count = (
+        await session.execute(
+            select(func.count(HumanReviewPackage.id)).where(
+                HumanReviewPackage.workspace_id == workspace_id
             )
         )
-        .scalars()
-        .all()
-    )
-    packages = (
-        (
-            await session.execute(
-                select(HumanReviewPackage).where(HumanReviewPackage.workspace_id == workspace_id)
-            )
+    ).scalar_one()
+    publication_eligible = (
+        await session.execute(
+            select(func.count(ArtifactPublicationEligibility.id))
+            .where(ArtifactPublicationEligibility.workspace_id == workspace_id)
+            .where(ArtifactPublicationEligibility.publication_eligible.is_(True))
         )
-        .scalars()
-        .all()
-    )
-    eligibility = (
-        (
-            await session.execute(
-                select(ArtifactPublicationEligibility).where(
-                    ArtifactPublicationEligibility.workspace_id == workspace_id
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
+    ).scalar_one()
     return {
         "provider_state": "not_configured",
         "policy_state": "freshness_unverified",
-        "compliance_audits": len(rows),
-        "passed": sum(row.status == "pass" for row in rows),
-        "blocked": sum(row.status != "pass" for row in rows),
-        "human_review_packages": len(packages),
-        "publication_eligible": sum(row.publication_eligible for row in eligibility),
-        "provider_cost_usd": sum((Decimal(str(row.cost_usd)) for row in rows), Decimal("0")),
+        "compliance_audits": total_audits,
+        "passed": passed,
+        # Derived rather than a `status != 'pass'` predicate: SQL would drop
+        # NULL statuses, where the previous Python comparison counted them.
+        "blocked": total_audits - passed,
+        "human_review_packages": int(package_count or 0),
+        "publication_eligible": int(publication_eligible or 0),
+        "provider_cost_usd": Decimal(audits[2] or 0),
         "real_provider_mode": False,
         "test_fixture_mode": False,
     }

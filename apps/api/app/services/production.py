@@ -12,7 +12,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.content_department import ContentPackage
@@ -163,45 +163,65 @@ async def get_job(
 
 
 async def summary(session: AsyncSession, *, workspace_id: uuid.UUID) -> dict:
-    jobs = await list_jobs(session, workspace_id=workspace_id)
-    artifacts = (
-        (
-            await session.execute(
-                select(FinalArtifact).where(FinalArtifact.workspace_id == workspace_id)
-            )
+    """Workspace production rollup.
+
+    Aggregated in SQL. This previously materialised four whole tables into
+    Python purely to count and sum them (same class as audit H-3).
+    """
+    job_totals = (
+        await session.execute(
+            select(
+                func.count(ProductionJob.id),
+                func.count(ProductionJob.id).filter(
+                    ProductionJob.status.in_(["queued", "running", "repairing"])
+                ),
+                func.coalesce(func.sum(ProductionJob.actual_cost_usd), 0),
+            ).where(ProductionJob.workspace_id == workspace_id)
         )
-        .scalars()
-        .all()
-    )
-    qa_rows = (
-        (
-            await session.execute(
-                select(MediaQaResult).where(MediaQaResult.workspace_id == workspace_id)
-            )
+    ).one()
+    artifact_count = (
+        await session.execute(
+            select(func.count(FinalArtifact.id)).where(FinalArtifact.workspace_id == workspace_id)
         )
-        .scalars()
-        .all()
-    )
-    readiness_rows = (
-        (
-            await session.execute(
-                select(ProductionReadiness).where(ProductionReadiness.workspace_id == workspace_id)
-            )
+    ).scalar_one()
+    qa_totals = (
+        await session.execute(
+            select(
+                func.count(MediaQaResult.id).filter(MediaQaResult.status == "pass"),
+                func.count(MediaQaResult.id).filter(MediaQaResult.status == "blocked"),
+                func.count(MediaQaResult.id).filter(MediaQaResult.status == "repair_required"),
+            ).where(MediaQaResult.workspace_id == workspace_id)
         )
-        .scalars()
-        .all()
-    )
+    ).one()
+    compliance_ready = (
+        await session.execute(
+            select(func.count(ProductionReadiness.id))
+            .where(ProductionReadiness.workspace_id == workspace_id)
+            .where(ProductionReadiness.status == "compliance_ready")
+        )
+    ).scalar_one()
+    # One row, not the whole table: the field only ever reports the most
+    # recent job carrying an error.
+    last_error = (
+        await session.execute(
+            select(ProductionJob.last_error)
+            .where(ProductionJob.workspace_id == workspace_id)
+            .where(ProductionJob.last_error.is_not(None))
+            .order_by(ProductionJob.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
     return {
         "provider_state": "not_configured",
-        "production_jobs": len(jobs),
-        "active_jobs": sum(1 for row in jobs if row.status in {"queued", "running", "repairing"}),
-        "final_artifacts": len(artifacts),
-        "media_qa_passed": sum(1 for row in qa_rows if row.status == "pass"),
-        "media_qa_blocked": sum(1 for row in qa_rows if row.status == "blocked"),
-        "repair_required": sum(1 for row in qa_rows if row.status == "repair_required"),
-        "compliance_ready": sum(1 for row in readiness_rows if row.status == "compliance_ready"),
-        "provider_cost_usd": sum((Decimal(str(row.actual_cost_usd)) for row in jobs), Decimal("0")),
-        "last_error": next((row.last_error for row in jobs if row.last_error), None),
+        "production_jobs": int(job_totals[0] or 0),
+        "active_jobs": int(job_totals[1] or 0),
+        "final_artifacts": int(artifact_count or 0),
+        "media_qa_passed": int(qa_totals[0] or 0),
+        "media_qa_blocked": int(qa_totals[1] or 0),
+        "repair_required": int(qa_totals[2] or 0),
+        "compliance_ready": int(compliance_ready or 0),
+        "provider_cost_usd": Decimal(job_totals[2] or 0),
+        "last_error": last_error,
         "real_provider_mode": False,
         "test_fixture_mode": False,
     }
