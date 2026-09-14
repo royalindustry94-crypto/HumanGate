@@ -85,6 +85,7 @@ async def release_owned_automation_loops(
         .where(AutomationLease.owner_id == owner_id)
         .values(
             owner_id=None,
+            owner_started_at=None,
             lease_expires_at=None,
             last_heartbeat_at=now,
         )
@@ -363,7 +364,7 @@ async def automation_health_snapshot() -> dict:
     ):
         status = "degraded"
     elif tasks_running:
-        status = "ok"
+        status = "degraded"
     else:
         status = "idle"
     return {

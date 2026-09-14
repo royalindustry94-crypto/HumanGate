@@ -135,3 +135,24 @@ async def test_competing_owners_are_deterministic_and_stale_owner_recovers():
     snapshot = await automation_health_snapshot()
     assert snapshot["scheduler"]["status"] == "idle"
     assert snapshot["scheduler"]["owner_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_partial_automation_ownership_is_degraded():
+    await _reset_automation_rows()
+    now = datetime.now(UTC)
+
+    async with AsyncSessionLocal() as session:
+        assert await try_claim_automation_loop(
+            session,
+            loop_name="scheduler",
+            owner_id="owner-a",
+            lease_seconds=5,
+            now=now,
+        )
+        await session.commit()
+
+    snapshot = await automation_health_snapshot()
+    assert snapshot["status"] == "degraded"
+    assert snapshot["tasks_running"] == ["scheduler"]
+    assert snapshot["maintenance"]["status"] == "idle"
