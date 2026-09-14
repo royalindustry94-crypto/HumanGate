@@ -33,6 +33,21 @@ non-local environment, including `staging`.
 
 The worker service does **not** load `.env` and does not receive
 `DATABASE_URL` or `POSTGRES_PASSWORD`. It talks to the API over HTTP.
+The separate `automation` service runs the scheduler, outbox relay, and
+maintenance loops directly from the API package; the FastAPI/Vercel API no
+longer owns those persistent tasks.
+
+Staging/production-equivalent automation runtime:
+
+- `docker-compose.staging.yml` runs `python -m app.automation` as its own
+  continuously running `automation` service.
+- `restart: unless-stopped` fail-closes through the container runtime if the
+  automation process exits after bounded supervision retries.
+- The automation healthcheck is owner-aware: it calls
+  `automation_health_snapshot()` inside the automation container and only
+  reports healthy when the current container still owns all active leases.
+- The API remains stateless and only serves HTTP; it does not start or own the
+  long-lived scheduler/outbox/maintenance loops.
 
 After `alembic upgrade head`, the API entrypoint rotates the runtime role
 to `APP_RUNTIME_PASSWORD` using PostgreSQL `format(%I, %L)` (no raw-SQL
@@ -61,6 +76,7 @@ Services:
 | `postgres` | `postgres:16-alpine` | none | Reachable only on the Compose network |
 | `api` | `apps/api/Dockerfile` | `8000` | `RUN_MIGRATIONS=1` → `alembic upgrade head` then uvicorn |
 | `worker` | `apps/worker/Dockerfile` | — | HTTP-only; no `.env` / owner DSN. Needs `WORKER_CREDENTIAL` / `WORKER_ID` to claim work |
+| `automation` | `apps/api/Dockerfile` | — | Runs `python -m app.automation`; owns scheduler/outbox/maintenance leases in Postgres |
 | `web` | `apps/web/Dockerfile` | `8080` | nginx serves `dist`; proxies `/api/` → `api:8000/` |
 
 Stop / tear down:
@@ -126,8 +142,8 @@ See `.env.example` for the full annotated list. Staging-relevant knobs:
 | `ENVIRONMENT` | `development` enables `/docs`, `/redoc`, `/openapi.json`. Any other value (including `staging` / `production` / `test`) disables them (P-005). |
 | `CORS_ALLOW_ORIGINS` | Include the web origin, e.g. `["http://localhost:8080"]` |
 | `RUN_MIGRATIONS` | Set to `1` on the API container for migrate-on-start |
-| `OUTBOX_RELAY_INTERVAL_SECONDS` | API outbox relay tick |
-| `ASSIGNMENT_REAPER_INTERVAL_SECONDS` | Lease reaper / maintenance tick |
+| `OUTBOX_RELAY_INTERVAL_SECONDS` | Automation-service outbox relay tick |
+| `ASSIGNMENT_REAPER_INTERVAL_SECONDS` | Automation-service lease reaper / maintenance tick |
 | `WORKER_OFFLINE_SWEEP_INTERVAL_SECONDS` | Offline worker sweep (via maintenance loop) |
 | `HEALTH_CHECK_INTERVAL_SECONDS` | Worker health-monitor interval |
 | `API_BASE_URL` | Worker → API (`http://api:8000` in compose) |
@@ -158,7 +174,8 @@ required for the nginx image; see commented `VITE_*` placeholders in
 |----------|---------|
 | `GET /health/live` | Process up (liveness) |
 | `GET /health/ready` | DB reachable via owner session (readiness) |
-| `GET /health/automation` | Scheduler / outbox / maintenance loop ticks |
+| `GET /health/automation` | Coarse automation loop status only (`status`, `active`, running set) |
+| `GET /workspaces/{workspace_id}/operations/automation` | Authenticated admin diagnostics for sanitized automation ownership/error details |
 | `GET /metrics` | Prometheus-format aggregate gauges (P-008); Bearer `METRICS_SCRAPER_TOKEN` when set / required in production |
 
 Examples:
@@ -173,8 +190,10 @@ curl -sf http://localhost:8080/api/health/live
 
 On-call: [`ON_CALL.md`](./ON_CALL.md).
 
-Compose marks `api` healthy only after `/health/live` succeeds; `worker`
-and `web` wait on that condition.
+Compose marks `api` healthy only after `/health/live` succeeds; `worker`,
+`automation`, and `web` wait on that condition. Compose marks `automation`
+healthy only after its owner-aware lease check confirms that this container is
+the live owner of the maintenance, outbox, and scheduler loops.
 
 ## Migrations
 
@@ -196,6 +215,25 @@ and `web` wait on that condition.
 - Against managed Supabase, if `CREATE ROLE` is denied, create
   `app_runtime` once in the SQL editor, then run Alembic for the rest.
 - CI also runs a migration replay: `alembic downgrade base && alembic upgrade head`.
+
+### Rollout / rollback order for automation ownership (`0057`)
+
+Roll forward:
+
+1. Deploy migration `0057` before starting the new automation container.
+2. Start or restart `api` so it runs migrations and stays stateless.
+3. Start `automation` and verify its healthcheck passes.
+4. Confirm `GET /health/automation` returns coarse `running`/`active` state and
+   the authenticated ops automation view shows all three loops owned by the
+   automation container.
+
+Rollback:
+
+1. Stop or scale down the dedicated `automation` service first.
+2. Verify no automation process is still querying `automation_leases`.
+3. Roll back the application images/configuration.
+4. Only then run `alembic downgrade 0056` / any rollback that removes
+   `automation_leases`, and bring services back up in the pre-`0057` order.
 
 ## Auth note
 

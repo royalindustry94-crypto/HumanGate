@@ -9,10 +9,15 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.automation import (
+    PublicAutomationHealthSnapshot,
+    automation_health_snapshot,
+    public_automation_health_snapshot,
+)
 from app.db.session import get_db
 
 logger = logging.getLogger(__name__)
@@ -49,41 +54,6 @@ async def readiness(db: AsyncSession = Depends(get_db)) -> dict[str, str]:
 
 
 @router.get("/health/automation")
-async def automation_health(request: Request) -> dict:
-    """Expose background-loop liveness for ops (scheduler / outbox / maintenance).
-
-    In ENVIRONMENT=test loops are intentionally not started; the payload
-    reports that fact rather than failing readiness.
-    """
-    # Prefer lifespan-bound state; fall back to module singleton so tests
-    # (ASGITransport without lifespan) still see a stable schema.
-    from app.main import automation_state as module_state
-
-    state = getattr(request.app.state, "automation", None) or module_state
-    return {
-        "status": "ok" if state.tasks_running else "idle",
-        "started_at": state.started_at.isoformat() if state.started_at else None,
-        "tasks_running": list(state.tasks_running),
-        "maintenance": {
-            "ticks": state.maintenance_ticks,
-            "last_ok_at": (
-                state.maintenance_last_ok_at.isoformat() if state.maintenance_last_ok_at else None
-            ),
-            "last_error": state.maintenance_last_error,
-        },
-        "outbox_relay": {
-            "ticks": state.outbox_ticks,
-            "last_ok_at": (
-                state.outbox_last_ok_at.isoformat() if state.outbox_last_ok_at else None
-            ),
-            "last_error": state.outbox_last_error,
-        },
-        "scheduler": {
-            "ticks": state.scheduler_ticks,
-            "jobs_leased": state.scheduler_jobs_leased,
-            "last_ok_at": (
-                state.scheduler_last_ok_at.isoformat() if state.scheduler_last_ok_at else None
-            ),
-            "last_error": state.scheduler_last_error,
-        },
-    }
+async def automation_health() -> PublicAutomationHealthSnapshot:
+    """Expose coarse automation health without lease-owner internals."""
+    return public_automation_health_snapshot(await automation_health_snapshot())

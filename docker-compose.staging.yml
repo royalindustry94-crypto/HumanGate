@@ -5,9 +5,10 @@
 # Runtime login is hard-set to app_runtime (the role migrations grant).
 # Owner/migration and runtime credentials stay separate. Never reuse
 # postgres/postgres or app_runtime/app_runtime here.
-# API/worker hard-set ENVIRONMENT: staging (do not inherit development
+# API/worker/automation hard-set ENVIRONMENT: staging (do not inherit development
 # from .env.example). The API entrypoint rotates the runtime role after
 # migrations. The worker is HTTP-only and must not receive owner DB secrets.
+# The dedicated automation service runs the scheduler/outbox/maintenance loops.
 #
 # Usage (from repo root, with a filled non-default .env):
 #   docker compose -f docker-compose.staging.yml up --build
@@ -79,6 +80,36 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  automation:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:?required}:${POSTGRES_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:?required}
+      APP_DATABASE_URL: postgresql://app_runtime:${APP_RUNTIME_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:?required}
+      ENVIRONMENT: staging
+      RUN_MIGRATIONS: "0"
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-["http://localhost:8080"]}
+    command: ["python", "-m", "app.automation"]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import asyncio; from app.automation import _owner_id, automation_health_snapshot; snapshot = asyncio.run(automation_health_snapshot()); owner = _owner_id(); running = set(snapshot['tasks_running']); expected = {'maintenance', 'outbox_relay', 'scheduler'}; assert running == expected, snapshot; assert all(snapshot[name]['owner_id'] == owner for name in expected), snapshot",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 45s
 
   web:
     build:

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from sqlalchemy import Text, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.automation import AutomationHealthSnapshot
 from app.models.assignments import StageAssignment
 from app.models.billing import BillingWebhookEvent
 from app.models.content import ContentItem
@@ -540,7 +541,7 @@ async def executive_mode(
     workspace_id: uuid.UUID,
     *,
     admin_user_id: uuid.UUID,
-    automation: dict | None,
+    automation: AutomationHealthSnapshot | None,
 ) -> ExecutiveModeOut:
     now = datetime.now(UTC)
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)

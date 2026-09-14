@@ -18,16 +18,23 @@ def test_staging_compose_does_not_publish_postgres_host_port():
     text = _staging_compose_text()
     assert "5432:5432" not in text
     assert "0.0.0.0:5432" not in text
-    postgres_block = text.split("  postgres:", 1)[1].split("\n  api:", 1)[0]
+    postgres_block = _service_block(text, "postgres")
     assert "ports:" not in postgres_block
 
 
-def _service_block(text: str, service: str, next_service: str | None) -> str:
-    start = f"  {service}:"
-    body = text.split(start, 1)[1]
-    if next_service is None:
-        return body
-    return body.split(f"\n  {next_service}:", 1)[0]
+def _service_block(text: str, service: str) -> str:
+    body: list[str] = []
+    capture = False
+    for line in text.splitlines():
+        if not capture:
+            if line == f"  {service}:":
+                capture = True
+            continue
+        if line.startswith("  ") and not line.startswith("    "):
+            break
+        body.append(line)
+    assert capture, f"service block not found: {service}"
+    return "\n".join(body)
 
 
 def _service_environment_lines(block: str) -> list[str]:
@@ -103,11 +110,13 @@ def test_staging_compose_hard_sets_environment_to_staging():
     """
     text = _staging_compose_text()
     assert "${ENVIRONMENT" not in text
-    assert text.count("ENVIRONMENT: staging") >= 2
-    api_block = text.split("  api:", 1)[1].split("\n  worker:", 1)[0]
-    worker_block = text.split("  worker:", 1)[1].split("\n  web:", 1)[0]
+    assert text.count("ENVIRONMENT: staging") >= 3
+    api_block = _service_block(text, "api")
+    worker_block = _service_block(text, "worker")
+    automation_block = _service_block(text, "automation")
     assert "ENVIRONMENT: staging" in api_block
     assert "ENVIRONMENT: staging" in worker_block
+    assert "ENVIRONMENT: staging" in automation_block
 
 
 def test_documented_staging_env_cannot_resolve_to_development():
@@ -126,7 +135,7 @@ def test_documented_staging_env_cannot_resolve_to_development():
 
 def test_staging_worker_does_not_load_shared_env_or_owner_dsn():
     text = _staging_compose_text()
-    worker = _service_block(text, "worker", "web")
+    worker = _service_block(text, "worker")
     assert re.search(r"^\s+env_file:", worker, re.M) is None
     env_keys = {line.split(":", 1)[0] for line in _service_environment_lines(worker)}
     assert "DATABASE_URL" not in env_keys
@@ -141,7 +150,7 @@ def test_rendered_worker_env_excludes_owner_secrets():
     not interpolate or inherit them when Compose renders the stack.
     """
     text = _staging_compose_text()
-    worker = _service_block(text, "worker", "web")
+    worker = _service_block(text, "worker")
     rendered = _render_environment(
         _service_environment_lines(worker),
         {
@@ -167,3 +176,16 @@ def test_rendered_worker_env_excludes_owner_secrets():
     assert "postgresql://staging_owner" not in " ".join(rendered.values())
     assert rendered["ENVIRONMENT"] == "staging"
     assert rendered["API_BASE_URL"] == "http://api:8000"
+
+
+def test_staging_automation_service_runs_continuously_and_stays_owner_aware():
+    text = _staging_compose_text()
+    automation = _service_block(text, "automation")
+    assert "restart: unless-stopped" in automation
+    assert 'command: ["python", "-m", "app.automation"]' in automation
+    assert re.search(r"^\s+ports:", automation, re.M) is None
+    env_keys = {line.split(":", 1)[0] for line in _service_environment_lines(automation)}
+    assert {"DATABASE_URL", "APP_DATABASE_URL", "ENVIRONMENT", "RUN_MIGRATIONS"} <= env_keys
+    assert "healthcheck:" in automation
+    assert "_owner_id" in automation
+    assert "automation_health_snapshot" in automation
