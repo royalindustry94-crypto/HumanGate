@@ -137,3 +137,67 @@ async def test_distinct_client_ips_have_independent_budgets():
     async with httpx.AsyncClient(transport=transport2, base_url="http://test") as ac2:
         # A different source IP has its own, untouched budget.
         assert (await ac2.get("/thing")).status_code == 200
+
+
+# --- H-2: the window map must stay bounded ---
+
+
+def test_expired_windows_are_swept_instead_of_accumulating():
+    """Distinct keys across successive windows must not accumulate forever.
+
+    Before the fix an entry was created on a key's first request and only
+    overwritten if that same key returned, so a caller rotating source IPs
+    grew the map for the life of the process.
+    """
+    limiter = InMemoryRateLimiter(max_requests=5, window_seconds=10)
+    for index in range(500):
+        limiter.check(f"ip-{index}", now=0.0)
+    assert limiter.tracked_keys == 500
+
+    # One key, a full window later: the 500 stale windows go with it.
+    limiter.check("later", now=10.0)
+    assert limiter.tracked_keys == 1
+
+
+def test_sweep_keeps_windows_that_are_still_live():
+    limiter = InMemoryRateLimiter(max_requests=5, window_seconds=10)
+    limiter.check("old", now=0.0)
+    limiter.check("fresh", now=9.0)
+    # now=10.0 expires "old" (started_at 0.0) but not "fresh" (started_at 9.0).
+    limiter.check("new", now=10.0)
+    assert limiter.tracked_keys == 2
+    # "fresh" kept its budget rather than being reset by the sweep.
+    assert limiter._windows["fresh"].count == 1
+
+
+def test_tracked_keys_never_exceed_the_cap_even_when_all_windows_are_live():
+    """Hard backstop: every window live inside one window_seconds."""
+    limiter = InMemoryRateLimiter(max_requests=5, window_seconds=1000, max_tracked_keys=50)
+    for index in range(500):
+        limiter.check(f"ip-{index}", now=float(index))
+    assert limiter.tracked_keys <= 50
+
+
+def test_eviction_frees_the_oldest_window_first():
+    limiter = InMemoryRateLimiter(max_requests=5, window_seconds=1000, max_tracked_keys=2)
+    limiter.check("oldest", now=0.0)
+    limiter.check("middle", now=1.0)
+    limiter.check("newest", now=2.0)
+    assert "oldest" not in limiter._windows
+    assert "newest" in limiter._windows
+
+
+def test_evicted_key_is_admitted_rather_than_blocked():
+    """Evicting a key must fail open — a dropped window means a fresh budget,
+    never a rejection caused by the limiter's own bookkeeping."""
+    limiter = InMemoryRateLimiter(max_requests=1, window_seconds=1000, max_tracked_keys=1)
+    assert limiter.check("a", now=0.0) == (True, 0.0)
+    # "a" is at its limit; admitting "b" evicts "a".
+    assert limiter.check("b", now=1.0) == (True, 0.0)
+    assert limiter.check("a", now=2.0) == (True, 0.0)
+
+
+@pytest.mark.parametrize("bad_cap", [0, -1])
+def test_rejects_nonsense_key_cap(bad_cap):
+    with pytest.raises(ValueError, match="max_tracked_keys"):
+        InMemoryRateLimiter(max_requests=1, window_seconds=1, max_tracked_keys=bad_cap)

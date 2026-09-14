@@ -30,20 +30,75 @@ class _Window:
     count: int
 
 
+# Ceiling on simultaneously tracked keys. At ~100 bytes per entry this caps
+# the limiter's own footprint in the low tens of MB even while every slot is
+# live. Sized well above any plausible count of distinct client IPs in one
+# window for the current single-process topology.
+DEFAULT_MAX_TRACKED_KEYS = 100_000
+
+
 class InMemoryRateLimiter:
     """Fixed-window request counter. One window per key at a time; a key's
     window resets (count back to 1) once `window_seconds` has elapsed
     since that key's window started.
+
+    The window map is bounded (audit H-2). It previously grew for the life of
+    the process: an entry was created on a key's first request and only ever
+    overwritten if that same key came back, so traffic across many source IPs
+    -- ordinary churn, or an attacker rotating addresses -- grew it without
+    limit, turning the limiter into its own memory-pressure vector. Expired
+    windows are now swept at most once per window (amortized O(1) per
+    request), with a hard key cap as the backstop.
     """
 
-    def __init__(self, *, max_requests: int, window_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        max_requests: int,
+        window_seconds: float,
+        max_tracked_keys: int = DEFAULT_MAX_TRACKED_KEYS,
+    ) -> None:
         if max_requests < 1:
             raise ValueError("max_requests must be >= 1")
         if window_seconds <= 0:
             raise ValueError("window_seconds must be > 0")
+        if max_tracked_keys < 1:
+            raise ValueError("max_tracked_keys must be >= 1")
         self.max_requests = max_requests
         self.window_seconds = window_seconds
+        self.max_tracked_keys = max_tracked_keys
         self._windows: dict[str, _Window] = {}
+        self._next_sweep_at = 0.0
+
+    @property
+    def tracked_keys(self) -> int:
+        """Live window count — the quantity H-2 requires stay bounded."""
+        return len(self._windows)
+
+    def _sweep(self, now: float) -> None:
+        """Drop windows that have already expired."""
+        cutoff = now - self.window_seconds
+        self._windows = {
+            key: window for key, window in self._windows.items() if window.started_at > cutoff
+        }
+        self._next_sweep_at = now + self.window_seconds
+
+    def _make_room(self, now: float) -> None:
+        """Bound the map before admitting a new key.
+
+        Sweeping runs at most once per window so the amortized cost per
+        request stays constant. If every tracked window is still live we evict
+        the oldest ones: an evicted key simply gets a fresh budget, which is
+        the safe direction to fail — the limiter must not start rejecting
+        legitimate traffic because of its own bookkeeping.
+        """
+        if now >= self._next_sweep_at or len(self._windows) >= self.max_tracked_keys:
+            self._sweep(now)
+        overflow = len(self._windows) - self.max_tracked_keys + 1
+        if overflow > 0:
+            oldest = sorted(self._windows.items(), key=lambda item: item[1].started_at)
+            for key, _ in oldest[:overflow]:
+                del self._windows[key]
 
     def check(self, key: str, *, now: float | None = None) -> tuple[bool, float]:
         """Returns (allowed, retry_after_seconds). retry_after_seconds is
@@ -53,6 +108,9 @@ class InMemoryRateLimiter:
         now = time.monotonic() if now is None else now
         window = self._windows.get(key)
         if window is None or (now - window.started_at) >= self.window_seconds:
+            # Only this branch grows the map, so it is the only one that needs
+            # to make room first.
+            self._make_room(now)
             self._windows[key] = _Window(started_at=now, count=1)
             return True, 0.0
         if window.count < self.max_requests:

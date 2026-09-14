@@ -30,6 +30,7 @@ from app.models.research import (
     ResearchSchedule,
     ResearchSource,
 )
+from app.orchestration.controller import utc_day_start
 from app.orchestration.outbox import emit
 from app.schemas.research import ResearchRunCreate
 
@@ -298,7 +299,18 @@ async def summary(session: AsyncSession, *, workspace_id: uuid.UUID) -> dict[str
             select(ResearchSchedule).where(ResearchSchedule.workspace_id == workspace_id)
         )
     ).scalar_one_or_none()
-    cost = sum((Decimal(str(run.actual_cost_usd)) for run in runs), Decimal("0"))
+    # Scoped to the current UTC day to match the field name; it previously
+    # summed whatever the last two runs cost, on any day.
+    cost = Decimal(
+        (
+            await session.execute(
+                select(func.coalesce(func.sum(ResearchRun.actual_cost_usd), 0)).where(
+                    ResearchRun.workspace_id == workspace_id,
+                    ResearchRun.created_at >= utc_day_start(),
+                )
+            )
+        ).scalar_one()
+    )
     current_or_last = current or last
     return {
         "provider_state": "not_configured",

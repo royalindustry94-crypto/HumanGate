@@ -696,3 +696,78 @@ async def test_direct_claim_priority_ordering(ctx):
         assert result.outcome == ClaimOutcome.GRANTED
         assert result.assignment is not None
         assert result.assignment.id == old
+
+
+@pytest.mark.asyncio
+async def test_saturated_provider_retires_in_one_pass_not_row_by_row(ctx):
+    """Audit M-2: a saturated provider must not exhaust the candidate budget.
+
+    The claim loop used to exclude each skipped candidate by its own id, so a
+    saturated provider was re-discovered once per row. With more saturated
+    rows ahead of the eligible one than `claim_candidate_batch_size` allows
+    passes, the loop ran out of iterations and reported `capacity` even though
+    a claimable assignment existed. Excluding the whole (workspace, provider)
+    pair retires them together, so the eligible row is still reached.
+    """
+    from app.core.config import get_settings
+
+    batch = get_settings().claim_candidate_batch_size
+
+    await ctx["client"].put(
+        f"/workspaces/{ctx['ws']}/provider-budgets/openai",
+        headers=ctx["headers"],
+        json={"max_concurrent": 1},
+    )
+    # Saturate openai with one in-flight assignment.
+    inflight = await _seed_assignment(ctx["ws"], provider="openai")
+    async with AsyncSessionLocal() as s:
+        a = await s.get(StageAssignment, inflight)
+        a.status = StageAssignmentStatus.DISPATCHED
+        a.dispatched_at = datetime.now(UTC)
+        await s.commit()
+
+    # More blocked-provider candidates than the loop has passes, all ranked
+    # above the one claimable row.
+    for _ in range(batch + 5):
+        await _seed_assignment(ctx["ws"], provider="openai", priority=99)
+    claimable = await _seed_assignment(ctx["ws"], provider="anthropic", priority=1)
+
+    prov = await _provision(ctx["client"], ctx["headers"], ctx["ws"])
+    wh = await _bring_online(ctx["client"], prov)
+    r = await ctx["client"].post("/workers/claim", headers=wh, json={})
+
+    assert r.json()["outcome"] == "granted", (
+        "a claimable assignment existed behind a saturated provider; the loop "
+        "must not spend its candidate budget re-skipping that provider row by row"
+    )
+    assert r.json()["assignment"]["id"] == str(claimable)
+
+
+@pytest.mark.asyncio
+async def test_null_provider_candidates_survive_saturated_pair_exclusion(ctx):
+    """`NULL NOT IN (...)` is NULL, not true.
+
+    A null-provider assignment always has capacity, so it must stay eligible
+    once some other provider has been excluded -- a bare NOT IN would drop it.
+    """
+    await ctx["client"].put(
+        f"/workspaces/{ctx['ws']}/provider-budgets/openai",
+        headers=ctx["headers"],
+        json={"max_concurrent": 1},
+    )
+    inflight = await _seed_assignment(ctx["ws"], provider="openai")
+    async with AsyncSessionLocal() as s:
+        a = await s.get(StageAssignment, inflight)
+        a.status = StageAssignmentStatus.DISPATCHED
+        a.dispatched_at = datetime.now(UTC)
+        await s.commit()
+
+    await _seed_assignment(ctx["ws"], provider="openai", priority=99)
+    unbudgeted = await _seed_assignment(ctx["ws"], provider=None, priority=1)
+
+    prov = await _provision(ctx["client"], ctx["headers"], ctx["ws"])
+    wh = await _bring_online(ctx["client"], prov)
+    r = await ctx["client"].post("/workers/claim", headers=wh, json={})
+
+    assert r.json()["outcome"] == "granted"
+    assert r.json()["assignment"]["id"] == str(unbudgeted)

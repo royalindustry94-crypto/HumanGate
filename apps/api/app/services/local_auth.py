@@ -146,7 +146,7 @@ async def signup(
     token = mint_access_token(user_id=user_id, email=normalized)
     return AuthToken(
         access_token=token,
-        token_type="bearer",
+        token_type="bearer",  # noqa: S106
         expires_in=3600,
         user_id=user_id,
         email=normalized,
@@ -203,7 +203,7 @@ async def login(session: AsyncSession, *, email: str, password: str) -> AuthToke
     token = mint_access_token(user_id=row.user_id, email=row.email)
     return AuthToken(
         access_token=token,
-        token_type="bearer",
+        token_type="bearer",  # noqa: S106
         expires_in=3600,
         user_id=row.user_id,
         email=row.email,

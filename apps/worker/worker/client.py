@@ -174,7 +174,12 @@ class ReferenceWorkerClient:
                 return None
             self.current_load += 1
             return body["assignment"]
-        assert last_exc is not None
+        # Reachable only after every attempt raised TransportError, so
+        # last_exc is always set. Written as a check rather than `assert`
+        # because `python -O` strips asserts, which would turn this into
+        # `raise None` -> TypeError and lose the real transport failure.
+        if last_exc is None:  # pragma: no cover - loop always runs at least once
+            raise RuntimeError("claim retry loop exited without an attempt")
         raise last_exc
 
     async def ack(self, assignment_id: uuid.UUID | str) -> dict:

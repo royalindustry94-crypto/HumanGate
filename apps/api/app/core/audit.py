@@ -23,7 +23,37 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 audit_logger = logging.getLogger("audit")
 
-_SENSITIVE_KEYS = frozenset({"secret", "worker_secret", "secret_hash", "token", "authorization"})
+# Matched as substrings, not exact keys (audit L-2). The previous exact-match
+# set let `password`, `api_key`, `stripe_secret_key`, `access_token` and any
+# other compound name through untouched, which defeats the point of refusing
+# to log credentials at all.
+_SENSITIVE_KEY_FRAGMENTS = (
+    "secret",
+    "token",
+    "password",
+    "passwd",
+    "authorization",
+    "api_key",
+    "apikey",
+    "credential",
+    "private_key",
+)
+
+
+def _sensitive(field_names) -> list[str]:
+    """Field names containing any credential-ish fragment.
+
+    Names ending in `_id` are exempt: this module's contract is that callers
+    log *identifiers* rather than values (`worker_id`, `credential_id`), and a
+    row id is not the secret it points at.
+    """
+    return sorted(
+        name
+        for name in field_names
+        if not name.lower().endswith("_id")
+        and any(fragment in name.lower() for fragment in _SENSITIVE_KEY_FRAGMENTS)
+    )
+
 
 # Attributes stdlib `logging.LogRecord` already defines. Passing one of
 # these via `extra` raises KeyError at log time (not at call time), deep
@@ -64,9 +94,9 @@ def audit(request: Request | None, event: str, **fields: object) -> None:
     Refuses sensitive keys outright instead of redacting them — passing a
     secret to the audit log is a programming error that should fail tests.
     """
-    leaked = _SENSITIVE_KEYS.intersection(k.lower() for k in fields)
+    leaked = _sensitive(fields)
     if leaked:
-        raise ValueError(f"refusing to audit-log sensitive fields: {sorted(leaked)}")
+        raise ValueError(f"refusing to audit-log sensitive fields: {leaked}")
     reserved = _RESERVED_LOG_RECORD_KEYS.intersection(fields)
     if reserved:
         raise ValueError(
@@ -86,18 +116,24 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         request_id = str(uuid.uuid4())
         request.state.request_id = request_id
         started = time.monotonic()
-        response = await call_next(request)
-        duration_ms = round((time.monotonic() - started) * 1000, 2)
+        # `call_next` raising used to skip both the audit line and the response
+        # header, losing correlation on precisely the failed requests that need
+        # it (audit L-3). The failure is still re-raised for the error handlers.
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+        finally:
+            audit_logger.info(
+                "http_request",
+                extra={
+                    "audit_event": "http_request",
+                    "request_id": request_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": status_code,
+                    "duration_ms": round((time.monotonic() - started) * 1000, 2),
+                },
+            )
         response.headers["X-Request-ID"] = request_id
-        audit_logger.info(
-            "http_request",
-            extra={
-                "audit_event": "http_request",
-                "request_id": request_id,
-                "method": request.method,
-                "path": request.url.path,
-                "status_code": response.status_code,
-                "duration_ms": duration_ms,
-            },
-        )
         return response

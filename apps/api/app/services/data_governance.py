@@ -240,6 +240,13 @@ class DataGovernanceError(Exception):
         self.message = message
 
 
+# Per-table ceiling on exported rows. Generous enough that no realistic
+# Private Beta tenant is affected, but finite so one large workspace cannot
+# exhaust the API process building the bundle. Any table that hits it is named
+# in `truncated_tables` -- a capped export is reported, never silent.
+EXPORT_MAX_ROWS_PER_TABLE = 50_000
+
+
 @dataclass(frozen=True)
 class ExportBundle:
     workspace_id: uuid.UUID
@@ -250,6 +257,8 @@ class ExportBundle:
     unattributable_tables: tuple[str, ...]
     unattributable_reason: str
     row_counts: dict[str, int] = field(default_factory=dict)
+    truncated_tables: tuple[str, ...] = ()
+    truncation_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -272,18 +281,21 @@ async def _existing_tables(session: AsyncSession) -> set[str]:
     return {r[0] for r in rows}
 
 
-async def _table_has_workspace_column(session: AsyncSession, table: str) -> bool:
-    found = (
+async def _tables_with_workspace_column(session: AsyncSession) -> set[str]:
+    """Every public table carrying a workspace_id, in one query.
+
+    Previously this was a per-table `information_schema.columns` lookup issued
+    inside each of the three table loops (audit M-3).
+    """
+    rows = (
         await session.execute(
             text(
-                "SELECT 1 FROM information_schema.columns "
-                "WHERE table_schema='public' AND table_name=:t "
-                "AND column_name='workspace_id'"
-            ),
-            {"t": table},
+                "SELECT table_name FROM information_schema.columns "
+                "WHERE table_schema='public' AND column_name='workspace_id'"
+            )
         )
-    ).first()
-    return found is not None
+    ).all()
+    return {row[0] for row in rows}
 
 
 async def export_workspace(session: AsyncSession, *, workspace_id: uuid.UUID) -> ExportBundle:
@@ -292,8 +304,10 @@ async def export_workspace(session: AsyncSession, *, workspace_id: uuid.UUID) ->
     Credential and service-only tables are excluded by name and reported.
     """
     present = await _existing_tables(session)
+    workspace_scoped = await _tables_with_workspace_column(session)
     tables: dict[str, list[dict]] = {}
     counts: dict[str, int] = {}
+    truncated: list[str] = []
 
     for table in EXPORTABLE_TABLES:
         if table in EXPORT_DENYLIST:  # defensive: never export a denied table
@@ -302,11 +316,24 @@ async def export_workspace(session: AsyncSession, *, workspace_id: uuid.UUID) ->
             continue
         if table == "workspaces":
             stmt = text("SELECT * FROM workspaces WHERE id = :ws")
-        elif await _table_has_workspace_column(session, table):
-            stmt = text(f"SELECT * FROM {table} WHERE workspace_id = :ws")  # noqa: S608
+        elif table in workspace_scoped:
+            # Bounded (audit M-3): this used to be an unbounded `SELECT *`
+            # materialised into Python dicts, so a large tenant could exhaust
+            # the API process. One row over the cap is fetched so truncation
+            # can be detected and REPORTED -- an export is never silently
+            # incomplete.
+            stmt = text(
+                f"SELECT * FROM {table} WHERE workspace_id = :ws LIMIT :limit"  # noqa: S608
+            )
         else:
             continue
-        rows = (await session.execute(stmt, {"ws": str(workspace_id)})).mappings().all()
+        params = {"ws": str(workspace_id), "limit": EXPORT_MAX_ROWS_PER_TABLE + 1}
+        if table == "workspaces":
+            params.pop("limit")
+        rows = (await session.execute(stmt, params)).mappings().all()
+        if len(rows) > EXPORT_MAX_ROWS_PER_TABLE:
+            rows = rows[:EXPORT_MAX_ROWS_PER_TABLE]
+            truncated.append(table)
         serialised = [
             {k: (str(v) if isinstance(v, uuid.UUID | datetime) else v) for k, v in row.items()}
             for row in rows
@@ -330,6 +357,13 @@ async def export_workspace(session: AsyncSession, *, workspace_id: uuid.UUID) ->
             "so their rows cannot be attributed to one tenant."
         ),
         row_counts=counts,
+        truncated_tables=tuple(truncated),
+        truncation_reason=(
+            f"Truncated at {EXPORT_MAX_ROWS_PER_TABLE} rows per table. Request a "
+            "paginated or offline export for the tables listed above."
+            if truncated
+            else None
+        ),
     )
 
 
@@ -349,17 +383,18 @@ async def delete_workspace_content(
         )
 
     present = await _existing_tables(session)
+    workspace_scoped = await _tables_with_workspace_column(session)
     soft_deleted: dict[str, int] = {}
     hard_deleted: dict[str, int] = {}
 
     for table in SOFT_DELETABLE_TABLES:
         if table not in present:
             continue
-        if not await _table_has_workspace_column(session, table):
+        if table not in workspace_scoped:
             continue
         result = await session.execute(
-            text(  # noqa: S608
-                f"UPDATE {table} SET deleted_at = now() "
+            text(
+                f"UPDATE {table} SET deleted_at = now() "  # noqa: S608
                 "WHERE workspace_id = :ws AND deleted_at IS NULL"
             ),
             {"ws": str(workspace_id)},
@@ -369,7 +404,7 @@ async def delete_workspace_content(
     for table in HARD_DELETABLE_TABLES:
         if table not in present:
             continue
-        if not await _table_has_workspace_column(session, table):
+        if table not in workspace_scoped:
             continue
         result = await session.execute(
             text(f"DELETE FROM {table} WHERE workspace_id = :ws"),  # noqa: S608

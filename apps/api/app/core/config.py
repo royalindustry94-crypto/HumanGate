@@ -25,8 +25,9 @@ CANONICAL_RUNTIME_ROLE = "app_runtime"
 
 # Fixed secret used only by API tests/CI under ENVIRONMENT=test. Listed in
 # the known-weak set so a production/staging/development process cannot boot
-# with this publicly committed value.
-REPOSITORY_TEST_JWT_SECRET = "test-supabase-jwt-secret-0123456789abcdef"
+# with this publicly committed value. S105 is suppressed because this is a
+# deny-list entry, not a credential this service authenticates with.
+REPOSITORY_TEST_JWT_SECRET = "test-supabase-jwt-secret-0123456789abcdef"  # noqa: S105
 
 
 class OpenAPIRouteKwargs(TypedDict):
@@ -326,6 +327,25 @@ class Settings(BaseSettings):
             raise ValueError(
                 "SUPABASE_JWT_SECRET looks predictable (too few distinct characters); "
                 "generate a real random secret"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_cors_origins(self) -> Settings:
+        """Reject a credentialed wildcard origin (audit L-7).
+
+        `app.main` attaches CORSMiddleware with `allow_credentials=True`, and
+        `"*"` combined with credentials means any site can make authenticated
+        cross-origin calls on a signed-in user's behalf. Browsers refuse that
+        pairing, so it would present as a confusing CORS failure rather than an
+        obvious misconfiguration; failing closed here says what is wrong.
+        Local environments are not exempt: nothing legitimately needs it.
+        """
+        if any(origin.strip() == "*" for origin in self.cors_allow_origins):
+            raise ValueError(
+                "CORS_ALLOW_ORIGINS must not contain '*': the API sends "
+                "credentials, and a wildcard origin with credentials is both "
+                "unsafe and rejected by browsers. List explicit origins."
             )
         return self
 

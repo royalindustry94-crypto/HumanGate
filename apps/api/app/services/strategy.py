@@ -26,6 +26,7 @@ from app.models.strategy import (
     StrategyRun,
     StrategySchedule,
 )
+from app.orchestration.controller import utc_day_start
 from app.orchestration.outbox import emit
 from app.schemas.strategy import StrategyRunCreate
 from app.services import research
@@ -556,9 +557,24 @@ async def writer_gate(
 
 
 async def summary(session: AsyncSession, *, workspace_id: uuid.UUID) -> dict[str, Any]:
-    runs = await list_runs(session, workspace_id=workspace_id)
-    current = next((run for run in runs if run.status == "running"), None)
-    last = runs[0] if runs else None
+    # Queried directly instead of scanning an unbounded `list_runs()`: the
+    # summary only needs the in-flight run and the most recent one.
+    current = (
+        await session.execute(
+            select(StrategyRun)
+            .where(StrategyRun.workspace_id == workspace_id, StrategyRun.status == "running")
+            .order_by(StrategyRun.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    last = (
+        await session.execute(
+            select(StrategyRun)
+            .where(StrategyRun.workspace_id == workspace_id)
+            .order_by(StrategyRun.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
     counts = (
         await session.execute(
             select(
@@ -585,7 +601,19 @@ async def summary(session: AsyncSession, *, workspace_id: uuid.UUID) -> dict[str
             )
         )
     ).scalar_one()
-    cost = sum((Decimal(str(run.actual_cost_usd)) for run in runs), Decimal("0"))
+    # `cost_today_usd` now actually means today. It previously summed every
+    # run ever recorded for the workspace, so the figure grew without bound
+    # and never matched its own field name.
+    cost = Decimal(
+        (
+            await session.execute(
+                select(func.coalesce(func.sum(StrategyRun.actual_cost_usd), 0)).where(
+                    StrategyRun.workspace_id == workspace_id,
+                    StrategyRun.created_at >= utc_day_start(),
+                )
+            )
+        ).scalar_one()
+    )
     business_context_state = await get_business_context_state(session, workspace_id=workspace_id)
     current_or_last = current or last
     if current_or_last:

@@ -22,7 +22,12 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "mkdir -p /home/runner/workspace/.pg/data && ([ -f /home/runner/workspace/.pg/data/PG_VERSION ] || initdb -D /home/runner/workspace/.pg/data) && postgres -D /home/runner/workspace/.pg/data -k /tmp -p 5432 -c listen_addresses=127.0.0.1"
+# --auth-host=scram-sha-256 so the rotated owner/app_runtime passwords are
+# actually enforced on TCP connections. Without it initdb writes `trust` for
+# host connections and any local process could connect as the table owner,
+# bypassing FORCE RLS. --auth-local stays trust so the preview entry script can
+# bootstrap the owner password over the unix socket before it is set.
+args = "mkdir -p /home/runner/workspace/.pg/data && ([ -f /home/runner/workspace/.pg/data/PG_VERSION ] || initdb -D /home/runner/workspace/.pg/data --auth-local=trust --auth-host=scram-sha-256) && postgres -D /home/runner/workspace/.pg/data -k /tmp -p 5432 -c listen_addresses=127.0.0.1"
 
 [workflows.workflow.metadata]
 outputType = "console"

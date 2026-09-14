@@ -680,18 +680,18 @@ async def handle_review_timeout(session: AsyncSession, *, review_gate_id: uuid.U
 # --- spend protection (design doc §9) ---------------------------------------
 
 
-def _utc_day_start(now: datetime | None = None) -> datetime:
+def utc_day_start(now: datetime | None = None) -> datetime:
     now = now or datetime.now(UTC)
     return now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def _utc_month_start(now: datetime | None = None) -> datetime:
+def utc_month_start(now: datetime | None = None) -> datetime:
     now = now or datetime.now(UTC)
     now = now.astimezone(UTC)
     return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
-async def _spend_committed_plus_reserved(
+async def spend_committed_plus_reserved(
     session: AsyncSession,
     *,
     workspace_id: uuid.UUID,
@@ -801,17 +801,17 @@ async def reserve_spend(
         # by the reservation provider against a workspace-wide cap would
         # allow cross-provider monthly/daily bypass.
         usage_provider = None if cap.provider is None else provider
-        daily = await _spend_committed_plus_reserved(
+        daily = await spend_committed_plus_reserved(
             session,
             workspace_id=run.workspace_id,
             provider=usage_provider,
-            since=_utc_day_start(),
+            since=utc_day_start(),
         )
-        monthly = await _spend_committed_plus_reserved(
+        monthly = await spend_committed_plus_reserved(
             session,
             workspace_id=run.workspace_id,
             provider=usage_provider,
-            since=_utc_month_start(),
+            since=utc_month_start(),
         )
         daily_cap = Decimal(str(cap.daily_cap_usd))
         monthly_cap = Decimal(str(cap.monthly_cap_usd))
