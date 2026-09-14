@@ -111,22 +111,35 @@ def _resolve_environment(preset: str | None) -> str:
     return result.stdout.strip()
 
 
-@pytest.mark.parametrize(
-    "preset",
-    [
-        None,
-        # The exact value .env.example ships, which defeated the previous fix.
-        "development",
-        "dev",
-        "test",
-        "local",
-        "DEVELOPMENT",
-    ],
-)
+def _case_variants(value: str) -> list[str]:
+    """Spellings the application would treat identically.
+
+    Every environment comparison in app/core/config.py and
+    app/api/routes/metrics.py normalises with `.strip().lower()`, so these are
+    all equivalent to the app and must all be caught by the launcher.
+    """
+    return [value, value.upper(), value.capitalize(), f"  {value} "]
+
+
+# Derived from the application's own constants rather than hardcoded: adding a
+# new local or tokenless environment name to the app fails this test until the
+# launcher's case list covers it.
+LOCAL_OR_TOKENLESS = sorted(set(Settings._LOCAL_ENVIRONMENTS) | set(TOKENLESS_METRICS_ENVIRONMENTS))
+
+_PRESETS = [None] + [variant for value in LOCAL_OR_TOKENLESS for variant in _case_variants(value)]
+
+
+def test_the_derived_case_set_is_not_silently_empty() -> None:
+    """Guards the guard: an empty derived set would make the sweep vacuous."""
+    assert {"development", "dev", "test", "local", "ci"} <= set(LOCAL_OR_TOKENLESS)
+
+
+@pytest.mark.parametrize("preset", _PRESETS)
 def test_local_environment_values_are_discarded_by_the_deployment_launcher(preset) -> None:
     resolved = _resolve_environment(preset)
-    assert resolved not in Settings._LOCAL_ENVIRONMENTS
-    assert resolved not in TOKENLESS_METRICS_ENVIRONMENTS
+    normalized = resolved.strip().lower()
+    assert normalized not in Settings._LOCAL_ENVIRONMENTS
+    assert normalized not in TOKENLESS_METRICS_ENVIRONMENTS
     assert openapi_route_kwargs(resolved) == {
         "docs_url": None,
         "redoc_url": None,

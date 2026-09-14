@@ -24,17 +24,17 @@ offline / no-work are normal, audited non-grants — never silent failures.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select, tuple_
+from sqlalchemy import or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models.assignments import StageAssignment
-from app.models.backpressure import ProviderConcurrencyBudget
 from app.models.claim_audit import StageClaimAudit
 from app.models.enums import (
     ClaimOutcome,
@@ -49,6 +49,13 @@ from app.orchestration.events.types import STAGE_ASSIGNED
 from app.orchestration.outbox import emit
 from app.orchestration.priority import effective_priority_expr
 from app.orchestration.provider_budgets import has_provider_capacity
+
+logger = logging.getLogger(__name__)
+
+# Runaway guard on the candidate scan. Not the termination condition -- the
+# loop ends when the pair-excluding query finds nothing -- so this only
+# trips on a bug, and is sized far above any real provider count.
+_CLAIM_SCAN_GUARD = 10_000
 
 # Back-compat module aliases; prefer Settings at call sites.
 CLAIM_HEARTBEAT_MAX_AGE_SECONDS = 90
@@ -223,43 +230,36 @@ async def claim_assignment(
 
     from sqlalchemy import text as sa_text
 
-    batch = get_settings().claim_candidate_batch_size
-    # The scan must not stop before every saturated pair has been excluded, or
-    # an assignment sitting behind them is reported as `capacity` while it is
-    # actually claimable. Each pass retires at most one (workspace, provider)
-    # pair, so `range(batch)` alone caps the scan at `batch` distinct saturated
-    # pairs -- 33 saturated budgets ahead of the eligible row reproduced the
-    # very false-capacity result M-2 set out to fix. Allow at least one pass per
-    # budget that could possibly be saturated, plus one to claim on.
-    budget_scope = [ProviderConcurrencyBudget.max_concurrent > 0]
-    if worker.workspace_id is not None:
-        budget_scope.append(ProviderConcurrencyBudget.workspace_id == worker.workspace_id)
-    budget_count = int(
-        (
-            await session.execute(
-                select(func.count(ProviderConcurrencyBudget.id)).where(*budget_scope)
-            )
-        ).scalar_one()
-        or 0
-    )
-    max_passes = max(batch, budget_count + 1)
+    # The scan runs until the pair-excluding candidate query is exhausted,
+    # rather than for a fixed number of passes.
+    #
+    # Each pass either claims, finds nothing, or retires exactly one
+    # (workspace_id, provider) pair -- and the candidate query excludes every
+    # retired pair, so the candidate set strictly shrinks and the loop
+    # terminates. A fixed bound cannot do this safely: `range(batch)` stopped
+    # after 32 pairs and reported `capacity` with a claimable row still behind
+    # them, and deriving the bound from a COUNT of provider_concurrency_budgets
+    # only moved the problem -- that count is a READ COMMITTED snapshot taken
+    # before the scan, so budgets committed mid-claim could still outrun it,
+    # and for a global worker it scanned every tenant's budgets on every poll,
+    # including no-work polls.
+    #
+    # `_CLAIM_SCAN_GUARD` is a runaway guard, not the termination condition; it
+    # is only reachable if a retired pair somehow fails to be excluded, which
+    # would be a bug worth seeing in the logs rather than looping on.
     effective = effective_priority_expr(
         StageAssignment.priority, StageAssignment.created_at, now=now
     )
-    # Saturated (workspace_id, provider) pairs discovered during this claim.
-    # Previously each skipped candidate was excluded by its own id, so the
-    # NOT IN list grew on every iteration and the loop could re-query up to
-    # `batch` times -- each time re-discovering that the same provider was
-    # still full (audit M-2). A candidate is skipped precisely because its
-    # provider budget is exhausted, and that verdict applies to every sibling
-    # row sharing the pair, so excluding the pair retires all of them at once.
-    # The loop now terminates in at most (distinct saturated pairs + 1) passes,
-    # and the exclusion set is bounded by the provider count, not the queue.
+    # Saturated (workspace_id, provider) pairs discovered during this claim. A
+    # candidate is skipped precisely because its provider budget is exhausted,
+    # and that verdict applies to every sibling row sharing the pair, so
+    # excluding the pair retires all of them at once instead of re-discovering
+    # the same full provider once per pending row (audit M-2).
     saturated: list[tuple[uuid.UUID, str]] = []
     assignment: StageAssignment | None = None
     saw_provider_budget_block = False
 
-    for _ in range(max_passes):
+    for _ in range(_CLAIM_SCAN_GUARD):
         await session.execute(sa_text("SAVEPOINT claim_candidate"))
         where = [
             StageAssignment.status == StageAssignmentStatus.PENDING,
@@ -319,6 +319,17 @@ async def claim_assignment(
         assignment = row
         await session.execute(sa_text("RELEASE SAVEPOINT claim_candidate"))
         break
+    else:
+        # Unreachable unless a retired pair failed to be excluded. Surface it
+        # rather than silently reporting no work.
+        logger.warning(
+            "claim candidate scan hit the runaway guard",
+            extra={
+                "worker_id": str(worker.id),
+                "saturated_pairs": len(saturated),
+                "guard": _CLAIM_SCAN_GUARD,
+            },
+        )
 
     if assignment is None:
         reason = (

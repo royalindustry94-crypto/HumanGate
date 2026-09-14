@@ -45,18 +45,30 @@ export OPS_PREVIEW_EMAIL OPS_PREVIEW_PASSWORD
 # database-credential validator inert and /docs, /redoc and /openapi.json
 # published. Any local-ish value inherited from the template is discarded here;
 # a deliberate non-local override (staging, production) is still honoured.
-case "${ENVIRONMENT:-}" in
-  "" | development | Development | DEVELOPMENT | dev | DEV | test | TEST | local | LOCAL)
+# Normalised the way the application itself compares it: every check in
+# app/core/config.py and app/api/routes/metrics.py uses `.strip().lower()`, so
+# `Dev` publishes OpenAPI docs just as surely as `dev` does. Matching exact
+# spellings here missed those, and missed `ci` entirely -- which is in
+# TOKENLESS_METRICS_ENVIRONMENTS and would waive the /metrics scrape token.
+#
+# The set below is the union of Settings._LOCAL_ENVIRONMENTS and
+# TOKENLESS_METRICS_ENVIRONMENTS; test_preview_script_security.py derives its
+# cases from those constants, so adding a new local environment name to the
+# application fails that test until this list covers it.
+_hg_env="$(printf '%s' "${ENVIRONMENT:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+case "$_hg_env" in
+  "" | development | dev | test | local | ci)
     ENVIRONMENT=preview
     ;;
 esac
 export ENVIRONMENT
+unset _hg_env
 # --- END environment resolution ---
 
 # Belt and braces: if a future edit reintroduces a local value here, refuse to
 # serve rather than silently waive the checks.
-case "${ENVIRONMENT}" in
-  development | dev | test | local)
+case "$(printf '%s' "${ENVIRONMENT}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in
+  development | dev | test | local | ci)
     echo "refusing to start: ENVIRONMENT=${ENVIRONMENT} waives database-credential" >&2
     echo "validation and publishes OpenAPI docs on a publicly reachable deployment" >&2
     exit 1

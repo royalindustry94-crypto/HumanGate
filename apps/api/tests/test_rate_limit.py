@@ -232,17 +232,44 @@ def test_admissions_at_the_cap_do_not_resweep_or_sort_every_request():
     )
 
 
-def test_eviction_order_survives_a_window_reset():
-    """A key whose window resets becomes the newest, not the oldest.
+def test_a_refreshed_key_moves_to_the_back_of_the_eviction_order():
+    """Plain dict assignment keeps a key's original slot.
 
-    Plain dict assignment keeps the original insertion slot, which would make
-    a just-refreshed key the next eviction victim.
+    Without `move_to_end`, a key whose window has just reset stays wherever it
+    was first inserted and becomes the next eviction victim despite being the
+    most recently started window.
+
+    The earlier version of this test could not tell the difference: it
+    refreshed the key at a point where the scheduled sweep had already removed
+    every entry, so the key was reinserted as a genuinely new one and the
+    assertion held either way. The refresh below happens while the map is
+    populated and *before* the next sweep is due, which is the only situation
+    where the ordering actually matters.
     """
     limiter = InMemoryRateLimiter(max_requests=1, window_seconds=10, max_tracked_keys=3)
-    limiter.check("a", now=0.0)
-    limiter.check("b", now=1.0)
-    # "a" resets well after "b" started, so it is now the most recent window.
-    limiter.check("a", now=20.0)
-    limiter.check("c", now=21.0)
-    limiter.check("d", now=22.0)
-    assert "a" in limiter._windows, "a was refreshed most recently and must outlive b"
+    limiter.check("x", now=0.0)  # arms the sweep for now=10
+    limiter.check("a", now=0.5)
+    limiter.check("b", now=10.0)  # sweep drops x, keeps a (started_at > cutoff)
+    assert list(limiter._windows) == ["a", "b"]
+
+    # "a" has expired, but the next sweep is not due until 20.0, so this is a
+    # reinsertion over a still-present key -- exactly the plain-assignment case.
+    limiter.check("a", now=10.6)
+    assert list(limiter._windows) == ["b", "a"], (
+        "a refreshed after b started must sort last; plain assignment would "
+        "leave it first and evict it next"
+    )
+
+
+def test_the_refreshed_key_outlives_the_older_one_under_eviction():
+    """The consequence of the ordering: eviction takes the genuinely oldest."""
+    limiter = InMemoryRateLimiter(max_requests=1, window_seconds=10, max_tracked_keys=3)
+    limiter.check("x", now=0.0)
+    limiter.check("a", now=0.5)
+    limiter.check("b", now=10.0)
+    limiter.check("a", now=10.6)  # a is now the newest window
+    limiter.check("c", now=11.0)
+    limiter.check("d", now=12.0)  # at the cap: evicts the leftmost entry
+
+    assert "a" in limiter._windows, "the most recently refreshed key must survive"
+    assert "b" not in limiter._windows, "the oldest window is the one evicted"

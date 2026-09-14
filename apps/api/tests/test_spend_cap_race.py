@@ -13,6 +13,7 @@ the test would pass without exercising anything.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import pytest
@@ -117,3 +118,58 @@ async def test_read_committed_caller_adopts_an_existing_cap():
 
     async with AsyncSessionLocal() as check:
         assert await _cap_count(check, workspace_id) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_read_committed_race_recovers_and_leaves_both_sessions_usable(
+    monkeypatch,
+):
+    """The production recovery branch, under the isolation the app actually uses.
+
+    The two tests above between them never execute `except IntegrityError ->
+    return existing`: one expects the raise (pinned snapshot hides the winner),
+    the other never conflicts at all. A regression in the recovery path or in
+    post-savepoint session state would pass both.
+
+    `get_workspace_spend_cap` is called *only* in the recovery branch, so
+    counting it is an exact probe for "the race actually happened" -- this test
+    refuses to pass vacuously.
+    """
+    real_lookup = spend.get_workspace_spend_cap
+    recoveries = {"n": 0}
+
+    async def counting_lookup(session, *, workspace_id):
+        recoveries["n"] += 1
+        return await real_lookup(session, workspace_id=workspace_id)
+
+    monkeypatch.setattr(spend, "get_workspace_spend_cap", counting_lookup)
+
+    async def racer(workspace_id: uuid.UUID, actor: uuid.UUID):
+        async with AsyncSessionLocal() as session:
+            cap = await spend.ensure_default_spend_cap(
+                session, workspace_id=workspace_id, actor_id=actor
+            )
+            cap_id = cap.id
+            # Must still be usable: proves the unique violation stayed inside
+            # the savepoint rather than aborting this transaction.
+            count = await _cap_count(session, workspace_id)
+            await session.commit()
+            return cap_id, count
+
+    # Both coroutines yield at their first await, so both reach the existence
+    # SELECT before either flushes. Retried a bounded number of times because
+    # scheduling is not contractually guaranteed.
+    for _attempt in range(10):
+        workspace_id, actor = await _bare_workspace()
+        results = await asyncio.gather(racer(workspace_id, actor), racer(workspace_id, actor))
+        if recoveries["n"]:
+            break
+    else:
+        pytest.skip("could not schedule the concurrent race in this environment")
+
+    (first_id, first_count), (second_id, second_count) = results
+    assert first_id == second_id, "both callers must end up with the same cap"
+    assert first_count == second_count == 1, "sessions stayed usable; exactly one cap row"
+
+    async with AsyncSessionLocal() as check:
+        assert await _cap_count(check, workspace_id) == 1, "no duplicate cap committed"

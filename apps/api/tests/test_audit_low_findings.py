@@ -145,24 +145,19 @@ async def test_unhandled_error_response_carries_the_request_id():
     middleware, so RequestIDMiddleware could log the id but never attach it to
     the response. Both halves must hold on the failing path."""
     import httpx
-    from fastapi import FastAPI, Request, Response
-    from fastapi.responses import JSONResponse
+    from fastapi import FastAPI
     from httpx import ASGITransport
 
     from app.core.audit import RequestIDMiddleware
 
+    # The PRODUCTION handler, not a copy of it. A local re-implementation here
+    # would keep passing if app.main stopped setting the header, which is the
+    # only thing this test exists to catch.
+    from app.main import _unhandled_exception_handler
+
     probe = FastAPI()
     probe.add_middleware(RequestIDMiddleware)
-
-    async def handler(request: Request, exc: Exception) -> Response:
-        request_id = getattr(request.state, "request_id", None)
-        return JSONResponse(
-            status_code=500,
-            content={"detail": "internal server error"},
-            headers={"X-Request-ID": request_id} if request_id else None,
-        )
-
-    probe.add_exception_handler(Exception, handler)
+    probe.add_exception_handler(Exception, _unhandled_exception_handler)
 
     @probe.get("/boom")
     async def boom():
@@ -186,8 +181,8 @@ async def test_unhandled_error_response_carries_the_request_id():
         assert failed.headers["X-Request-ID"] != ok.headers["X-Request-ID"]
 
 
-def test_app_registers_an_unhandled_exception_handler():
-    """Pins that the real app wires the handler, not just this probe."""
-    from app.main import app
+def test_app_registers_the_same_unhandled_exception_handler():
+    """Pins that the real app wires the exact handler the probe exercises."""
+    from app.main import _unhandled_exception_handler, app
 
-    assert Exception in app.exception_handlers
+    assert app.exception_handlers.get(Exception) is _unhandled_exception_handler
