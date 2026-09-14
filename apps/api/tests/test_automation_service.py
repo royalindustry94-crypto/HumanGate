@@ -299,8 +299,9 @@ async def test_lost_lease_cancels_inflight_tick_and_allows_takeover(monkeypatch)
         standby_poll_seconds=0.01,
     )
     task_a = asyncio.create_task(service_a.run(stop_owner_a))
-    task_b = asyncio.create_task(service_b.run(stop_owner_b))
+    task_b: asyncio.Task[None] | None = None
     try:
+
         async def _tick_started() -> bool:
             return tick_started.is_set()
 
@@ -317,6 +318,7 @@ async def test_lost_lease_cancels_inflight_tick_and_allows_takeover(monkeypatch)
             return (await automation_health_snapshot())["scheduler"]["ticks"] == 1
 
         await _wait_for(_tick_started)
+        task_b = asyncio.create_task(service_b.run(stop_owner_b))
         await _wait_for(_takeover_complete)
         await _wait_for(_tick_cancelled)
         await _wait_for(_winner_ticked)
@@ -330,7 +332,8 @@ async def test_lost_lease_cancels_inflight_tick_and_allows_takeover(monkeypatch)
         stop_owner_a.set()
         stop_owner_b.set()
         await asyncio.wait_for(task_a, timeout=5)
-        await asyncio.wait_for(task_b, timeout=5)
+        if task_b is not None:
+            await asyncio.wait_for(task_b, timeout=5)
 
 
 @pytest.mark.asyncio

@@ -188,4 +188,5 @@ def test_staging_automation_service_runs_continuously_with_process_liveness_heal
     assert {"DATABASE_URL", "APP_DATABASE_URL", "ENVIRONMENT", "RUN_MIGRATIONS"} <= env_keys
     assert "healthcheck:" in automation
     assert "automation_process_healthcheck" in automation
+    assert "_owner_id" not in automation
     assert "automation_health_snapshot" not in automation
