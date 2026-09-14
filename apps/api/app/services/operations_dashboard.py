@@ -97,6 +97,121 @@ async def _count(session: AsyncSession, stmt) -> int:
     return int(value or 0)
 
 
+_WORKER_TOTAL_FIELDS = (
+    "jobs_completed",
+    "jobs_failed",
+    "retry_count",
+    "completed_today",
+    "failed_today",
+)
+# Shared read-only default for a worker with no assignments in this workspace.
+_EMPTY_WORKER_TOTALS: dict[str, int] = dict.fromkeys(_WORKER_TOTAL_FIELDS, 0)
+
+
+async def _worker_assignment_totals(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    worker_ids: list[uuid.UUID],
+    *,
+    day_start: datetime,
+) -> dict[uuid.UUID, dict[str, int]]:
+    """Per-worker assignment tallies for the whole worker set in one query.
+
+    Conditional aggregates (`COUNT(...) FILTER (WHERE ...)`) replace what used
+    to be five separate per-worker queries inside the `workers()` loop.
+    """
+    if not worker_ids:
+        return {}
+    completed = StageAssignment.status == StageAssignmentStatus.COMPLETED
+    failed = StageAssignment.status == StageAssignmentStatus.FAILED
+    stmt = (
+        select(
+            StageAssignment.worker_id.label("worker_id"),
+            func.count(StageAssignment.id).filter(completed).label("jobs_completed"),
+            func.count(StageAssignment.id).filter(failed).label("jobs_failed"),
+            func.count(StageAssignment.id)
+            .filter(StageAssignment.attempt_number > 1)
+            .label("retry_count"),
+            func.count(StageAssignment.id)
+            .filter(
+                completed,
+                or_(
+                    StageAssignment.completed_at >= day_start,
+                    StageAssignment.updated_at >= day_start,
+                ),
+            )
+            .label("completed_today"),
+            func.count(StageAssignment.id)
+            .filter(failed, StageAssignment.updated_at >= day_start)
+            .label("failed_today"),
+        )
+        .where(
+            StageAssignment.workspace_id == workspace_id,
+            StageAssignment.worker_id.in_(worker_ids),
+        )
+        .group_by(StageAssignment.worker_id)
+    )
+    return {
+        row.worker_id: {field: int(getattr(row, field) or 0) for field in _WORKER_TOTAL_FIELDS}
+        for row in (await session.execute(stmt)).all()
+    }
+
+
+async def _worker_active_assignments(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    worker_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, StageAssignment]:
+    """Most recently updated in-flight assignment per worker, in one query.
+
+    `DISTINCT ON (worker_id)` with a matching leading ORDER BY term is the
+    Postgres form of "top row per group"; this service is Postgres-only.
+    """
+    if not worker_ids:
+        return {}
+    stmt = (
+        select(StageAssignment)
+        .where(
+            StageAssignment.workspace_id == workspace_id,
+            StageAssignment.worker_id.in_(worker_ids),
+            StageAssignment.status.in_(
+                [
+                    StageAssignmentStatus.DISPATCHED,
+                    StageAssignmentStatus.ACKNOWLEDGED,
+                ]
+            ),
+        )
+        .order_by(StageAssignment.worker_id, StageAssignment.updated_at.desc())
+        .distinct(StageAssignment.worker_id)
+    )
+    return {
+        assignment.worker_id: assignment
+        for assignment in (await session.execute(stmt)).scalars().all()
+        if assignment.worker_id is not None
+    }
+
+
+async def _pending_counts_by_stage(
+    session: AsyncSession, workspace_id: uuid.UUID
+) -> dict[str, int]:
+    """Pending assignment depth per stage, summed per worker by the caller.
+
+    Stages partition the pending set, so summing a worker's supported stages
+    is equivalent to the old per-worker `stage.in_(supported_stages)` count.
+    """
+    stmt = (
+        select(StageAssignment.stage, func.count(StageAssignment.id))
+        .where(
+            StageAssignment.workspace_id == workspace_id,
+            StageAssignment.status == StageAssignmentStatus.PENDING,
+        )
+        .group_by(StageAssignment.stage)
+    )
+    return {
+        _enum_value(stage): int(count or 0) for stage, count in (await session.execute(stmt)).all()
+    }
+
+
 def _resource_percent(capabilities: dict | None, *keys: str) -> float | None:
     if not isinstance(capabilities, dict):
         return None
@@ -213,75 +328,27 @@ async def workers(session: AsyncSession, workspace_id: uuid.UUID) -> WorkerMonit
         )
         .order_by(WorkerRegistration.name)
     )
-    rows: list[WorkerMonitorRow] = []
+    registrations = list(result.scalars().all())
     now = datetime.now(UTC)
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    for worker in result.scalars().all():
-        active = (
-            await session.execute(
-                select(StageAssignment)
-                .where(
-                    StageAssignment.workspace_id == workspace_id,
-                    StageAssignment.worker_id == worker.id,
-                    StageAssignment.status.in_(
-                        [
-                            StageAssignmentStatus.DISPATCHED,
-                            StageAssignmentStatus.ACKNOWLEDGED,
-                        ]
-                    ),
-                )
-                .order_by(StageAssignment.updated_at.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        counts = await session.execute(
-            select(StageAssignment.status, func.count(StageAssignment.id))
-            .where(
-                StageAssignment.workspace_id == workspace_id,
-                StageAssignment.worker_id == worker.id,
-            )
-            .group_by(StageAssignment.status)
+
+    # Three set-wide queries instead of six per worker. The previous shape was
+    # 6W+1 round-trips for W workers on a route the dashboard auto-refreshes.
+    worker_ids = [worker.id for worker in registrations]
+    totals = await _worker_assignment_totals(session, workspace_id, worker_ids, day_start=day_start)
+    active_by_worker = await _worker_active_assignments(session, workspace_id, worker_ids)
+    pending_by_stage = await _pending_counts_by_stage(session, workspace_id)
+
+    rows: list[WorkerMonitorRow] = []
+    for worker in registrations:
+        tally = totals.get(worker.id, _EMPTY_WORKER_TOTALS)
+        active = active_by_worker.get(worker.id)
+        # dict.fromkeys dedupes while preserving order: a stage listed twice in
+        # supported_stages must not be counted twice, which the previous
+        # `stage.in_(...)` form gave for free.
+        queue = sum(
+            pending_by_stage.get(stage, 0) for stage in dict.fromkeys(worker.supported_stages or ())
         )
-        status_counts = {_enum_value(status): int(count) for status, count in counts.all()}
-        retry_count = await _count(
-            session,
-            select(func.count(StageAssignment.id)).where(
-                StageAssignment.workspace_id == workspace_id,
-                StageAssignment.worker_id == worker.id,
-                StageAssignment.attempt_number > 1,
-            ),
-        )
-        completed_today = await _count(
-            session,
-            select(func.count(StageAssignment.id)).where(
-                StageAssignment.workspace_id == workspace_id,
-                StageAssignment.worker_id == worker.id,
-                StageAssignment.status == StageAssignmentStatus.COMPLETED,
-                or_(
-                    StageAssignment.completed_at >= day_start,
-                    StageAssignment.updated_at >= day_start,
-                ),
-            ),
-        )
-        failed_today = await _count(
-            session,
-            select(func.count(StageAssignment.id)).where(
-                StageAssignment.workspace_id == workspace_id,
-                StageAssignment.worker_id == worker.id,
-                StageAssignment.status == StageAssignmentStatus.FAILED,
-                StageAssignment.updated_at >= day_start,
-            ),
-        )
-        queue = 0
-        if worker.supported_stages:
-            queue = await _count(
-                session,
-                select(func.count(StageAssignment.id)).where(
-                    StageAssignment.workspace_id == workspace_id,
-                    StageAssignment.status == StageAssignmentStatus.PENDING,
-                    StageAssignment.stage.in_(worker.supported_stages),
-                ),
-            )
         lease_status = "none"
         if active is not None and active.lease_expires_at is not None:
             lease_status = "expired" if active.lease_expires_at <= now else "active"
@@ -309,11 +376,11 @@ async def workers(session: AsyncSession, workspace_id: uuid.UUID) -> WorkerMonit
                 current_task=current,
                 queue=queue,
                 last_heartbeat_at=worker.last_heartbeat_at,
-                retry_count=retry_count,
-                jobs_completed=status_counts.get(StageAssignmentStatus.COMPLETED.value, 0),
-                jobs_failed=status_counts.get(StageAssignmentStatus.FAILED.value, 0),
-                jobs_completed_today=completed_today,
-                jobs_failed_today=failed_today,
+                retry_count=tally["retry_count"],
+                jobs_completed=tally["jobs_completed"],
+                jobs_failed=tally["jobs_failed"],
+                jobs_completed_today=tally["completed_today"],
+                jobs_failed_today=tally["failed_today"],
                 cpu_percent=_resource_percent(
                     worker.capabilities, "cpu_percent", "cpu", "cpu_usage"
                 ),
