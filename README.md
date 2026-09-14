@@ -36,6 +36,10 @@ alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 
 # separate terminal
+cd apps/api
+python -m app.automation
+
+# separate terminal
 cd apps/worker
 pip install -e ".[dev]" -c constraints-prod.txt
 python -m worker.main

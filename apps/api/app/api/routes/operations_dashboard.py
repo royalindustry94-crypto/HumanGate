@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.automation import automation_health_snapshot
 from app.core.authorization import require_workspace_admin
 from app.core.security import AuthenticatedUser, get_current_session, get_current_user
 from app.models.workspace_membership import WorkspaceMembership
@@ -195,23 +196,10 @@ async def activity_feed(
 @router.get("/health", response_model=SystemHealthOut)
 async def system_health(
     workspace_id: uuid.UUID,
-    request: Request,
     membership: WorkspaceMembership = Depends(require_workspace_admin),
     db: AsyncSession = Depends(get_current_session),
 ) -> SystemHealthOut:
-    from app.main import automation_state as module_state
-
-    state = getattr(request.app.state, "automation", None) or module_state
-    automation = {
-        "tasks_running": list(state.tasks_running),
-        "scheduler": {
-            "ticks": state.scheduler_ticks,
-            "last_ok_at": (
-                state.scheduler_last_ok_at.isoformat() if state.scheduler_last_ok_at else None
-            ),
-            "last_error": state.scheduler_last_error,
-        },
-    }
+    automation = await automation_health_snapshot()
     return await operations_mission.system_health(db, workspace_id, automation=automation)
 
 
@@ -365,26 +353,13 @@ async def live_logs(
     )
 
 
-def _automation_payload(request: Request) -> dict:
-    from app.main import automation_state as module_state
-
-    state = getattr(request.app.state, "automation", None) or module_state
-    return {
-        "tasks_running": list(state.tasks_running),
-        "scheduler": {
-            "ticks": state.scheduler_ticks,
-            "last_ok_at": (
-                state.scheduler_last_ok_at.isoformat() if state.scheduler_last_ok_at else None
-            ),
-            "last_error": state.scheduler_last_error,
-        },
-    }
+async def _automation_payload() -> dict:
+    return await automation_health_snapshot()
 
 
 @router.get("/executive-mode", response_model=ExecutiveModeOut)
 async def executive_mode(
     workspace_id: uuid.UUID,
-    request: Request,
     membership: WorkspaceMembership = Depends(require_workspace_admin),
     user: AuthenticatedUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_current_session),
@@ -393,7 +368,7 @@ async def executive_mode(
         db,
         workspace_id,
         admin_user_id=uuid.UUID(user.id),
-        automation=_automation_payload(request),
+        automation=await _automation_payload(),
     )
 
 

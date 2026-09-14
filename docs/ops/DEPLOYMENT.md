@@ -33,6 +33,9 @@ non-local environment, including `staging`.
 
 The worker service does **not** load `.env` and does not receive
 `DATABASE_URL` or `POSTGRES_PASSWORD`. It talks to the API over HTTP.
+The separate `automation` service runs the scheduler, outbox relay, and
+maintenance loops directly from the API package; the FastAPI/Vercel API no
+longer owns those persistent tasks.
 
 After `alembic upgrade head`, the API entrypoint rotates the runtime role
 to `APP_RUNTIME_PASSWORD` using PostgreSQL `format(%I, %L)` (no raw-SQL
@@ -61,6 +64,7 @@ Services:
 | `postgres` | `postgres:16-alpine` | none | Reachable only on the Compose network |
 | `api` | `apps/api/Dockerfile` | `8000` | `RUN_MIGRATIONS=1` → `alembic upgrade head` then uvicorn |
 | `worker` | `apps/worker/Dockerfile` | — | HTTP-only; no `.env` / owner DSN. Needs `WORKER_CREDENTIAL` / `WORKER_ID` to claim work |
+| `automation` | `apps/api/Dockerfile` | — | Runs `python -m app.automation`; owns scheduler/outbox/maintenance leases in Postgres |
 | `web` | `apps/web/Dockerfile` | `8080` | nginx serves `dist`; proxies `/api/` → `api:8000/` |
 
 Stop / tear down:
@@ -126,8 +130,8 @@ See `.env.example` for the full annotated list. Staging-relevant knobs:
 | `ENVIRONMENT` | `development` enables `/docs`, `/redoc`, `/openapi.json`. Any other value (including `staging` / `production` / `test`) disables them (P-005). |
 | `CORS_ALLOW_ORIGINS` | Include the web origin, e.g. `["http://localhost:8080"]` |
 | `RUN_MIGRATIONS` | Set to `1` on the API container for migrate-on-start |
-| `OUTBOX_RELAY_INTERVAL_SECONDS` | API outbox relay tick |
-| `ASSIGNMENT_REAPER_INTERVAL_SECONDS` | Lease reaper / maintenance tick |
+| `OUTBOX_RELAY_INTERVAL_SECONDS` | Automation-service outbox relay tick |
+| `ASSIGNMENT_REAPER_INTERVAL_SECONDS` | Automation-service lease reaper / maintenance tick |
 | `WORKER_OFFLINE_SWEEP_INTERVAL_SECONDS` | Offline worker sweep (via maintenance loop) |
 | `HEALTH_CHECK_INTERVAL_SECONDS` | Worker health-monitor interval |
 | `API_BASE_URL` | Worker → API (`http://api:8000` in compose) |
@@ -158,7 +162,7 @@ required for the nginx image; see commented `VITE_*` placeholders in
 |----------|---------|
 | `GET /health/live` | Process up (liveness) |
 | `GET /health/ready` | DB reachable via owner session (readiness) |
-| `GET /health/automation` | Scheduler / outbox / maintenance loop ticks |
+| `GET /health/automation` | Postgres-backed automation ownership/health (scheduler / outbox / maintenance) |
 | `GET /metrics` | Prometheus-format aggregate gauges (P-008); Bearer `METRICS_SCRAPER_TOKEN` when set / required in production |
 
 Examples:
@@ -173,8 +177,8 @@ curl -sf http://localhost:8080/api/health/live
 
 On-call: [`ON_CALL.md`](./ON_CALL.md).
 
-Compose marks `api` healthy only after `/health/live` succeeds; `worker`
-and `web` wait on that condition.
+Compose marks `api` healthy only after `/health/live` succeeds; `worker`,
+`automation`, and `web` wait on that condition.
 
 ## Migrations
 

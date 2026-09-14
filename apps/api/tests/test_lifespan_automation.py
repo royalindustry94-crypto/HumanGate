@@ -1,38 +1,23 @@
-"""P0-3: scheduler/outbox start on lifespan; shutdown awaits cancelled tasks."""
+"""P0-3: API lifespan stays stateless; automation runs elsewhere."""
 
 from __future__ import annotations
-
-import asyncio
 
 import pytest
 
 from app import main as main_mod
-from app.main import automation_state
+from app.automation import automation_health_snapshot
 
 
 @pytest.mark.asyncio
-async def test_lifespan_starts_and_stops_automation_loops():
+async def test_lifespan_does_not_start_automation_loops():
     previous = main_mod.settings.environment
     main_mod.settings.environment = "development"
-    automation_state.tasks_running = []
-    automation_state.scheduler_ticks = 0
-    automation_state.outbox_ticks = 0
     try:
         async with main_mod.lifespan(main_mod.app):
-            assert set(automation_state.tasks_running) == {
-                "maintenance",
-                "outbox_relay",
-                "scheduler",
-            }
-            # Intervals default to 2s for scheduler/outbox; poll with timeout
-            # to avoid timing races under CPU contention.
-            deadline = asyncio.get_running_loop().time() + 5.0
-            while automation_state.scheduler_ticks < 1 or automation_state.outbox_ticks < 1:
-                if asyncio.get_running_loop().time() >= deadline:
-                    break
-                await asyncio.sleep(0.1)
-            assert automation_state.scheduler_ticks >= 1
-            assert automation_state.outbox_ticks >= 1
-        assert automation_state.tasks_running == []
+            snapshot = await automation_health_snapshot()
+            assert snapshot["tasks_running"] == []
+            assert snapshot["status"] == "idle"
+        snapshot = await automation_health_snapshot()
+        assert snapshot["tasks_running"] == []
     finally:
         main_mod.settings.environment = previous

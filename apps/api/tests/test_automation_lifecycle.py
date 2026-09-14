@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.main import app, automation_state
+from app.main import app
 from app.orchestration import consumers
 from app.orchestration.events.types import REVIEW_APPROVED, REVIEW_REJECTED
 from app.orchestration.relay import _REGISTRY
@@ -25,11 +25,11 @@ async def test_health_automation_endpoint(client):
     assert "scheduler" in body
     assert "outbox_relay" in body
     assert "maintenance" in body
-    # ENVIRONMENT=test => loops not started
+    assert body["scheduler"]["status"] == "idle"
+    assert body["scheduler"]["owner_id"] is None
+    # ENVIRONMENT=test => API process stays stateless
     assert body["tasks_running"] == []
 
 
-@pytest.mark.asyncio
-async def test_automation_state_object_exists():
-    assert automation_state is not None
+def test_app_routes_exist():
     assert app.router.routes

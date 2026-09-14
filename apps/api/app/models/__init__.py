@@ -3,6 +3,7 @@
 # only (columns, FKs, relationships) — no business logic.
 
 from app.models.assignments import StageAssignment  # noqa: F401
+from app.models.automation import AutomationLease  # noqa: F401
 from app.models.backpressure import (  # noqa: F401
     ProviderConcurrencyBudget,
     WorkspaceBackpressureState,
@@ -128,6 +129,7 @@ __all__ = [
     "WorkerRegistration",
     "WorkerHeartbeat",
     "StageAssignment",
+    "AutomationLease",
     "StageClaimAudit",
     "StageRecoveryAudit",
     "ProviderEffectKey",
