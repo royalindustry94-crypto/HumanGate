@@ -52,10 +52,16 @@ from app.orchestration.provider_budgets import has_provider_capacity
 
 logger = logging.getLogger(__name__)
 
-# Runaway guard on the candidate scan. Not the termination condition -- the
-# loop ends when the pair-excluding query finds nothing -- so this only
-# trips on a bug, and is sized far above any real provider count.
-_CLAIM_SCAN_GUARD = 10_000
+# Diagnostic threshold on the candidate scan -- deliberately NOT a bound.
+#
+# Every fixed bound tried here was wrong in the same way: the scan stopped with
+# `saw_provider_budget_block` still true and a claimable row still behind the
+# retired pairs, so the caller was told `capacity` when work was available
+# (audit M-2 / review C3). The number of distinct (workspace_id, provider)
+# pairs is arbitrary per-tenant data, so no constant can be derived from it.
+# The scan therefore terminates only on candidate exhaustion; crossing this
+# many passes is logged once, as an observation, and the scan continues.
+_CLAIM_SCAN_REPORT_AFTER = 10_000
 
 # Back-compat module aliases; prefer Settings at call sites.
 CLAIM_HEARTBEAT_MAX_AGE_SECONDS = 90
@@ -230,23 +236,23 @@ async def claim_assignment(
 
     from sqlalchemy import text as sa_text
 
-    # The scan runs until the pair-excluding candidate query is exhausted,
-    # rather than for a fixed number of passes.
+    # Candidate exhaustion is the ONLY termination condition for this scan.
     #
-    # Each pass either claims, finds nothing, or retires exactly one
-    # (workspace_id, provider) pair -- and the candidate query excludes every
-    # retired pair, so the candidate set strictly shrinks and the loop
-    # terminates. A fixed bound cannot do this safely: `range(batch)` stopped
-    # after 32 pairs and reported `capacity` with a claimable row still behind
-    # them, and deriving the bound from a COUNT of provider_concurrency_budgets
-    # only moved the problem -- that count is a READ COMMITTED snapshot taken
-    # before the scan, so budgets committed mid-claim could still outrun it,
-    # and for a global worker it scanned every tenant's budgets on every poll,
-    # including no-work polls.
+    # Each pass either claims a row, finds no candidate at all, or retires
+    # exactly one (workspace_id, provider) pair. The candidate query excludes
+    # every retired pair, so a returned row's pair is by construction one not
+    # yet in `saturated`: the list grows by a distinct pair each pass, and the
+    # pending set holds finitely many distinct pairs. The loop is therefore
+    # bounded by the data itself and needs no synthetic cap.
     #
-    # `_CLAIM_SCAN_GUARD` is a runaway guard, not the termination condition; it
-    # is only reachable if a retired pair somehow fails to be excluded, which
-    # would be a bug worth seeing in the logs rather than looping on.
+    # Neither `range(batch)` nor `range(10_000)` was safe: both stop with
+    # `saw_provider_budget_block` still true and a claimable row still behind
+    # the retired pairs, which is exactly the false-`capacity` bug this scan
+    # exists to avoid. Deriving the bound from a COUNT of
+    # provider_concurrency_budgets only moved the problem -- that count is a
+    # READ COMMITTED snapshot taken before the scan, so budgets committed
+    # mid-claim could outrun it, and for a global worker it scanned every
+    # tenant's budgets on every poll, including no-work polls.
     effective = effective_priority_expr(
         StageAssignment.priority, StageAssignment.created_at, now=now
     )
@@ -259,7 +265,21 @@ async def claim_assignment(
     assignment: StageAssignment | None = None
     saw_provider_budget_block = False
 
-    for _ in range(_CLAIM_SCAN_GUARD):
+    scan_passes = 0
+
+    while True:
+        scan_passes += 1
+        if scan_passes == _CLAIM_SCAN_REPORT_AFTER:
+            # Observation only: log once and keep scanning. Converting this
+            # into a stop would hand the caller a false `capacity`.
+            logger.warning(
+                "claim candidate scan is unusually long",
+                extra={
+                    "worker_id": str(worker.id),
+                    "saturated_pairs": len(saturated),
+                    "passes": scan_passes,
+                },
+            )
         await session.execute(sa_text("SAVEPOINT claim_candidate"))
         where = [
             StageAssignment.status == StageAssignmentStatus.PENDING,
@@ -319,17 +339,6 @@ async def claim_assignment(
         assignment = row
         await session.execute(sa_text("RELEASE SAVEPOINT claim_candidate"))
         break
-    else:
-        # Unreachable unless a retired pair failed to be excluded. Surface it
-        # rather than silently reporting no work.
-        logger.warning(
-            "claim candidate scan hit the runaway guard",
-            extra={
-                "worker_id": str(worker.id),
-                "saturated_pairs": len(saturated),
-                "guard": _CLAIM_SCAN_GUARD,
-            },
-        )
 
     if assignment is None:
         reason = (

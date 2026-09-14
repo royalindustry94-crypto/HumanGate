@@ -774,57 +774,85 @@ async def test_null_provider_candidates_survive_saturated_pair_exclusion(ctx):
 
 
 @pytest.mark.asyncio
-async def test_more_saturated_pairs_than_the_candidate_batch_still_reaches_the_claimable_row(
-    ctx, monkeypatch
+async def test_saturated_pair_scan_crosses_its_diagnostic_threshold_and_still_grants(
+    ctx, monkeypatch, caplog
 ):
-    """Copilot follow-up to M-2: the scan bound must not cause false capacity.
+    """Copilot follow-up to M-2/C3: no fixed scan bound may cause false capacity.
 
     Excluding whole (workspace, provider) pairs fixed the row-by-row rescan,
-    but the loop was still capped at `claim_candidate_batch_size` passes and
-    each pass retires only one pair. With more saturated budgets than that cap,
-    ranked above the eligible assignment, the loop ran out of passes and
-    reported `capacity` while a claimable row existed. The bound is now derived
-    from how many budgets could actually be saturated.
+    but the loop was still capped -- first at `claim_candidate_batch_size`, then
+    at a flat 10,000. Each pass retires exactly one pair, so with more saturated
+    budgets than the cap ranked above the eligible assignment, the scan ran out
+    of passes with `saw_provider_budget_block` still true and reported
+    `capacity` while a claimable row existed.
 
-    The batch size is shrunk rather than seeding 33 providers so the test stays
-    fast; the failure mode is identical.
+    This drives the boundary directly instead of inferring it from a setting the
+    scan no longer reads: `_CLAIM_SCAN_REPORT_AFTER` is lowered below the number
+    of saturated pairs, so the scan MUST cross it. Seeding 10,001 provider
+    budgets would exercise the identical code path at unusable cost; lowering
+    the constant keeps the boundary real and the test fast. The caplog assertion
+    pins that the threshold was genuinely crossed -- without it this test would
+    silently degrade into the same never-reaches-the-bound case Copilot flagged.
+
+    Against any bounding implementation (`for _ in range(_CLAIM_SCAN_REPORT_AFTER)`)
+    this fails with outcome == "capacity".
     """
-    from app.core.config import get_settings
+    import logging
 
-    monkeypatch.setenv("CLAIM_CANDIDATE_BATCH_SIZE", "2")
-    get_settings.cache_clear()
-    try:
-        assert get_settings().claim_candidate_batch_size == 2
-        saturated_providers = ["openai", "anthropic", "gemini"]
-        assert len(saturated_providers) > get_settings().claim_candidate_batch_size
+    from app.orchestration import claiming
 
-        for provider in saturated_providers:
-            r = await ctx["client"].put(
-                f"/workspaces/{ctx['ws']}/provider-budgets/{provider}",
-                headers=ctx["headers"],
-                json={"max_concurrent": 1},
-            )
-            assert r.status_code == 200, r.text
-            # Saturate it with one in-flight assignment...
-            inflight = await _seed_assignment(ctx["ws"], provider=provider)
-            async with AsyncSessionLocal() as s:
-                a = await s.get(StageAssignment, inflight)
-                a.status = StageAssignmentStatus.DISPATCHED
-                a.dispatched_at = datetime.now(UTC)
-                await s.commit()
-            # ...and rank a blocked candidate above the claimable one.
-            await _seed_assignment(ctx["ws"], provider=provider, priority=99)
+    saturated_providers = ["openai", "anthropic", "gemini"]
+    # Strictly below the pair count, so the scan cannot finish without crossing.
+    monkeypatch.setattr(claiming, "_CLAIM_SCAN_REPORT_AFTER", 2)
+    assert claiming._CLAIM_SCAN_REPORT_AFTER < len(saturated_providers)
 
-        claimable = await _seed_assignment(ctx["ws"], provider="unbudgeted", priority=1)
+    for provider in saturated_providers:
+        r = await ctx["client"].put(
+            f"/workspaces/{ctx['ws']}/provider-budgets/{provider}",
+            headers=ctx["headers"],
+            json={"max_concurrent": 1},
+        )
+        assert r.status_code == 200, r.text
+        # Saturate it with one in-flight assignment...
+        inflight = await _seed_assignment(ctx["ws"], provider=provider)
+        async with AsyncSessionLocal() as s:
+            a = await s.get(StageAssignment, inflight)
+            a.status = StageAssignmentStatus.DISPATCHED
+            a.dispatched_at = datetime.now(UTC)
+            await s.commit()
+        # ...and rank a blocked candidate above the claimable one.
+        await _seed_assignment(ctx["ws"], provider=provider, priority=99)
 
-        prov = await _provision(ctx["client"], ctx["headers"], ctx["ws"])
-        wh = await _bring_online(ctx["client"], prov)
+    claimable = await _seed_assignment(ctx["ws"], provider="unbudgeted", priority=1)
+
+    prov = await _provision(ctx["client"], ctx["headers"], ctx["ws"])
+    wh = await _bring_online(ctx["client"], prov)
+    with caplog.at_level(logging.WARNING, logger=claiming.__name__):
         r = await ctx["client"].post("/workers/claim", headers=wh, json={})
 
-        assert r.json()["outcome"] == "granted", (
-            "with more saturated pairs than the candidate batch, the scan must "
-            "still reach the claimable assignment instead of reporting capacity"
-        )
-        assert r.json()["assignment"]["id"] == str(claimable)
-    finally:
-        get_settings.cache_clear()
+    assert r.json()["outcome"] == "granted", (
+        "with more saturated pairs than the scan's diagnostic threshold, the "
+        "scan must still reach the claimable assignment instead of reporting "
+        "capacity -- the threshold is an observation, not a bound"
+    )
+    assert r.json()["assignment"]["id"] == str(claimable)
+    assert any("claim candidate scan is unusually long" in m for m in caplog.messages), (
+        "the scan did not actually cross its threshold, so this test would "
+        "pass against a bounded implementation too"
+    )
+
+
+def test_the_scan_threshold_is_not_used_as_a_loop_bound() -> None:
+    """Belt and braces on the above: the constant must never bound iteration.
+
+    A future edit could reintroduce `for _ in range(_CLAIM_SCAN_REPORT_AFTER)`,
+    and with the threshold patched low the behavioural test above would catch
+    it -- but only while that test survives. Pin the shape too.
+    """
+    import inspect
+
+    from app.orchestration import claiming
+
+    source = inspect.getsource(claiming.claim_assignment)
+    assert "range(_CLAIM_SCAN_REPORT_AFTER)" not in source
+    assert "while True:" in source
