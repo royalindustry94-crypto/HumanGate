@@ -331,6 +331,25 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _validate_cors_origins(self) -> Settings:
+        """Reject a credentialed wildcard origin (audit L-7).
+
+        `app.main` attaches CORSMiddleware with `allow_credentials=True`, and
+        `"*"` combined with credentials means any site can make authenticated
+        cross-origin calls on a signed-in user's behalf. Browsers refuse that
+        pairing, so it would present as a confusing CORS failure rather than an
+        obvious misconfiguration; failing closed here says what is wrong.
+        Local environments are not exempt: nothing legitimately needs it.
+        """
+        if any(origin.strip() == "*" for origin in self.cors_allow_origins):
+            raise ValueError(
+                "CORS_ALLOW_ORIGINS must not contain '*': the API sends "
+                "credentials, and a wildcard origin with credentials is both "
+                "unsafe and rejected by browsers. List explicit origins."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _validate_auth_mode(self) -> Settings:
         mode = self.auth_mode.strip().lower()
         if mode not in {"local", "supabase"}:

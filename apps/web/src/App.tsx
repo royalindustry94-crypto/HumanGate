@@ -1,12 +1,17 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
 import {
   createWorkspace,
   listWorkspaces,
   login,
   signup,
 } from "./api";
-import LumoraDashboard from "./LumoraDashboard";
 import { BusinessManagerMark } from "./BusinessManagerMark";
+
+// Code-split (audit M-5). The dashboard and the API client it pulls in are the
+// bulk of the bundle and are unreachable until a session exists, so a visitor
+// on the sign-in screen should not download them. Tests import
+// ./LumoraDashboard directly and are unaffected by this boundary.
+const LumoraDashboard = lazy(() => import("./LumoraDashboard"));
 
 type Session = {
   token: string;
@@ -93,21 +98,29 @@ export default function App() {
   if (session) {
     return (
       <>
-        <LumoraDashboard
-          token={session.token}
-          workspaceId={session.workspaceId}
-          email={session.email}
-          onWorkspaceChange={(workspaceId) => {
-            const next = { ...session, workspaceId };
-            sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-            setSession(next);
-          }}
-          onSignOut={() => {
-            sessionStorage.removeItem(STORAGE_KEY);
-            setLaunchState("hidden");
-            setSession(null);
-          }}
-        />
+        <Suspense
+          fallback={
+            <div className="auth-shell" role="status" aria-live="polite">
+              <p>Loading Mission Control…</p>
+            </div>
+          }
+        >
+          <LumoraDashboard
+            token={session.token}
+            workspaceId={session.workspaceId}
+            email={session.email}
+            onWorkspaceChange={(workspaceId) => {
+              const next = { ...session, workspaceId };
+              sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+              setSession(next);
+            }}
+            onSignOut={() => {
+              sessionStorage.removeItem(STORAGE_KEY);
+              setLaunchState("hidden");
+              setSession(null);
+            }}
+          />
+        </Suspense>
         {launchState !== "hidden" ? (
           <div aria-label="The Business Manager launch" className={launchState === "exiting" ? "business-launch business-launch--exiting" : "business-launch"} role="status">
             <BusinessManagerMark className="business-launch__mark" />

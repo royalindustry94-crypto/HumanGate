@@ -6,6 +6,7 @@ import uuid
 from decimal import Decimal
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -52,7 +53,20 @@ async def ensure_default_spend_cap(
         updated_by=actor_id,
     )
     session.add(cap)
-    await session.flush()
+    # Concurrent first-touch of the same workspace both miss the SELECT above
+    # and race to INSERT. `uq_spend_caps_workspace_provider` (migration 0003)
+    # keeps that from creating a duplicate cap, but the loser used to surface
+    # as an unhandled IntegrityError -> HTTP 500 (audit L-4). Re-read the row
+    # the winner committed instead: the caller wanted the cap to exist, and it
+    # now does.
+    try:
+        async with session.begin_nested():
+            await session.flush()
+    except IntegrityError:
+        existing = await get_workspace_spend_cap(session, workspace_id=workspace_id)
+        if existing is None:  # pragma: no cover - unique violation implies a row
+            raise
+        return existing
     return cap
 
 
