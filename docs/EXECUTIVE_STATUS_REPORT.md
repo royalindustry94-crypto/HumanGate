@@ -96,15 +96,18 @@ Independently re-verified live in the 2026-09-09 recovery audit (`protected: tru
 re-probed again this pass — no reason to expect regression, but flagged as carried-forward
 rather than freshly checked.
 
-### 2. Managed runtime / Supabase evidence — RE-OPENED (drift, 2026-09-14)
+### 2. Managed runtime / Supabase evidence — RE-OPENED (drift, status unverified, 2026-09-14)
 
 Previously reported RESOLVED for database/RLS/grant-state purposes. The last independently
-confirmed managed-database Alembic head (`docs/TECHNICAL_DEBT_REGISTER.md` TD-071,
-2026-09-10 update) was `0055`. `main` has since advanced through `0056` and `0057` — **not
-yet applied to or verified against the managed project**, per this pass's independent
-re-derivation of the current head. This is a real, growing gap that a prior version of this
-report did not carry forward accurately. PITR/backup policy remains separately unverified,
-unchanged.
+confirmed managed-database Alembic head is **`0056`** (issue #68, 2026-09-11 — corrected here
+per a Copilot review on PR #141; this report's first draft under-cited the evidence and used
+TD-071's older `0055` figure). `main` has since advanced once more, to `0057`, via PR #137
+(2026-09-14). **Whether `0057` has reached the managed project is unverified**, not
+confirmed-absent — no Supabase query has run since the 2026-09-11 check. This is a real gap
+in verification currency that a prior version of this report did not carry forward
+accurately, but it is a one-migration, unverified-status gap, not the two-migration
+confirmed-unapplied gap this report first stated. PITR/backup policy remains separately
+unverified, unchanged.
 
 ### 3. Live provider execution remains deferred
 
@@ -145,7 +148,7 @@ closed issue and this report.
 
 1. ~~Close issue #50 by enabling and independently verifying `main` protection~~ — **DONE**, 2026-09-09.
 2. ~~Close issue #126's four Critical findings~~ — **DONE**, 2026-09-14 (PRs #129/#130/#137/#140).
-3. Re-verify managed-Supabase Alembic parity — apply `0056`/`0057` to the managed project and re-run the Security Advisor (RUNTIME-001, re-opened above). Touches the managed database; deliberately not performed by this docs-only pass.
+3. Re-verify managed-Supabase Alembic parity (RUNTIME-001, re-opened above) — first query the managed project's actual `alembic_version` (it may already read `0057`, in which case this closes immediately); only apply `0057` and re-run the Security Advisor if it doesn't. Touches the managed database; deliberately not performed by this docs-only pass.
 4. Triage issue #126's follow-up warnings (TD-089..TD-096) with a real read-the-code investigation per item, then prioritize by actual severity.
 5. Get the one remaining Founder Studio Test step done: a hands-on mobile click-through of the now-live `https://royalindustry9.vercel.app` deployment (issue #68) to convert the existing functional PASS into a full end-to-end verdict.
 6. Reconcile and select the first revenue-producing private-beta workflow.

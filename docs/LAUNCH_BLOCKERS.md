@@ -121,20 +121,23 @@ per-check ruleset detail (which status checks are required, force-push/deletion 
 admin-enforcement) was not individually re-read then and still hasn't been — reopen narrowly
 if that finer-grained evidence is ever needed for an external audit.
 
-### RUNTIME-001 — Managed Supabase/runtime verification — **RE-OPENED (drift, 2026-09-14)**
+### RUNTIME-001 — Managed Supabase/runtime verification — **RE-OPENED (drift, status unverified, 2026-09-14)**
 
-Previously marked CLOSED. The last independently confirmed managed-database Alembic head
-(`docs/TECHNICAL_DEBT_REGISTER.md` TD-071, 2026-09-10 update) was **`0055`**. `main` has
-since advanced through migrations `0056` and `0057` (issue #108's review-gate RLS widening,
-and P0-3's automation-ownership migration) — **neither has been applied to or verified
-against the managed `content-orchestrator-test` project**, per this pass's independent
-re-derivation of the current Alembic head. This is a real, growing gap (2 unapplied
-migrations, up from the 1-migration gap the last update tracked), not a new finding — but it
-was stale in this document and needs the same apply-and-verify treatment TD-071 previously
-received. Reopen scope: apply `0056`/`0057` to the managed project via Supabase MCP,
-cross-check pre/post RLS+grant state as TD-071's prior passes did, re-run the Security
-Advisor. **Not performed in this pass** — this reconciliation task is docs-only and this
-action touches the managed database, which is out of scope here.
+Previously marked CLOSED. The last independently confirmed managed-database Alembic head is
+**`0056`** — not `0055`: a Copilot review on PR #141 caught this document under-citing the
+evidence trail, since issue #68's 2026-09-11 live-infrastructure check already reported the
+deployed backend's `/api/health/ready` connected to the `content-orchestrator-test` project
+at migration head `0056`, matching `main` on that date (superseding TD-071's 2026-09-10
+`0055` note, which is now the stale figure, not the current one). `main` has since advanced
+once more, to `0057`, via P0-3's automation-ownership migration (PR #137, 2026-09-14).
+**Whether `0057` has been applied to the managed project is unverified** — no Supabase query
+has been run by any session since the 2026-09-11 check, so say "unverified," not "not yet
+applied": that would assert a negative nobody has actually confirmed. Reopen scope: query the
+managed project's current `alembic_version` first: if it already reads `0057`, this item
+closes immediately with no further action; if it still reads `0056`, apply `0057` via
+Supabase MCP, cross-check pre/post RLS+grant state as TD-071's prior passes did, and re-run
+the Security Advisor. **Not performed in this pass** — this reconciliation task is docs-only
+and this action touches the managed database, which is out of scope here.
 
 ### PROVIDER-001 — Live provider activation — **OPEN / DEFERRED**
 

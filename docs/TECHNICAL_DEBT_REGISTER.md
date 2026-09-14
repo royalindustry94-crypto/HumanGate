@@ -13,7 +13,7 @@ Do not mark HIGH/CRITICAL resolved without exact commit/PR evidence, regression 
 | Fact | Prior doc claim | Independently re-verified now |
 |---|---|---|
 | Alembic head | `0054` | **`0057`** — single true head confirmed by walking every `revision`/`down_revision` pair in `apps/api/alembic/versions/` (59 files; the three parallel `0031_*` leaves merge cleanly into `0032_merge_p1`, so there is no dangling parallel head) |
-| API coverage floor (CI gate) | 75% | **79%** (`.github/workflows/ci.yml:55` — `pytest --cov=app --cov-fail-under=79`; raised by TD-031, already recorded below, just not reflected in this header before now) |
+| API coverage floor (CI gate) | 75% | **79%** (`.github/workflows/ci.yml:55` — `pytest --cov=app --cov-fail-under=79`; raised by TD-031, already recorded below, just not reflected in this header before now). **Separate finding, caught by Copilot review on PR #141:** root `AGENTS.md`'s own "Engineering rules" table still instructs `pytest --cov-fail-under=75`, contradicting the actual enforced gate. That is a genuine inconsistency in repository guidance, not a documentation-register error — `AGENTS.md` is outside this pass's authorized file scope (`LAUNCH_BLOCKERS.md`/`TECHNICAL_DEBT_REGISTER.md`/`EXECUTIVE_STATUS_REPORT.md` only), so it is recorded here as a separated finding per this task's own operating rules rather than edited unprompted. Whoever next touches `AGENTS.md` should update that line to `79`. |
 | Open pull requests | "~30 open PRs... remain from earlier multi-agent lanes" (`EXECUTIVE_STATUS_REPORT.md`, 2026-09-09) | **0** — `mcp__github__list_pull_requests(state=open)` returns an empty list as of this pass. That claim is stale/incorrect; the founder-directed cleanup it recommended has evidently already happened by another path. |
 | P0-1..P0-4 (issue #126) | Not yet triaged in this register | **All four CLOSED** — see new section immediately below |
 
@@ -30,10 +30,10 @@ An external audit opened issue #126 (`CODEX_BASELINE: CHANGES_REQUESTED` against
 | P0-3 | Scheduler/outbox-relay/maintenance loops lived in FastAPI `lifespan`, incompatible with Vercel's stateless function model | #137 (migration `0057_automation_runtime_ownership.py`) | **CLOSED** |
 | P0-4 | Worker executor returned generic success for unimplemented stages; unavailable capabilities appeared runnable | #140 | **CLOSED** |
 
-Issue #126 itself is **closed** (`state_reason: completed`, 2026-09-14T15:03:10Z). Its own text carries a **follow-up warnings** list explicitly deferred to post-P0 triage — not yet independently severity-assessed by any pass, including this one (this pass is docs-reconciliation only, no code changed): "Health-detail exposure, distributed rate limiting, worker concurrency/lease renewal, dashboard N+1/polling/export pagination, concurrent last-admin mutation, browser security headers/session design, oversized modules/duplicated business logic, and stronger CI security supply-chain gates." Recorded below as TD-089 through TD-096 so they carry IDs and don't get lost between issue #126 (closed) and this register; each needs its own read-the-code investigation before a severity/fix can be assigned — do not treat the labels below as pre-judged severities.
+Issue #126 itself is **closed** (`state_reason: completed`, 2026-09-14T15:03:10Z). Its own text carries a **follow-up warnings** list explicitly deferred to post-P0 triage — not yet independently severity-assessed by any pass, including this one (this pass is docs-reconciliation only, no code changed): "Health-detail exposure, distributed rate limiting, worker concurrency/lease renewal, dashboard N+1/polling/export pagination, concurrent last-admin mutation, browser security headers/session design, oversized modules/duplicated business logic, and stronger CI security supply-chain gates." Recorded below as TD-089 through TD-096 so most of them carry an ID and don't get lost between issue #126 (closed) and this register; each still needs its own read-the-code investigation before a severity/fix can be assigned — do not treat the labels below as pre-judged severities. **Exception, caught by Copilot review on PR #141:** the "distributed rate limiting" item is not actually new or ID-less — it is the exact deferred-scope note already recorded in TD-034 below ("deliberately in-process... no Redis dependency added without its own work package"). Recording it again as a fresh untriaged TD-090 would have lost that prior fix/defer history; TD-090 below is corrected to point at TD-034 instead of standing alone.
 
 ### TD-089 — Health-detail exposure — **OPEN / UNTRIAGED**
-### TD-090 — Rate limiting is per-instance, not distributed — **OPEN / UNTRIAGED**
+### TD-090 — Distributed rate limiting — **not new; see TD-034 below (deferred scope already recorded there, not a fresh untriaged item)**
 ### TD-091 — Worker concurrency / lease-renewal follow-up — **OPEN / UNTRIAGED**
 ### TD-092 — Operations Dashboard N+1 / polling / export pagination — **OPEN / UNTRIAGED**
 ### TD-093 — Concurrent last-admin mutation — **OPEN / UNTRIAGED**
@@ -43,9 +43,9 @@ Issue #126 itself is **closed** (`state_reason: completed`, 2026-09-14T15:03:10Z
 
 | Field | Value |
 |---|---|
-| Evidence | Named verbatim in issue #126's "Follow-up warnings" paragraph (closed 2026-09-14). No file/line-level evidence has been gathered for any of these eight items by this pass — that is explicitly out of scope for this docs-reconciliation task. |
-| Recommendation | Each needs a dedicated read-the-code pass (matching this register's own standard: no HIGH/CRITICAL without exact evidence) before it can be prioritized, assigned a real severity, or closed. Do not infer severity from ordering above — the list is copied in the order issue #126 stated it, not a ranking. |
-| Effort | Unknown until triaged |
+| Evidence | Named verbatim in issue #126's "Follow-up warnings" paragraph (closed 2026-09-14). No file/line-level evidence has been gathered for TD-089, TD-091..TD-096 by this pass — that is explicitly out of scope for this docs-reconciliation task. (TD-090 is the exception — see its entry above; it already has real evidence, in TD-034.) |
+| Recommendation | TD-089, TD-091..TD-096 each need a dedicated read-the-code pass (matching this register's own standard: no HIGH/CRITICAL without exact evidence) before being prioritized, assigned a real severity, or closed. Do not infer severity from ordering above — the list is copied in the order issue #126 stated it, not a ranking. |
+| Effort | Unknown until triaged (except TD-090, already scoped under TD-034) |
 
 ---
 
@@ -338,7 +338,9 @@ see issue #91 for the full reasoning.
 
 ## Recently closed / superseded debt
 
-### TD-071 — Managed Supabase/runtime evidence unavailable — **CLOSED**
+### TD-071 — Managed Supabase/runtime evidence unavailable — **CLOSED for the audit this entry describes; see 2026-09-14 status note below**
+
+> **2026-09-14 status note (added after Copilot review on PR #141 flagged this entry as contradicting the burn-down list's re-opened drift item):** this entry's own history is CLOSED and stays that way — every audit below happened and its evidence is real. The *current* managed-DB parity question is tracked live in "Current burn-down priority" item 4.b above, not here: last independently confirmed managed head is **`0056`** (issue #68, 2026-09-11), `main` is now at `0057` (PR #137, 2026-09-14), and whether `0057` is applied is **unverified** — nobody has queried the managed project since 2026-09-11. Treat this TD-071 entry as a historical evidence log, and the burn-down item as the live status.
 
 | Field | Value |
 |---|---|
@@ -403,9 +405,10 @@ The following previously resolved controls remain closed unless new evidence sho
 3. ~~**P0-1..P0-4** (issue #126): JWT fail-closed, staging PostgreSQL exposure, durable automation ownership, unsupported-execution fail-closed~~ — **DONE 2026-09-14.** PRs #129/#130/#137/#140 merged; `CODEX_BASELINE: PASS` at `dfacbbd1f941c98e9c437d828575acd35bf7d96c`. See the new section above.
 4. **Next up (ranked, not yet started by this pass):**
    a. Triage TD-089…TD-096 (issue #126's follow-up warnings) — read-the-code investigation to assign real severities; **concurrent last-admin mutation (TD-093)** and **health-detail exposure (TD-089)** look likely to be the highest-signal items by category (authz/integrity and info-disclosure respectively) but this is a preliminary read of the one-line issue text, not a verified ranking.
-   b. Re-verify managed-Supabase Alembic parity — `main` is now at `0057`; the last independently confirmed managed-DB head (TD-071's 2026-09-10 update) was `0055`. Two migrations' worth of drift is unconfirmed on the managed project.
+   b. Re-verify managed-Supabase Alembic parity — the last independently confirmed managed-DB head is **`0056`** (issue #68, 2026-09-11: the deployed backend's `/api/health/ready` reported the `content-orchestrator-test` project at migration head `0056`, matching `main` at that date), correcting this document's earlier TD-071-derived `0055` figure, which predates that check. `main` has since advanced to `0057` via P0-3 (PR #137, 2026-09-14). Whether `0057` is applied to the managed project is **unverified by this pass** (no Supabase query was run) — say "unverified," not "not yet applied," until someone actually checks.
    c. issue #68 (Founder Studio Test): functional PASS already achieved locally (2026-09-10) and a live public URL is confirmed reachable (2026-09-11, `https://royalindustry9.vercel.app`); the one remaining step is a human/mobile click-through of that live URL — not a coding task.
 5. Select one revenue-producing private-beta workflow and verify it end-to-end in the managed environment.
 6. Activate cost-bearing providers one at a time with spend, retry, idempotency and Human Review controls — see TD-041's build-order gap list (PROVIDER-001, still deferred).
-5. Raise coverage/security/observability depth based on measured risk, not feature-count pressure.
-6. Housekeeping (low priority, not blocking): ~30 open PRs and dozens of stale branches remain from earlier multi-agent lanes, mostly superseded by the now-merged audited baseline (`main` @ `2ca92f8`). Per `coordination hub #90`, none should be closed/merged/absorbed without an explicit Founder decision — flagged here for Founder triage, not acted on unilaterally.
+7. Raise coverage/security/observability depth based on measured risk, not feature-count pressure (carried forward from the pre-2026-09-14 version of this list; still a reasonable forward-looking item, not yet started).
+
+**2026-09-14 correction:** the pre-existing item "6. Housekeeping... ~30 open PRs... `main` @ `2ca92f8`" that previously followed here has been **removed**, not carried forward — this pass independently listed open pull requests and found **0**, so that housekeeping recommendation is resolved, not merely stale. A Copilot review on PR #141 caught this document briefly containing both the old and new burn-down lists side by side (an editing error in the reconciliation pass, not a real second data point) — corrected here to a single consistent list.
