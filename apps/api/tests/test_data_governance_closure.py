@@ -414,3 +414,59 @@ async def test_tombstoned_content_is_writable_and_correctly_scoped():
     assert await _visible_to(owner) == 1, "writers retain sight of withdrawn content"
     assert await _visible_to(reviewer) == 0, "withdrawn content is hidden from reviewers"
     assert await _visible_to(outsider) == 0, "withdrawn content never crosses tenants"
+
+
+@pytest.mark.asyncio
+async def test_export_truncation_is_bounded_and_reported(client, new_user, monkeypatch):
+    """Copilot follow-up to M-3: the cap must be exercised, not just written.
+
+    `export_workspace` used to run an unbounded `SELECT *` materialised into
+    Python dicts, so one large tenant could exhaust the API process. It is now
+    capped per table -- but a cap that silently drops rows would be worse than
+    the unbounded read, so any capped table must be named in `truncated_tables`
+    with a reason. The limit is lowered here rather than seeding 50,000 rows.
+    """
+    from app.services import data_governance
+
+    _user_id, _token, headers = new_user
+    workspace = await client.post("/workspaces", headers=headers, json={"name": "cap"})
+    assert workspace.status_code == 201
+    workspace_id = workspace.json()["id"]
+
+    async with AsyncSessionLocal() as session:
+        for index in range(3):
+            await session.execute(
+                text("INSERT INTO content_items (id, workspace_id, topic) VALUES (:i,:w,:t)"),
+                {"i": str(uuid.uuid4()), "w": workspace_id, "t": f"topic-{index}"},
+            )
+        await session.commit()
+
+    monkeypatch.setattr(data_governance, "EXPORT_MAX_ROWS_PER_TABLE", 2)
+
+    async with AsyncSessionLocal() as session:
+        bundle = await data_governance.export_workspace(
+            session, workspace_id=uuid.UUID(workspace_id)
+        )
+
+    assert len(bundle.tables["content_items"]) == 2, "rows must be capped at the limit"
+    assert "content_items" in bundle.truncated_tables, "a capped table must be reported"
+    assert bundle.truncation_reason is not None
+    assert "2" in bundle.truncation_reason
+
+
+@pytest.mark.asyncio
+async def test_export_reports_no_truncation_when_under_the_cap(client, new_user):
+    """The truncation contract must not fire spuriously."""
+    from app.services import data_governance
+
+    _user_id, _token, headers = new_user
+    workspace = await client.post("/workspaces", headers=headers, json={"name": "under cap"})
+    workspace_id = workspace.json()["id"]
+
+    async with AsyncSessionLocal() as session:
+        bundle = await data_governance.export_workspace(
+            session, workspace_id=uuid.UUID(workspace_id)
+        )
+
+    assert bundle.truncated_tables == ()
+    assert bundle.truncation_reason is None

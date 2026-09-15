@@ -52,15 +52,20 @@ async def ensure_default_spend_cap(
         created_by=actor_id,
         updated_by=actor_id,
     )
-    session.add(cap)
     # Concurrent first-touch of the same workspace both miss the SELECT above
     # and race to INSERT. `uq_spend_caps_workspace_provider` (migration 0003)
-    # keeps that from creating a duplicate cap, but the loser used to surface
+    # keeps that from creating a duplicate cap, but the loser must not surface
     # as an unhandled IntegrityError -> HTTP 500 (audit L-4). Re-read the row
     # the winner committed instead: the caller wanted the cap to exist, and it
     # now does.
+    #
+    # `session.add()` belongs INSIDE the savepoint. With it outside, the failing
+    # flush rolled back the whole session transaction rather than just the
+    # savepoint, and the caller's next statement raised PendingRollbackError --
+    # so the original form of this fix did not actually contain the failure.
     try:
         async with session.begin_nested():
+            session.add(cap)
             await session.flush()
     except IntegrityError:
         existing = await get_workspace_spend_cap(session, workspace_id=workspace_id)

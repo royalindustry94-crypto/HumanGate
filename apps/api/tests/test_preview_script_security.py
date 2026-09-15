@@ -11,7 +11,10 @@ the same pin published `/docs` and `/openapi.json`.
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -79,12 +82,141 @@ def test_replit_deployment_entry_is_the_preview_launcher() -> None:
     assert _replit_deployment_script() == "scripts/run_ops_preview_replit.sh"
 
 
+def _resolve_environment(
+    preset: str | None, *, tmp_path: Path | None = None, existing_env: bool = False
+) -> str:
+    """Run the launcher's REAL prefix -- .env handling included -- under bash.
+
+    Everything from the top of the script through the END marker is executed,
+    in a throwaway root seeded with the repository's own `.env.example`. That
+    span, not the marked block alone, is what decides ENVIRONMENT on a real
+    boot, and each narrower version of this helper hid a live bug:
+
+      * asserting on the literal `ENVIRONMENT="${ENVIRONMENT:-preview}"` missed
+        that the launcher sources `.env.example` (ENVIRONMENT=development)
+        first, so `:-` never substituted and the public deployment ran as a
+        local environment; then
+      * executing only the marked block missed that `set -a; source .env`
+        assigns every key in the template, clobbering an ENVIRONMENT=staging
+        supplied by the deployment platform before the block ever sees it.
+
+    Both passed a test while the shipped script did the wrong thing, so this
+    runs the whole prefix instead.
+    """
+    raw = (REPOSITORY_ROOT / _replit_deployment_script()).read_text()
+    prefix = raw.split("# --- END environment resolution", 1)[0]
+
+    root = Path(tempfile.mkdtemp()) if tmp_path is None else tmp_path
+    (root / "scripts").mkdir(parents=True, exist_ok=True)
+    # ROOT is derived from `dirname "$0"/..`, so a stand-in script path here
+    # points the launcher at this throwaway tree rather than the repository.
+    stand_in = root / "scripts" / "run_ops_preview_replit.sh"
+    stand_in.write_text(prefix + '\nprintf "%s" "$ENVIRONMENT"\n')
+
+    # The real template with its credential blanks filled in. ENVIRONMENT is
+    # left exactly as shipped -- that is the value under test -- but the
+    # OPS_PREVIEW_ blanks must be populated or `set -a; source` assigns the
+    # empty strings over the caller's and the `:?` guards abort the run before
+    # the resolution block is ever reached.
+    template = (REPOSITORY_ROOT / ".env.example").read_text()
+    template = template.replace(
+        "OPS_PREVIEW_EMAIL=", "OPS_PREVIEW_EMAIL=ops@example.invalid"
+    ).replace("OPS_PREVIEW_PASSWORD=", "OPS_PREVIEW_PASSWORD=not-a-real-password")
+    (root / ".env.example").write_text(template)
+    if existing_env:
+        # Steady state: the operator already has a .env (created from the
+        # template, ENVIRONMENT left at its default). No copy happens, but
+        # sourcing still assigns that ENVIRONMENT over the platform's.
+        (root / ".env").write_text(template)
+
+    env = dict(os.environ)
+    env.pop("ENVIRONMENT", None)
+    if preset is not None:
+        env["ENVIRONMENT"] = preset
+    # S603: the command is this repository's own launcher, run under bash with
+    # a fixed argv; `preset` only ever reaches it as an environment value.
+    result = subprocess.run(  # noqa: S603
+        ["bash", str(stand_in)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def _case_variants(value: str) -> list[str]:
+    """Spellings the application would treat identically.
+
+    Every environment comparison in app/core/config.py and
+    app/api/routes/metrics.py normalises with `.strip().lower()`, so these are
+    all equivalent to the app and must all be caught by the launcher.
+    """
+    return [value, value.upper(), value.capitalize(), f"  {value} "]
+
+
+# Derived from the application's own constants rather than hardcoded: adding a
+# new local or tokenless environment name to the app fails this test until the
+# launcher's case list covers it.
+LOCAL_OR_TOKENLESS = sorted(set(Settings._LOCAL_ENVIRONMENTS) | set(TOKENLESS_METRICS_ENVIRONMENTS))
+
+_PRESETS = [None] + [variant for value in LOCAL_OR_TOKENLESS for variant in _case_variants(value)]
+
+
+def test_the_derived_case_set_is_not_silently_empty() -> None:
+    """Guards the guard: an empty derived set would make the sweep vacuous."""
+    assert {"development", "dev", "test", "local", "ci"} <= set(LOCAL_OR_TOKENLESS)
+
+
+@pytest.mark.parametrize("preset", _PRESETS)
+def test_local_environment_values_are_discarded_by_the_deployment_launcher(preset) -> None:
+    resolved = _resolve_environment(preset)
+    normalized = resolved.strip().lower()
+    assert normalized not in Settings._LOCAL_ENVIRONMENTS
+    assert normalized not in TOKENLESS_METRICS_ENVIRONMENTS
+    assert openapi_route_kwargs(resolved) == {
+        "docs_url": None,
+        "redoc_url": None,
+        "openapi_url": None,
+    }, f"ENVIRONMENT={resolved!r} would publish OpenAPI docs on a public deployment"
+
+
+@pytest.mark.parametrize("override", ["staging", "production"])
+@pytest.mark.parametrize("existing_env", [False, True], ids=["fresh-boot", "existing-dotenv"])
+def test_a_deliberate_non_local_environment_is_still_honoured(
+    override: str, existing_env: bool
+) -> None:
+    """Forcing must not clobber a real operator override.
+
+    Run through the whole prefix, in both shapes the launcher can meet:
+
+      * fresh boot -- no `.env`, so the template is copied and sourced; and
+      * steady state -- a `.env` already exists (made from that template, its
+        ENVIRONMENT left at the default) and is sourced as-is.
+
+    The second is the one that actually bites a deployment: `set -a; source
+    .env` assigns the file's ENVIRONMENT over the platform-supplied one, so a
+    deliberate `staging` silently became `development` and then `preview`.
+    """
+    assert _resolve_environment(override, existing_env=existing_env) == override
+
+
+def test_env_example_ships_a_local_environment_that_must_be_overridden() -> None:
+    """Pins the precondition the fix exists for.
+
+    If .env.example ever stops shipping a local ENVIRONMENT this test should be
+    revisited -- but the launcher must keep forcing regardless, since the file
+    is operator-editable.
+    """
+    env_example = (REPOSITORY_ROOT / ".env.example").read_text()
+    shipped = re.search(r"^ENVIRONMENT=(\S+)", env_example, re.MULTILINE)
+    assert shipped is not None
+    assert shipped.group(1) in Settings._LOCAL_ENVIRONMENTS
+
+
 def test_deployment_launcher_does_not_pin_a_local_environment() -> None:
     """A local ENVIRONMENT waives database-credential validation entirely."""
-    launcher = _executable_lines(_replit_deployment_script())
-    default = re.search(r'ENVIRONMENT="\$\{ENVIRONMENT:-([a-z]+)\}"', launcher)
-    assert default is not None, "deployment launcher must set an explicit ENVIRONMENT default"
-    chosen = default.group(1)
+    chosen = _resolve_environment(None)
 
     assert chosen not in Settings._LOCAL_ENVIRONMENTS, (
         f"deployment launcher defaults ENVIRONMENT={chosen!r}, which "

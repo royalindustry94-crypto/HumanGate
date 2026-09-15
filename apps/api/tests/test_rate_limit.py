@@ -201,3 +201,75 @@ def test_evicted_key_is_admitted_rather_than_blocked():
 def test_rejects_nonsense_key_cap(bad_cap):
     with pytest.raises(ValueError, match="max_tracked_keys"):
         InMemoryRateLimiter(max_requests=1, window_seconds=1, max_tracked_keys=bad_cap)
+
+
+def test_admissions_at_the_cap_do_not_resweep_or_sort_every_request():
+    """Copilot follow-up to H-2: the mitigation must not become the bottleneck.
+
+    Previously hitting the cap triggered a full map rebuild *and* a sort of
+    every tracked key on each admission -- O(K log K) per request under exactly
+    the rotating-source-IP pattern the cap exists to survive. Eviction is now
+    O(1) off the ordered map, and the sweep is time-based only.
+    """
+    limiter = InMemoryRateLimiter(max_requests=5, window_seconds=1000, max_tracked_keys=50)
+    sweeps = {"n": 0}
+    real_sweep = limiter._sweep
+
+    def counting_sweep(now):
+        sweeps["n"] += 1
+        return real_sweep(now)
+
+    limiter._sweep = counting_sweep  # type: ignore[method-assign]
+
+    # 500 distinct keys, all inside one window, well past the cap.
+    for index in range(500):
+        limiter.check(f"ip-{index}", now=float(index))
+
+    assert limiter.tracked_keys <= 50
+    assert sweeps["n"] <= 1, (
+        f"sweep ran {sweeps['n']} times for 500 admissions in one window; "
+        "the cap must not retrigger a full rebuild per request"
+    )
+
+
+def test_a_refreshed_key_moves_to_the_back_of_the_eviction_order():
+    """Plain dict assignment keeps a key's original slot.
+
+    Without `move_to_end`, a key whose window has just reset stays wherever it
+    was first inserted and becomes the next eviction victim despite being the
+    most recently started window.
+
+    The earlier version of this test could not tell the difference: it
+    refreshed the key at a point where the scheduled sweep had already removed
+    every entry, so the key was reinserted as a genuinely new one and the
+    assertion held either way. The refresh below happens while the map is
+    populated and *before* the next sweep is due, which is the only situation
+    where the ordering actually matters.
+    """
+    limiter = InMemoryRateLimiter(max_requests=1, window_seconds=10, max_tracked_keys=3)
+    limiter.check("x", now=0.0)  # arms the sweep for now=10
+    limiter.check("a", now=0.5)
+    limiter.check("b", now=10.0)  # sweep drops x, keeps a (started_at > cutoff)
+    assert list(limiter._windows) == ["a", "b"]
+
+    # "a" has expired, but the next sweep is not due until 20.0, so this is a
+    # reinsertion over a still-present key -- exactly the plain-assignment case.
+    limiter.check("a", now=10.6)
+    assert list(limiter._windows) == ["b", "a"], (
+        "a refreshed after b started must sort last; plain assignment would "
+        "leave it first and evict it next"
+    )
+
+
+def test_the_refreshed_key_outlives_the_older_one_under_eviction():
+    """The consequence of the ordering: eviction takes the genuinely oldest."""
+    limiter = InMemoryRateLimiter(max_requests=1, window_seconds=10, max_tracked_keys=3)
+    limiter.check("x", now=0.0)
+    limiter.check("a", now=0.5)
+    limiter.check("b", now=10.0)
+    limiter.check("a", now=10.6)  # a is now the newest window
+    limiter.check("c", now=11.0)
+    limiter.check("d", now=12.0)  # at the cap: evicts the leftmost entry
+
+    assert "a" in limiter._windows, "the most recently refreshed key must survive"
+    assert "b" not in limiter._windows, "the oldest window is the one evicted"

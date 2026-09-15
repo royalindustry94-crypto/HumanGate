@@ -24,6 +24,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Capture a deliberate operator override BEFORE sourcing .env. `set -a; source
+# .env` assigns every key in the file, and the template copied just above sets
+# ENVIRONMENT=development, so an ENVIRONMENT=staging supplied by the deployment
+# platform would otherwise be silently clobbered on any boot where .env does
+# not already exist. Restored in the resolution block below.
+_hg_env_preset="${ENVIRONMENT:-}"
+
 if [[ ! -f .env ]]; then
   cp .env.example .env
 fi
@@ -37,7 +44,49 @@ set +a
 : "${OPS_PREVIEW_PASSWORD:?Set OPS_PREVIEW_PASSWORD in .env for the local preview}"
 export OPS_PREVIEW_EMAIL OPS_PREVIEW_PASSWORD
 
-export ENVIRONMENT="${ENVIRONMENT:-preview}"
+# --- BEGIN environment resolution (behaviour pinned by test_preview_script_security.py) ---
+# FORCED, not defaulted. `${ENVIRONMENT:-preview}` was not enough: the block
+# above copies .env.example -- which sets ENVIRONMENT=development -- and sources
+# it, so the variable is already set and `:-` never substitutes. That left this
+# publicly reachable deployment running as a "local" environment, with the
+# database-credential validator inert and /docs, /redoc and /openapi.json
+# published. Any local-ish value inherited from the template is discarded here;
+# a deliberate non-local override (staging, production) is still honoured.
+# Normalised the way the application itself compares it: every check in
+# app/core/config.py and app/api/routes/metrics.py uses `.strip().lower()`, so
+# `Dev` publishes OpenAPI docs just as surely as `dev` does. Matching exact
+# spellings here missed those, and missed `ci` entirely -- which is in
+# TOKENLESS_METRICS_ENVIRONMENTS and would waive the /metrics scrape token.
+#
+# The set below is the union of Settings._LOCAL_ENVIRONMENTS and
+# TOKENLESS_METRICS_ENVIRONMENTS; test_preview_script_security.py derives its
+# cases from those constants, so adding a new local environment name to the
+# application fails that test until this list covers it.
+# Restore the pre-source override first, so `staging` supplied by the platform
+# beats `development` inherited from the template.
+if [[ -n "${_hg_env_preset:-}" ]]; then
+  ENVIRONMENT="$_hg_env_preset"
+fi
+_hg_env="$(printf '%s' "${ENVIRONMENT:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+case "$_hg_env" in
+  "" | development | dev | test | local | ci)
+    ENVIRONMENT=preview
+    ;;
+esac
+export ENVIRONMENT
+unset _hg_env _hg_env_preset
+# --- END environment resolution ---
+
+# Belt and braces: if a future edit reintroduces a local value here, refuse to
+# serve rather than silently waive the checks.
+case "$(printf '%s' "${ENVIRONMENT}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in
+  development | dev | test | local | ci)
+    echo "refusing to start: ENVIRONMENT=${ENVIRONMENT} waives database-credential" >&2
+    echo "validation and publishes OpenAPI docs on a publicly reachable deployment" >&2
+    exit 1
+    ;;
+esac
+
 export AUTH_MODE="${AUTH_MODE:-local}"
 WEB_PORT="${PORT:-5000}"
 PGHOST_ADDR="${PGHOST_ADDR:-127.0.0.1}"

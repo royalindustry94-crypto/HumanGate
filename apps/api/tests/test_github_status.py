@@ -263,3 +263,33 @@ async def test_merged_pull_requests_require_a_merged_at(monkeypatch):
 
     assert [p.number for p in out.recently_merged_pull_requests] == [2]
     assert out.recently_merged_pull_requests[0].state == "merged"
+
+
+@pytest.mark.asyncio
+async def test_one_transport_failure_does_not_strand_the_other_requests(monkeypatch):
+    """A bare `gather` propagates the first failure while siblings are still in
+    flight, and leaving the client context then closes it out from under them.
+    All five must settle before the context exits."""
+    started = 0
+    finished = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal started, finished
+        started += 1
+        if request.url.path.endswith("/commits"):
+            # Fail fast, while the others are still awaiting.
+            raise httpx.ConnectError("boom", request=request)
+        await asyncio.sleep(0.05)
+        finished += 1
+        return httpx.Response(200, json=_body_for(request.url.path))
+
+    _install_transport(monkeypatch, handler)
+    out = await gh.github_status()
+
+    assert out.available is False
+    assert "GitHub API unavailable" in (out.unavailable_reason or "")
+    assert started == 5
+    assert finished == 4, (
+        "every non-failing request must complete before the client closes; "
+        f"only {finished} of 4 finished"
+    )

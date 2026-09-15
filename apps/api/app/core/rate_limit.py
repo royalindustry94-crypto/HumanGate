@@ -14,6 +14,7 @@ here is never interrupted mid-mutation by another concurrent request.
 from __future__ import annotations
 
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 
 from fastapi import Request
@@ -67,7 +68,10 @@ class InMemoryRateLimiter:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self.max_tracked_keys = max_tracked_keys
-        self._windows: dict[str, _Window] = {}
+        # Ordered by window start: new keys append, a reset key is moved to the
+        # end, so the oldest window is always the leftmost entry and eviction
+        # is O(1) via popitem(last=False).
+        self._windows: OrderedDict[str, _Window] = OrderedDict()
         self._next_sweep_at = 0.0
 
     @property
@@ -76,29 +80,35 @@ class InMemoryRateLimiter:
         return len(self._windows)
 
     def _sweep(self, now: float) -> None:
-        """Drop windows that have already expired."""
+        """Drop windows that have already expired.
+
+        O(K), but rate-limited to once per window, so the amortized cost per
+        request stays constant.
+        """
         cutoff = now - self.window_seconds
-        self._windows = {
-            key: window for key, window in self._windows.items() if window.started_at > cutoff
-        }
+        self._windows = OrderedDict(
+            (key, window) for key, window in self._windows.items() if window.started_at > cutoff
+        )
         self._next_sweep_at = now + self.window_seconds
 
     def _make_room(self, now: float) -> None:
         """Bound the map before admitting a new key.
 
-        Sweeping runs at most once per window so the amortized cost per
-        request stays constant. If every tracked window is still live we evict
-        the oldest ones: an evicted key simply gets a fresh budget, which is
-        the safe direction to fail — the limiter must not start rejecting
-        legitimate traffic because of its own bookkeeping.
+        The periodic sweep reclaims expired windows. If every tracked window is
+        still live we evict the oldest, which is O(1) on the ordered map: an
+        evicted key simply gets a fresh budget, the safe direction to fail --
+        the limiter must not start rejecting legitimate traffic because of its
+        own bookkeeping.
+
+        The sweep is deliberately NOT triggered by hitting the cap. Doing so
+        rebuilt the whole map, and the overflow path then sorted every tracked
+        key, on *every* admission once full -- O(K log K) per request against
+        exactly the rotating-source-IP pattern this cap exists to survive.
         """
-        if now >= self._next_sweep_at or len(self._windows) >= self.max_tracked_keys:
+        if now >= self._next_sweep_at:
             self._sweep(now)
-        overflow = len(self._windows) - self.max_tracked_keys + 1
-        if overflow > 0:
-            oldest = sorted(self._windows.items(), key=lambda item: item[1].started_at)
-            for key, _ in oldest[:overflow]:
-                del self._windows[key]
+        while len(self._windows) >= self.max_tracked_keys:
+            self._windows.popitem(last=False)
 
     def check(self, key: str, *, now: float | None = None) -> tuple[bool, float]:
         """Returns (allowed, retry_after_seconds). retry_after_seconds is
@@ -112,6 +122,7 @@ class InMemoryRateLimiter:
             # to make room first.
             self._make_room(now)
             self._windows[key] = _Window(started_at=now, count=1)
+            self._windows.move_to_end(key)
             return True, 0.0
         if window.count < self.max_requests:
             window.count += 1

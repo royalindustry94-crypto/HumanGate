@@ -134,3 +134,119 @@ async def test_readiness_withholds_db_role_without_the_metrics_token(client, mon
         assert "db_user" not in wrong.json()
     finally:
         get_settings.cache_clear()
+
+
+# --- L-3 completion: the correlation id must reach the 500 response too ---
+
+
+@pytest.mark.asyncio
+async def test_unhandled_error_response_carries_the_request_id():
+    """Starlette's ServerErrorMiddleware builds the 500 outside every user
+    middleware, so RequestIDMiddleware could log the id but never attach it to
+    the response. Both halves must hold on the failing path."""
+    import httpx
+    from fastapi import FastAPI
+    from httpx import ASGITransport
+
+    from app.core.audit import RequestIDMiddleware
+
+    # The PRODUCTION handler, not a copy of it. A local re-implementation here
+    # would keep passing if app.main stopped setting the header, which is the
+    # only thing this test exists to catch.
+    from app.main import _unhandled_exception_handler
+
+    probe = FastAPI()
+    probe.add_middleware(RequestIDMiddleware)
+    probe.add_exception_handler(Exception, _unhandled_exception_handler)
+
+    @probe.get("/boom")
+    async def boom():
+        raise RuntimeError("kaboom")
+
+    @probe.get("/fine")
+    async def fine():
+        return {"ok": True}
+
+    transport = ASGITransport(app=probe, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://probe") as client:
+        ok = await client.get("/fine")
+        assert ok.status_code == 200
+        assert ok.headers.get("X-Request-ID")
+
+        failed = await client.get("/boom")
+        assert failed.status_code == 500
+        assert failed.headers.get("X-Request-ID"), (
+            "the 500 produced by an unhandled error must still be correlatable"
+        )
+        assert failed.headers["X-Request-ID"] != ok.headers["X-Request-ID"]
+
+
+def test_app_registers_the_same_unhandled_exception_handler():
+    """Pins that the real app wires the exact handler the probe exercises."""
+    from app.main import _unhandled_exception_handler, app
+
+    assert app.exception_handlers.get(Exception) is _unhandled_exception_handler
+
+
+def test_exception_key_installs_the_server_error_handler_not_an_inner_one():
+    """Settles a review claim: `Exception` here is the ServerErrorMiddleware key.
+
+    A review argued that registering `_unhandled_exception_handler` for
+    `Exception` makes FastAPI's inner `ExceptionMiddleware` consume the error so
+    Starlette's outer `ServerErrorMiddleware` never re-raises it, losing the
+    traceback, and that registering for status `500` instead would fix it.
+
+    Starlette's `build_middleware_stack` buckets the two identically::
+
+        for key, value in self.exception_handlers.items():
+            if key in (500, Exception):
+                error_handler = value
+            else:
+                exception_handlers[key] = value
+
+    so `Exception` never reaches `ExceptionMiddleware`, and switching to `500`
+    would be a no-op. Pinned here rather than argued, and the companion test
+    below covers the re-raise the claim said was lost.
+    """
+    from starlette.middleware.errors import ServerErrorMiddleware
+
+    from app.main import _unhandled_exception_handler, app
+
+    app.build_middleware_stack()
+    layer = app.middleware_stack
+    assert isinstance(layer, ServerErrorMiddleware)
+    assert layer.handler is _unhandled_exception_handler
+
+    # And it is absent from the inner ExceptionMiddleware's table.
+    inner = {k for k in app.exception_handlers if k not in (500, Exception)}
+    assert Exception not in inner
+
+
+@pytest.mark.asyncio
+async def test_unhandled_error_still_propagates_for_server_logging():
+    """The 500 response is sent AND the exception keeps propagating.
+
+    `ServerErrorMiddleware` sends the handler's response and then re-raises
+    ("We always continue to raise the exception. This allows servers to log the
+    error"). So attaching X-Request-ID did not swallow the traceback: with
+    `raise_app_exceptions=True` the original error must still reach the caller.
+    """
+    import httpx
+    from fastapi import FastAPI
+    from httpx import ASGITransport
+
+    from app.core.audit import RequestIDMiddleware
+    from app.main import _unhandled_exception_handler
+
+    probe = FastAPI()
+    probe.add_middleware(RequestIDMiddleware)
+    probe.add_exception_handler(Exception, _unhandled_exception_handler)
+
+    @probe.get("/boom")
+    async def boom():
+        raise RuntimeError("kaboom")
+
+    transport = ASGITransport(app=probe, raise_app_exceptions=True)
+    async with httpx.AsyncClient(transport=transport, base_url="http://probe") as client:
+        with pytest.raises(RuntimeError, match="kaboom"):
+            await client.get("/boom")
