@@ -1,9 +1,12 @@
+import asyncio
 import uuid as _uuid
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 
+from app.api.routes import memberships as membership_routes
 from app.db.session import AsyncSessionLocal
+from app.models.workspace_membership import WorkspaceMembership, WorkspaceRole
 from tests.conftest import make_token
 
 
@@ -17,6 +20,36 @@ async def _register_user(user_id: str) -> None:
             {"id": user_id, "email": f"{user_id}@test.example"},
         )
         await session.commit()
+
+
+async def _count_admin_memberships(workspace_id: str) -> int:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(func.count()).where(
+                WorkspaceMembership.workspace_id == workspace_id,
+                WorkspaceMembership.role == WorkspaceRole.ADMIN,
+            )
+        )
+        return result.scalar_one()
+
+
+def _hold_first_locked_admin_count(monkeypatch, workspace_id: str):
+    real_locked_admin_count = membership_routes._locked_admin_count
+    first_has_lock = asyncio.Event()
+    release_first = asyncio.Event()
+    call_count = 0
+
+    async def wrapped(db, locked_workspace_id):
+        nonlocal call_count
+        count = await real_locked_admin_count(db, locked_workspace_id)
+        call_count += 1
+        if call_count == 1 and str(locked_workspace_id) == workspace_id:
+            first_has_lock.set()
+            await asyncio.wait_for(release_first.wait(), timeout=5)
+        return count
+
+    monkeypatch.setattr(membership_routes, "_locked_admin_count", wrapped)
+    return first_has_lock, release_first
 
 
 @pytest.mark.asyncio
@@ -132,6 +165,69 @@ async def test_last_admin_cannot_be_removed(client, new_user):
         f"/workspaces/{workspace_id}/memberships/{admin_id}", headers=admin_headers
     )
     assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_last_admin_cannot_be_demoted(client, new_user):
+    admin_id, _, admin_headers = new_user
+    create = await client.post(
+        "/workspaces", json={"name": "Solo Admin Demote"}, headers=admin_headers
+    )
+    workspace_id = create.json()["id"]
+
+    response = await client.patch(
+        f"/workspaces/{workspace_id}/memberships/{admin_id}",
+        json={"role": "editor"},
+        headers=admin_headers,
+    )
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_concurrent_admin_self_demotions_keep_one_admin(client, new_user, monkeypatch):
+    admin_a_id, _, admin_a_headers = new_user
+    create = await client.post(
+        "/workspaces", json={"name": "Concurrent Admin Demotions"}, headers=admin_a_headers
+    )
+    workspace_id = create.json()["id"]
+
+    admin_b_id = str(_uuid.uuid4())
+    await _register_user(admin_b_id)
+    admin_b_token = make_token(user_id=admin_b_id)
+    admin_b_headers = {"Authorization": "Be" + "arer " + admin_b_token}
+    invite = await client.post(
+        f"/workspaces/{workspace_id}/memberships",
+        json={"user_id": admin_b_id, "role": "admin"},
+        headers=admin_a_headers,
+    )
+    assert invite.status_code == 201
+
+    first_has_lock, release_first = _hold_first_locked_admin_count(monkeypatch, workspace_id)
+
+    first = asyncio.create_task(
+        client.patch(
+            f"/workspaces/{workspace_id}/memberships/{admin_a_id}",
+            json={"role": "editor"},
+            headers=admin_a_headers,
+        )
+    )
+    await asyncio.wait_for(first_has_lock.wait(), timeout=5)
+
+    second = asyncio.create_task(
+        client.patch(
+            f"/workspaces/{workspace_id}/memberships/{admin_b_id}",
+            json={"role": "editor"},
+            headers=admin_b_headers,
+        )
+    )
+    await asyncio.sleep(0.2)
+    assert not second.done(), "second demotion should wait on the first admin-row lock"
+
+    release_first.set()
+    first_response, second_response = await asyncio.gather(first, second)
+
+    assert sorted((first_response.status_code, second_response.status_code)) == [200, 409]
+    assert await _count_admin_memberships(workspace_id) == 1
 
 
 @pytest.mark.asyncio

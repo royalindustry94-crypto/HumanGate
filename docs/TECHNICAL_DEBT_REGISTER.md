@@ -36,7 +36,14 @@ Issue #126 itself is **closed** (`state_reason: completed`, 2026-09-14T15:03:10Z
 ### TD-090 — Rate limiting is per-instance, not distributed — **OPEN / UNTRIAGED**
 ### TD-091 — Worker concurrency / lease-renewal follow-up — **OPEN / UNTRIAGED**
 ### TD-092 — Operations Dashboard N+1 / polling / export pagination — **OPEN / UNTRIAGED**
-### TD-093 — Concurrent last-admin mutation — **OPEN / UNTRIAGED**
+### TD-093 — Concurrent last-admin mutation — **CLOSED (2026-09-15)**
+
+| Field | Value |
+|---|---|
+| Severity | HIGH |
+| Evidence | `apps/api/app/api/routes/memberships.py` previously guarded admin-removing `PATCH /workspaces/{workspace_id}/memberships/{user_id}` and `DELETE /workspaces/{workspace_id}/memberships/{user_id}` with a plain `SELECT count(*)` of admin rows before mutating. Under PostgreSQL's default `READ COMMITTED` isolation, two concurrent requests targeting different admin memberships could each observe `admin_count = 2`, both pass the check, and then both commit their demotion/removal, leaving the workspace with zero admins. No existing DB constraint or lock prevented that interleaving. |
+| Fix | `apps/api/app/api/routes/memberships.py` now locks the workspace's current admin membership rows with `SELECT ... FOR UPDATE` inside the same request transaction before applying any admin-removing role change or delete, then re-reads the target membership after the lock wait and fails closed with `409 workspace must retain at least one admin` if the mutation would remove the final admin. |
+| Tests | `apps/api/tests/test_workspaces.py` adds `test_last_admin_cannot_be_demoted` plus `test_concurrent_admin_self_demotions_keep_one_admin`, which uses real Postgres-backed concurrent requests and forces the second demotion to block behind the first admin-row lock before it is rejected. Targeted validation on this branch: `python -m pytest tests/test_workspaces.py -q` → 10 passed; `python -m ruff check app/api/routes/memberships.py tests/test_workspaces.py` → clean. |
 ### TD-094 — Browser security headers / session design — **OPEN / UNTRIAGED**
 ### TD-095 — Oversized modules / duplicated business logic — **OPEN / UNTRIAGED**
 ### TD-096 — CI security supply-chain gates could go further — **OPEN / UNTRIAGED**
