@@ -236,6 +236,8 @@ class PostgresRateLimiter:
                             {"batch_size": self._cleanup_batch_size},
                         )
                         self._next_cleanup_at = now + self._cleanup_interval_seconds
+                    else:
+                        self._next_cleanup_at = now + min(1.0, self._cleanup_interval_seconds)
                 await session.commit()
             except Exception:
                 await session.rollback()
