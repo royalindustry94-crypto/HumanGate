@@ -41,6 +41,16 @@ settings = get_settings()
 configure_logging(service_name=settings.service_name, level=settings.log_level)
 logger = logging.getLogger(__name__)
 
+_DEFAULT_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+}
+_API_CONTENT_SECURITY_POLICY = (
+    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+)
+
 # Review approve/reject is bus-mediated; register once at import.
 consumers.register_all()
 
@@ -86,14 +96,32 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> Resp
     traceback still reaches the server log.
     """
     request_id = getattr(request.state, "request_id", None)
-    return JSONResponse(
+    response = JSONResponse(
         status_code=500,
         content={"detail": "internal server error"},
         headers={"X-Request-ID": request_id} if request_id else None,
     )
+    _attach_security_headers(response, path=request.url.path)
+    return response
+
+
+def _attach_security_headers(response: Response, *, path: str) -> None:
+    for key, value in _DEFAULT_SECURITY_HEADERS.items():
+        response.headers.setdefault(key, value)
+    # Keep FastAPI's interactive docs usable in development: the docs UI loads
+    # script/style assets that a `default-src 'none'` policy intentionally blocks.
+    if path not in {"/docs", "/redoc"} and not path.startswith("/docs/"):
+        response.headers.setdefault("Content-Security-Policy", _API_CONTENT_SECURITY_POLICY)
 
 
 app.add_exception_handler(Exception, _unhandled_exception_handler)
+
+
+@app.middleware("http")
+async def _security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    _attach_security_headers(response, path=request.url.path)
+    return response
 
 # Rate limiting deliberately stays detached under ENVIRONMENT=test: the
 # shared pytest app singleton would otherwise make unrelated tests spend
