@@ -230,12 +230,12 @@ class PostgresRateLimiter:
                     )
                 ).one()
                 if now >= self._next_cleanup_at:
-                    self._next_cleanup_at = now + self._cleanup_interval_seconds
                     if await session.scalar(_RATE_LIMIT_CLEANUP_LOCK_SQL, {"lock_key": 9058}):
                         await session.execute(
                             _RATE_LIMIT_CLEANUP_SQL,
                             {"batch_size": self._cleanup_batch_size},
                         )
+                        self._next_cleanup_at = now + self._cleanup_interval_seconds
                 await session.commit()
             except Exception:
                 await session.rollback()
