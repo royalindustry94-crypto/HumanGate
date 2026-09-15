@@ -15,7 +15,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.automation import (
-    PublicAutomationHealthSnapshot,
     automation_health_snapshot,
     public_automation_health_snapshot,
 )
@@ -87,6 +86,16 @@ async def readiness(
 
 
 @router.get("/health/automation")
-async def automation_health() -> PublicAutomationHealthSnapshot:
-    """Expose coarse automation health without lease-owner internals."""
-    return public_automation_health_snapshot(await automation_health_snapshot())
+async def automation_health(
+    authorization: str | None = Header(default=None),
+) -> dict[str, object]:
+    """Expose coarse automation health; gate runtime metadata outside local envs."""
+    payload = public_automation_health_snapshot(await automation_health_snapshot())
+    if _may_see_db_role(authorization):
+        return payload
+    return {
+        "status": payload["status"],
+        "maintenance": payload["maintenance"],
+        "outbox_relay": payload["outbox_relay"],
+        "scheduler": payload["scheduler"],
+    }

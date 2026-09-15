@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import uuid
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
+
 import pytest
 from pydantic import ValidationError
 
 from app.core.audit import _sensitive
 from app.core.config import Settings, get_settings
+from app.db.session import get_db
+from app.main import app
 from tests.conftest import nontest_jwt_secret
 
 # --- L-2: sensitive-key matching was exact, so compound names slipped past ---
@@ -134,6 +140,92 @@ async def test_readiness_withholds_db_role_without_the_metrics_token(client, mon
         assert "db_user" not in wrong.json()
     finally:
         get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_non_local_unauthenticated_health_and_metrics_shapes(client, monkeypatch):
+    from app.api.routes import health as health_routes
+    from app.api.routes import metrics as metrics_routes
+
+    metrics_token = "scrape-me-please"
+    fake_automation_payload = {
+        "status": "ok",
+        "started_at": "2026-01-01T00:00:00+00:00",
+        "tasks_running": ["scheduler"],
+        "maintenance": {"status": "idle", "active": False},
+        "outbox_relay": {"status": "idle", "active": False},
+        "scheduler": {"status": "running", "active": True},
+    }
+
+    result = Mock()
+    result.scalar_one.return_value = "app_runtime"
+    session = AsyncMock()
+    session.execute.return_value = result
+
+    async def _fake_db():
+        yield session
+
+    async def _fake_automation_health_snapshot():
+        return {}
+
+    async def _fake_collect(_session):
+        return "co_up 1\n"
+
+    app.dependency_overrides[get_db] = _fake_db
+    monkeypatch.setattr(
+        health_routes,
+        "automation_health_snapshot",
+        _fake_automation_health_snapshot,
+    )
+    monkeypatch.setattr(
+        health_routes,
+        "public_automation_health_snapshot",
+        lambda _snapshot: fake_automation_payload,
+    )
+    monkeypatch.setattr(metrics_routes, "_collect", _fake_collect)
+    monkeypatch.setattr(
+        health_routes,
+        "get_settings",
+        lambda: SimpleNamespace(
+            is_local_environment=False,
+            metrics_scraper_token=metrics_token,
+        ),
+    )
+    monkeypatch.setattr(
+        metrics_routes,
+        "get_settings",
+        lambda: SimpleNamespace(
+            environment="preview",
+            metrics_scraper_token=metrics_token,
+        ),
+    )
+    try:
+        live = await client.get("/health/live")
+        assert live.status_code == 200
+        assert live.json() == {"status": "ok"}
+
+        ready = await client.get("/health/ready")
+        assert ready.status_code == 200
+        assert ready.json() == {"status": "ok", "database": "reachable"}
+
+        automation = await client.get("/health/automation")
+        assert automation.status_code == 200
+        assert automation.json() == {
+            "status": "ok",
+            "maintenance": {"status": "idle", "active": False},
+            "outbox_relay": {"status": "idle", "active": False},
+            "scheduler": {"status": "running", "active": True},
+        }
+        metrics = await client.get("/metrics")
+        assert metrics.status_code == 401
+        assert metrics.json() == {"detail": "missing metrics bearer token"}
+
+        operations_health = await client.get(
+            f"/workspaces/{uuid.uuid4()}/operations/health"
+        )
+        assert operations_health.status_code == 401
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
 # --- L-3 completion: the correlation id must reach the 500 response too ---
