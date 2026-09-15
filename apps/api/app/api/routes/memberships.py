@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit
@@ -19,14 +19,50 @@ from app.schemas.membership import MembershipCreate, MembershipOut, MembershipRo
 router = APIRouter(prefix="/workspaces/{workspace_id}/memberships", tags=["memberships"])
 
 
-async def _admin_count(db: AsyncSession, workspace_id: uuid.UUID) -> int:
+async def _get_target_membership(
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *,
+    populate_existing: bool = False,
+) -> WorkspaceMembership | None:
+    statement = select(WorkspaceMembership).where(
+        WorkspaceMembership.workspace_id == workspace_id,
+        WorkspaceMembership.user_id == user_id,
+    )
+    if populate_existing:
+        statement = statement.execution_options(populate_existing=True)
+    result = await db.execute(statement)
+    return result.scalar_one_or_none()
+
+
+async def _locked_admin_count(db: AsyncSession, workspace_id: uuid.UUID) -> int:
     result = await db.execute(
-        select(func.count()).where(
+        select(WorkspaceMembership.id)
+        .where(
             WorkspaceMembership.workspace_id == workspace_id,
             WorkspaceMembership.role == WorkspaceRole.ADMIN,
         )
+        .with_for_update()
     )
-    return result.scalar_one()
+    return len(result.scalars().all())
+
+
+async def _ensure_admin_mutation_keeps_an_admin(
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> WorkspaceMembership:
+    locked_admin_count = await _locked_admin_count(db, workspace_id)
+    target = await _get_target_membership(db, workspace_id, user_id, populate_existing=True)
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
+    if target.role == WorkspaceRole.ADMIN and locked_admin_count <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="workspace must retain at least one admin",
+        )
+    return target
 
 
 @router.get("", response_model=list[MembershipOut])
@@ -86,16 +122,12 @@ async def update_member_role(
     db: AsyncSession = Depends(get_current_session),
     _membership: WorkspaceMembership = Depends(require_workspace_admin),
 ) -> WorkspaceMembership:
-    target = await get_membership(workspace_id, AuthenticatedUser(id=str(user_id), email=None), db)
+    target = await _get_target_membership(db, workspace_id, user_id)
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
 
     if target.role == WorkspaceRole.ADMIN and payload.role != WorkspaceRole.ADMIN:
-        if await _admin_count(db, workspace_id) <= 1:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="workspace must retain at least one admin",
-            )
+        target = await _ensure_admin_mutation_keeps_an_admin(db, workspace_id, user_id)
 
     previous_role = target.role.value
     target.role = payload.role
@@ -131,15 +163,12 @@ async def remove_member(
     if not is_self_leave and caller_membership.role != WorkspaceRole.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="requires one of: admin")
 
-    target = await get_membership(workspace_id, AuthenticatedUser(id=str(user_id), email=None), db)
+    target = await _get_target_membership(db, workspace_id, user_id)
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="member not found")
 
-    if target.role == WorkspaceRole.ADMIN and await _admin_count(db, workspace_id) <= 1:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="workspace must retain at least one admin",
-        )
+    if target.role == WorkspaceRole.ADMIN:
+        target = await _ensure_admin_mutation_keeps_an_admin(db, workspace_id, user_id)
 
     removed_role = target.role.value
     await db.delete(target)
