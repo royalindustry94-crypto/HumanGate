@@ -41,6 +41,7 @@ class _Window:
 # live. Sized well above any plausible count of distinct client IPs in one
 # window for the current single-process topology.
 DEFAULT_MAX_TRACKED_KEYS = 100_000
+DEFAULT_CLEANUP_BATCH_SIZE = 1_000
 
 _RATE_LIMIT_UPSERT_SQL = text(
     """
@@ -84,10 +85,18 @@ _RATE_LIMIT_UPSERT_SQL = text(
 
 _RATE_LIMIT_CLEANUP_SQL = text(
     """
+    WITH doomed AS (
+        SELECT bucket_key
+        FROM request_rate_limits
+        WHERE expires_at <= clock_timestamp()
+        ORDER BY expires_at
+        LIMIT :batch_size
+    )
     DELETE FROM request_rate_limits
-    WHERE expires_at <= clock_timestamp()
+    WHERE bucket_key IN (SELECT bucket_key FROM doomed)
     """
 )
+_RATE_LIMIT_CLEANUP_LOCK_SQL = text("SELECT pg_try_advisory_xact_lock(:lock_key)")
 
 
 class InMemoryRateLimiter:
@@ -193,6 +202,7 @@ class PostgresRateLimiter:
         window_seconds: float,
         session_factory: async_sessionmaker[AsyncSession] = RuntimeSessionLocal,
         cleanup_interval_seconds: float | None = None,
+        cleanup_batch_size: int = DEFAULT_CLEANUP_BATCH_SIZE,
     ) -> None:
         if max_requests < 1:
             raise ValueError("max_requests must be >= 1")
@@ -200,10 +210,13 @@ class PostgresRateLimiter:
             raise ValueError("window_seconds must be > 0")
         if cleanup_interval_seconds is not None and cleanup_interval_seconds <= 0:
             raise ValueError("cleanup_interval_seconds must be > 0")
+        if cleanup_batch_size < 1:
+            raise ValueError("cleanup_batch_size must be >= 1")
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self._session_factory = session_factory
         self._cleanup_interval_seconds = cleanup_interval_seconds or window_seconds
+        self._cleanup_batch_size = cleanup_batch_size
         self._next_cleanup_at = time.monotonic() + self._cleanup_interval_seconds
 
     async def check(self, key: str) -> tuple[bool, float]:
@@ -217,8 +230,12 @@ class PostgresRateLimiter:
                     )
                 ).one()
                 if now >= self._next_cleanup_at:
-                    await session.execute(_RATE_LIMIT_CLEANUP_SQL)
                     self._next_cleanup_at = now + self._cleanup_interval_seconds
+                    if await session.scalar(_RATE_LIMIT_CLEANUP_LOCK_SQL, {"lock_key": 9058}):
+                        await session.execute(
+                            _RATE_LIMIT_CLEANUP_SQL,
+                            {"batch_size": self._cleanup_batch_size},
+                        )
                 await session.commit()
             except Exception:
                 await session.rollback()
