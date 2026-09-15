@@ -28,23 +28,30 @@ Out of scope (explicitly deferred, not silently dropped):
   ties these to live-provider exposure (TD-041), which isn't built yet;
   no workspace-scoped cost-amplification path exists to protect today.
   Revisit when TD-041 ships.
-- Cross-process/shared-cluster enforcement (e.g. Redis-backed). The
-  current deployment (`docker-compose.staging.yml`, `Dockerfile`) runs a
-  single API container/process; an in-memory limiter is exact for that
-  topology. Move to a shared store if/when the API is horizontally
-  scaled — tracked as a follow-up, not built speculatively now (no new
-  framework/dependency without its own work package, per `AGENTS.md`).
+- Cross-process/shared-cluster enforcement via a new dependency such as
+  Redis. The production API now runs stateless on Vercel, so TD-090
+  moved the live counters into PostgreSQL instead; introducing a second
+  shared state system remains out of scope.
 - Trusting `X-Forwarded-For`. Keying on `request.client.host` directly
   avoids a trivial spoof-to-bypass vector; revisit only alongside a
   documented trusted-proxy deployment.
 
 ## Design
 
-`app/core/rate_limit.py`: a plain-dict fixed-window counter
-(`InMemoryRateLimiter`), safe without locks because Starlette middleware
-runs cooperatively on one event loop per process — no true parallel
-access to the dict. `RateLimitMiddleware` wraps it, checks the stricter
-auth-path limit first (for auth paths), falling back to the global limit.
+`app/core/rate_limit.py` now provides two implementations:
+
+- `InMemoryRateLimiter`: the original plain-dict fixed-window counter,
+  still safe without locks because Starlette middleware runs
+  cooperatively on one event loop per process — no true parallel access
+  to the dict.
+- `PostgresRateLimiter`: a shared fixed-window counter backed by
+  `request_rate_limits`, using one atomic upsert per request so every API
+  replica sees the same budget and a bounded cleanup pass to delete
+  expired rows.
+
+`RateLimitMiddleware` wraps either limiter and checks the stricter
+auth-path limit first (for auth paths), falling back to the global
+limit.
 
 Test-suite safety: the middleware is only attached when
 `settings.rate_limit_enabled and settings.environment != "test"`,
@@ -77,4 +84,9 @@ request/response contract end-to-end.
 Set `RATE_LIMIT_ENABLED=false`, or revert this change — no migration, no
 schema, no persisted state.
 
-## Status — COMPLETE (2026-09-09)
+## Status — COMPLETE (2026-09-09; updated 2026-09-15 for TD-090)
+
+The original 2026-09-09 in-memory design closed TD-034 for the then-live
+single-process path. After the production deployment moved the API to
+Vercel's stateless runtime, TD-090 updated the live middleware to use
+PostgreSQL-backed shared counters instead of per-process state.

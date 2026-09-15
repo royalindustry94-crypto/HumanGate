@@ -34,7 +34,7 @@ from app.api.routes.workspaces import router as workspaces_router
 from app.core.audit import RequestIDMiddleware
 from app.core.config import get_settings, openapi_route_kwargs
 from app.core.logging import configure_logging
-from app.core.rate_limit import InMemoryRateLimiter, RateLimitMiddleware
+from app.core.rate_limit import PostgresRateLimiter, RateLimitMiddleware
 from app.orchestration import consumers
 
 settings = get_settings()
@@ -95,19 +95,18 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> Resp
 
 app.add_exception_handler(Exception, _unhandled_exception_handler)
 
-# Rate limiting is process-local (see app/core/rate_limit.py) and
-# deliberately not attached under ENVIRONMENT=test: the test session
-# imports this module once and shares this middleware's state across the
-# full pytest run, and none of those ~340 tests are exercising rate
-# limiting — see docs/work-packages/WP-P1-010-rate-limiting.md.
+# Rate limiting deliberately stays detached under ENVIRONMENT=test: the
+# shared pytest app singleton would otherwise make unrelated tests spend
+# one global budget. Non-test environments use Postgres-backed counters
+# so the Vercel API shares one budget across concurrent instances.
 if settings.rate_limit_enabled and settings.environment != "test":
     app.add_middleware(
         RateLimitMiddleware,
-        global_limiter=InMemoryRateLimiter(
+        global_limiter=PostgresRateLimiter(
             max_requests=settings.rate_limit_requests_per_window,
             window_seconds=settings.rate_limit_window_seconds,
         ),
-        auth_limiter=InMemoryRateLimiter(
+        auth_limiter=PostgresRateLimiter(
             max_requests=settings.auth_rate_limit_requests_per_window,
             window_seconds=settings.rate_limit_window_seconds,
         ),
