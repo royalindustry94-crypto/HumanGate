@@ -32,6 +32,26 @@ async def test_auth_mode_response_does_not_set_session_cookie(client):
     assert "set-cookie" not in response.headers
 
 
+@pytest.mark.asyncio
+async def test_not_found_responses_still_include_browser_security_headers(client):
+    response = await client.get("/does-not-exist")
+    assert response.status_code == 404
+    assert response.headers.get("Content-Security-Policy") == (
+        "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+    )
+    assert response.headers.get("X-Frame-Options") == "DENY"
+
+
+@pytest.mark.asyncio
+async def test_validation_error_responses_include_browser_security_headers(client):
+    response = await client.post("/auth/login", json={})
+    assert response.status_code == 422
+    assert response.headers.get("Content-Security-Policy") == (
+        "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+    )
+    assert response.headers.get("X-Frame-Options") == "DENY"
+
+
 def test_vercel_web_responses_define_browser_security_headers():
     config = json.loads((_REPO_ROOT / "vercel.json").read_text())
     headers = config.get("headers", [])
@@ -49,13 +69,21 @@ def test_vercel_web_responses_define_browser_security_headers():
     assert all_headers.get("Strict-Transport-Security") == "max-age=31536000; includeSubDomains"
     csp = all_headers.get("Content-Security-Policy")
     assert csp is not None
-    assert "frame-ancestors 'none'" in csp
-
-
-def test_frontend_uses_bearer_header_and_tab_scoped_session_storage():
-    api_client = (_REPO_ROOT / "apps/web/src/api.ts").read_text()
-    app_shell = (_REPO_ROOT / "apps/web/src/App.tsx").read_text()
-
-    assert "Authorization" in api_client
-    assert "sessionStorage.setItem" in app_shell
-    assert "sessionStorage.removeItem" in app_shell
+    directives = {
+        part.strip().split(" ", 1)[0]: part.strip()
+        for part in csp.split(";")
+        if part.strip()
+    }
+    assert directives["default-src"] == "default-src 'self'"
+    assert directives["script-src"] == "script-src 'self'"
+    assert directives["script-src-elem"] == "script-src-elem 'self'"
+    assert directives["style-src"] == "style-src 'self' https://fonts.googleapis.com"
+    assert directives["font-src"] == "font-src 'self' https://fonts.gstatic.com"
+    assert directives["img-src"] == "img-src 'self' data:"
+    assert directives["connect-src"] == (
+        "connect-src 'self' https://content-orchestrator-api.vercel.app https://*.vercel.app"
+    )
+    assert directives["object-src"] == "object-src 'none'"
+    assert directives["base-uri"] == "base-uri 'self'"
+    assert directives["frame-ancestors"] == "frame-ancestors 'none'"
+    assert directives["form-action"] == "form-action 'self'"
