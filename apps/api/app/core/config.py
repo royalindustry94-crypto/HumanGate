@@ -88,11 +88,10 @@ class Settings(BaseSettings):
     # --- CORS ---
     cors_allow_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
-    # --- Rate limiting (P1-010 / TD-034) ---
-    # In-process, per-IP fixed-window limits — see
-    # docs/work-packages/WP-P1-010-rate-limiting.md. Disabled automatically
-    # in ENVIRONMENT=test (see app/main.py) regardless of this flag, so the
-    # shared test-session process never trips it.
+    # --- Rate limiting (P1-010 / TD-034 / TD-090) ---
+    # Per-IP fixed-window limits. Live traffic uses shared Postgres-backed
+    # counters; ENVIRONMENT=test still disables the middleware entirely (see
+    # app/main.py) so the shared test-session process never trips it.
     rate_limit_enabled: bool = Field(default=True)
     rate_limit_window_seconds: float = Field(default=60.0, gt=0)
     rate_limit_requests_per_window: int = Field(default=300, ge=1)

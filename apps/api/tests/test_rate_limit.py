@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import httpx
 import pytest
+import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport
+from sqlalchemy import text
 
-from app.core.rate_limit import InMemoryRateLimiter, RateLimitMiddleware
+from app.core.rate_limit import InMemoryRateLimiter, PostgresRateLimiter, RateLimitMiddleware
+from app.db.session import AsyncSessionLocal
 
 
 def test_allows_up_to_the_limit_then_blocks():
@@ -54,8 +57,15 @@ def test_rejects_invalid_construction(bad_kwargs):
         InMemoryRateLimiter(**kwargs)
 
 
-def _build_app(*, global_max: int = 2, auth_max: int = 1) -> FastAPI:
+def _build_app(
+    *,
+    global_max: int = 2,
+    auth_max: int = 1,
+    limiter_cls=InMemoryRateLimiter,
+    limiter_kwargs: dict | None = None,
+) -> FastAPI:
     app = FastAPI()
+    limiter_kwargs = limiter_kwargs or {}
 
     @app.get("/thing")
     async def thing():
@@ -71,8 +81,10 @@ def _build_app(*, global_max: int = 2, auth_max: int = 1) -> FastAPI:
 
     app.add_middleware(
         RateLimitMiddleware,
-        global_limiter=InMemoryRateLimiter(max_requests=global_max, window_seconds=60),
-        auth_limiter=InMemoryRateLimiter(max_requests=auth_max, window_seconds=60),
+        global_limiter=limiter_cls(
+            max_requests=global_max, window_seconds=60, **limiter_kwargs
+        ),
+        auth_limiter=limiter_cls(max_requests=auth_max, window_seconds=60, **limiter_kwargs),
     )
     return app
 
@@ -137,6 +149,73 @@ async def test_distinct_client_ips_have_independent_budgets():
     async with httpx.AsyncClient(transport=transport2, base_url="http://test") as ac2:
         # A different source IP has its own, untouched budget.
         assert (await ac2.get("/thing")).status_code == 200
+
+
+@pytest_asyncio.fixture
+async def clean_request_rate_limits():
+    async with AsyncSessionLocal() as session:
+        await session.execute(text("DELETE FROM request_rate_limits"))
+        await session.commit()
+    yield
+    async with AsyncSessionLocal() as session:
+        await session.execute(text("DELETE FROM request_rate_limits"))
+        await session.commit()
+
+
+async def test_postgres_limiter_budget_is_shared_across_middleware_instances(
+    clean_request_rate_limits,
+):
+    app1 = _build_app(global_max=1, limiter_cls=PostgresRateLimiter)
+    app2 = _build_app(global_max=1, limiter_cls=PostgresRateLimiter)
+
+    transport1 = ASGITransport(app=app1, client=("1.1.1.1", 123))
+    transport2 = ASGITransport(app=app2, client=("1.1.1.1", 456))
+
+    async with httpx.AsyncClient(transport=transport1, base_url="http://test") as ac1:
+        assert (await ac1.get("/thing")).status_code == 200
+    async with httpx.AsyncClient(transport=transport2, base_url="http://test") as ac2:
+        resp = await ac2.get("/thing")
+        assert resp.status_code == 429
+        assert int(resp.headers["Retry-After"]) >= 1
+
+
+async def test_postgres_limiter_cleans_up_expired_rows(clean_request_rate_limits):
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text(
+                """
+                INSERT INTO request_rate_limits (
+                    bucket_key,
+                    window_started_at,
+                    expires_at,
+                    count,
+                    updated_at
+                )
+                VALUES (
+                    'stale',
+                    clock_timestamp() - interval '2 minutes',
+                    clock_timestamp() - interval '1 minute',
+                    1,
+                    clock_timestamp() - interval '1 minute'
+                )
+                """
+            )
+        )
+        await session.commit()
+
+    limiter = PostgresRateLimiter(
+        max_requests=5,
+        window_seconds=60,
+        cleanup_interval_seconds=0.001,
+    )
+    limiter._next_cleanup_at = 0.0
+    assert await limiter.check("global:fresh") == (True, 0.0)
+
+    async with AsyncSessionLocal() as session:
+        remaining = await session.scalar(
+            text("SELECT count(*) FROM request_rate_limits WHERE bucket_key = 'stale'")
+        )
+    assert remaining == 0
 
 
 # --- H-2: the window map must stay bounded ---
