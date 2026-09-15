@@ -36,4 +36,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute("REVOKE ALL PRIVILEGES ON request_rate_limits FROM app_runtime;")
     op.execute("DROP TABLE IF EXISTS request_rate_limits;")

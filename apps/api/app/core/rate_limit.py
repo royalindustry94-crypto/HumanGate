@@ -204,7 +204,7 @@ class PostgresRateLimiter:
         self.window_seconds = window_seconds
         self._session_factory = session_factory
         self._cleanup_interval_seconds = cleanup_interval_seconds or window_seconds
-        self._next_cleanup_at = 0.0
+        self._next_cleanup_at = time.monotonic() + self._cleanup_interval_seconds
 
     async def check(self, key: str) -> tuple[bool, float]:
         now = time.monotonic()

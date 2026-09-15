@@ -208,6 +208,7 @@ async def test_postgres_limiter_cleans_up_expired_rows(clean_request_rate_limits
         window_seconds=60,
         cleanup_interval_seconds=0.001,
     )
+    limiter._next_cleanup_at = 0.0
     assert await limiter.check("global:fresh") == (True, 0.0)
 
     async with AsyncSessionLocal() as session:
