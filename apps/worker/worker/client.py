@@ -10,6 +10,7 @@ tests without pretending to do AI generation.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -74,6 +75,34 @@ class ReferenceWorkerClient:
         )
         self.current_load = 0
         self._draining = False
+
+    def _renew_interval_seconds(self) -> float:
+        return max(
+            0.1,
+            min(float(self.heartbeat_interval_seconds), float(self.lease_seconds) / 2.0),
+        )
+
+    async def _renew_while_running(
+        self,
+        assignment_id: uuid.UUID | str,
+        *,
+        stop_event: asyncio.Event,
+    ) -> None:
+        interval = self._renew_interval_seconds()
+        while True:
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval)
+                return
+            except TimeoutError:
+                pass
+            try:
+                await self.renew(assignment_id)
+            except httpx.HTTPError:
+                logger.exception(
+                    "lease renew failed",
+                    extra={"assignment_id": str(assignment_id)},
+                )
+                continue
 
     async def register(self) -> uuid.UUID:
         response = await self._http.post(
@@ -231,11 +260,8 @@ class ReferenceWorkerClient:
         the full worker-side half of the contract. ``assignment`` is the
         dict returned by ``claim_next`` (HTTP). ``session`` is unused.
 
-        Protocol: ack (reserves provider effect key) → renew (keep lease
-        alive across execution) → execute → submit. Real workers with
-        long provider calls should renew on an interval; the reference
-        client renews once immediately before submit as a minimal
-        heartbeat-extend.
+        Protocol: ack (reserves provider effect key) → renew in the
+        background while execution is running → execute → submit.
 
         Does NOT synthesize its own provider effect key (2026-09-07 fix —
         see `docs/TECHNICAL_DEBT_REGISTER.md` TD-077): the server derives
@@ -273,8 +299,10 @@ class ReferenceWorkerClient:
                 ),
             )
             return
-        # Renew before side effects so a slow executor does not race the reaper.
-        await self.renew(assignment_id)
+        stop_renewals = asyncio.Event()
+        renew_task = asyncio.create_task(
+            self._renew_while_running(assignment_id, stop_event=stop_renewals)
+        )
         context = {
             "stage": stage,
             "assignment_id": str(assignment_id),
@@ -291,7 +319,19 @@ class ReferenceWorkerClient:
             ):
                 if key in assignment and assignment[key] is not None:
                     context[key] = assignment[key]
-        success, result, error = await self.executor(context)
+        try:
+            success, result, error = await self.executor(context)
+        except Exception as exc:
+            logger.exception(
+                "stage execution failed",
+                extra={"assignment_id": str(assignment_id), "stage": str(stage)},
+            )
+            success = False
+            result = None
+            error = str(exc) or exc.__class__.__name__
+        finally:
+            stop_renewals.set()
+            await renew_task
         await self.submit(
             assignment_id,
             success=success,
