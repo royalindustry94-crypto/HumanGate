@@ -292,7 +292,13 @@ jobs:
           assert "GITHUB_ENV" in smoke
 
           def assert_pinned(ref: str, source: str) -> None:
-              if ref.startswith("./") or ref.startswith("docker://"):
+              if ref.startswith("./"):
+                  return
+              if ref.startswith("docker://"):
+                  image_ref = ref.removeprefix("docker://")
+                  assert re.fullmatch(r".+@sha256:[0-9A-Fa-f]{64}", image_ref), (
+                      f"{source} must pin docker actions by digest: {ref}"
+                  )
                   return
               assert "@" in ref, f"{source} missing action ref: {ref}"
               _, revision = ref.rsplit("@", 1)
