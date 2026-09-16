@@ -300,7 +300,10 @@ jobs:
                   f"{source} must pin full commit SHA: {ref}"
               )
 
-          for workflow_path in Path(".github/workflows").glob("*.yml"):
+          workflow_paths = sorted(Path(".github/workflows").rglob("*.yml")) + sorted(
+              Path(".github/workflows").rglob("*.yaml")
+          )
+          for workflow_path in workflow_paths:
               workflow_doc = yaml.safe_load(workflow_path.read_text()) or {}
               for job_name, job in (workflow_doc.get("jobs") or {}).items():
                   job_uses = job.get("uses")
