@@ -97,9 +97,9 @@ class ReferenceWorkerClient:
                 pass
             try:
                 await self.renew(assignment_id)
-            except httpx.TransportError:
+            except httpx.HTTPError:
                 logger.exception(
-                    "lease renew transport failed",
+                    "lease renew failed",
                     extra={"assignment_id": str(assignment_id)},
                 )
                 continue
