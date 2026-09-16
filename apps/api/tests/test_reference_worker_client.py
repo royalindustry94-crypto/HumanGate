@@ -7,6 +7,7 @@ import os
 import sys
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault(
     "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/content_orchestrator_test"
@@ -28,7 +29,6 @@ from httpx import ASGITransport
 from sqlalchemy import select, text
 from worker.client import ReferenceWorkerClient  # noqa: E402
 
-from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
 from app.main import app
 from app.models.assignments import StageAssignment
@@ -316,10 +316,10 @@ async def test_reference_worker_client_refuses_to_reexecute_after_crash_recovery
 
 @pytest.mark.asyncio
 async def test_reference_worker_client_renews_lease_during_slow_execution():
-    settings = get_settings()
-    original_lease_seconds = settings.assignment_lease_seconds
-    settings.assignment_lease_seconds = 1
-    try:
+    with (
+        patch("app.orchestration.claiming._claim_lease_seconds", return_value=1),
+        patch("app.orchestration.dispatcher._lease_seconds", return_value=1),
+    ):
         async with AsyncSessionLocal() as session:
             await session.execute(
                 text(
@@ -433,5 +433,3 @@ async def test_reference_worker_client_renews_lease_during_slow_execution():
             assert assignment.status == StageAssignmentStatus.COMPLETED
             assert assignment.attempt_number == 1
             assert assignment.claim_count == 1
-    finally:
-        settings.assignment_lease_seconds = original_lease_seconds
