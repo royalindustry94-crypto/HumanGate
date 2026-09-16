@@ -349,6 +349,25 @@ jobs:
                           f"{workflow_path}:{job_name}:step{step_index}",
                       )
 
+          composite_action_manifests = sorted(Path(".github/actions").rglob("action.yml"))
+          composite_action_manifests += sorted(Path(".github/actions").rglob("action.yaml"))
+          for manifest_path in composite_action_manifests:
+              action_doc = yaml.safe_load(manifest_path.read_text()) or {}
+              runs = action_doc.get("runs") or {}
+              if runs.get("using") != "composite":
+                  continue
+              for step_index, step in enumerate(runs.get("steps") or [], start=1):
+                  assert isinstance(step, dict), (
+                      f"{manifest_path}:runs.steps[{step_index}] must be a mapping"
+                  )
+                  step_uses = step.get("uses")
+                  if not step_uses:
+                      continue
+                  assert_pinned(
+                      step_uses,
+                      f"{manifest_path}:composite-step{step_index}",
+                  )
+
           staging = Path("docker-compose.staging.yml").read_text()
           assert "5432:5432" not in staging
           assert "${POSTGRES_PASSWORD:?required}" in staging
