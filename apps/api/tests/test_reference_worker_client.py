@@ -367,62 +367,62 @@ async def test_reference_worker_client_renews_lease_during_slow_execution():
             assert dispatched.assignment is not None
             assignment_id = dispatched.assignment.id
 
-        http = httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
         admin_headers = {"Authorization": "Bearer " + make_token(user_id=admin_user)}
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as http:
+            async def _provision_client(name: str) -> ReferenceWorkerClient:
+                provision = await http.post(
+                    f"/workspaces/{ws}/workers",
+                    headers=admin_headers,
+                    json={"name": name, "supported_stages": ["scripting"], "max_concurrency": 1},
+                )
+                assert provision.status_code == 201, provision.text
+                provisioned = provision.json()
+                client = ReferenceWorkerClient(
+                    name=name,
+                    supported_stages=["scripting"],
+                    http=http,
+                    credential=provisioned["worker_secret"],
+                    worker_id=provisioned["worker_id"],
+                    heartbeat_interval_seconds=1,
+                    lease_seconds=1,
+                )
+                await client.register()
+                await client.heartbeat()
+                return client
 
-        async def _provision_client(name: str) -> ReferenceWorkerClient:
-            provision = await http.post(
-                f"/workspaces/{ws}/workers",
-                headers=admin_headers,
-                json={"name": name, "supported_stages": ["scripting"], "max_concurrency": 1},
-            )
-            assert provision.status_code == 201, provision.text
-            provisioned = provision.json()
-            client = ReferenceWorkerClient(
-                name=name,
-                supported_stages=["scripting"],
-                http=http,
-                credential=provisioned["worker_secret"],
-                worker_id=provisioned["worker_id"],
-                heartbeat_interval_seconds=1,
-                lease_seconds=1,
-            )
-            await client.register()
-            await client.heartbeat()
-            return client
+            slow_client = await _provision_client("ref-slow-1")
+            rival_client = await _provision_client("ref-slow-2")
 
-        slow_client = await _provision_client("ref-slow-1")
-        rival_client = await _provision_client("ref-slow-2")
+            claimed = await slow_client.claim_next()
+            assert claimed is not None
+            assert claimed["id"] == str(assignment_id)
 
-        claimed = await slow_client.claim_next()
-        assert claimed is not None
-        assert claimed["id"] == str(assignment_id)
+            started = asyncio.Event()
+            finish = asyncio.Event()
 
-        started = asyncio.Event()
-        finish = asyncio.Event()
+            async def _slow_executor(_context):
+                started.set()
+                await finish.wait()
+                return True, {"ok": True}, ""
 
-        async def _slow_executor(_context):
-            started.set()
-            await finish.wait()
-            return True, {"ok": True}, ""
+            slow_client.executor = _slow_executor
+            run_task = asyncio.create_task(slow_client.run_one(assignment=claimed))
+            await asyncio.wait_for(started.wait(), timeout=5)
 
-        slow_client.executor = _slow_executor
-        run_task = asyncio.create_task(slow_client.run_one(assignment=claimed))
-        await asyncio.wait_for(started.wait(), timeout=5)
+            await asyncio.sleep(1.3)
 
-        await asyncio.sleep(1.3)
+            async with AsyncSessionLocal() as session:
+                reaped = await dispatcher.reap_expired_leases(session)
+                await session.commit()
+            assert assignment_id not in {result.assignment.id for result in reaped}
 
-        async with AsyncSessionLocal() as session:
-            reaped = await dispatcher.reap_expired_leases(session)
-            await session.commit()
-        assert assignment_id not in {result.assignment.id for result in reaped}
+            rival_claim = await rival_client.claim_next()
+            assert rival_claim is None
 
-        rival_claim = await rival_client.claim_next()
-        assert rival_claim is None
-
-        finish.set()
-        await asyncio.wait_for(run_task, timeout=5)
-        await http.aclose()
+            finish.set()
+            await asyncio.wait_for(run_task, timeout=5)
 
         async with AsyncSessionLocal() as session:
             refreshed = (
