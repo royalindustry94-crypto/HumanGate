@@ -123,6 +123,7 @@ async def _security_headers_middleware(request: Request, call_next):
     _attach_security_headers(response, path=request.url.path)
     return response
 
+
 # Rate limiting deliberately stays detached under ENVIRONMENT=test: the
 # shared pytest app singleton would otherwise make unrelated tests spend
 # one global budget. Non-test environments use Postgres-backed counters

@@ -70,9 +70,7 @@ def test_vercel_web_responses_define_browser_security_headers():
     csp = all_headers.get("Content-Security-Policy")
     assert csp is not None
     directives = {
-        part.strip().split(" ", 1)[0]: part.strip()
-        for part in csp.split(";")
-        if part.strip()
+        part.strip().split(" ", 1)[0]: part.strip() for part in csp.split(";") if part.strip()
     }
     assert directives["default-src"] == "default-src 'self'"
     assert directives["script-src"] == "script-src 'self'"
