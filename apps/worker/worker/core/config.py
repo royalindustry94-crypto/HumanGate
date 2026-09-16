@@ -43,6 +43,7 @@ class WorkerSettings(BaseSettings):
     supported_stages: list[str] = Field(default_factory=lambda: ["scripting"])
     max_concurrency: int = Field(default=1, ge=1, le=1000)
     heartbeat_interval_seconds: int = Field(default=10, ge=1)
+    assignment_lease_seconds: int = Field(default=60, ge=1)
 
 
 @lru_cache

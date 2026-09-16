@@ -2,6 +2,7 @@
 proving the WS3 worker-side contract without any real generation logic.
 """
 
+import asyncio
 import os
 import sys
 import uuid
@@ -27,8 +28,10 @@ from httpx import ASGITransport
 from sqlalchemy import select, text
 from worker.client import ReferenceWorkerClient  # noqa: E402
 
+from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
 from app.main import app
+from app.models.assignments import StageAssignment
 from app.models.enums import StageAssignmentStatus
 from app.models.pipeline import PipelineRun
 from app.models.workflow import WorkflowDefinition, WorkflowStage
@@ -309,3 +312,126 @@ async def test_reference_worker_client_refuses_to_reexecute_after_crash_recovery
         assert stage_run is not None
         assert stage_run.status == "failed"
         assert "prior attempt" in (stage_run.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_reference_worker_client_renews_lease_during_slow_execution():
+    settings = get_settings()
+    original_lease_seconds = settings.assignment_lease_seconds
+    settings.assignment_lease_seconds = 1
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                text(
+                    "UPDATE worker_registry SET status = 'offline'::worker_status "
+                    "WHERE status IN ('online'::worker_status, 'busy'::worker_status)"
+                )
+            )
+            ws, item, admin_user = await _make_workspace_item(session)
+            definition = WorkflowDefinition(
+                id=uuid.uuid4(),
+                workspace_id=ws,
+                name="one-stage-slow",
+                version=1,
+            )
+            session.add(definition)
+            await session.flush()
+            session.add(
+                WorkflowStage(
+                    id=uuid.uuid4(),
+                    workspace_id=ws,
+                    definition_id=definition.id,
+                    stage_key="scripting",
+                    ordinal=1,
+                    is_terminal=True,
+                )
+            )
+            await session.flush()
+
+            run = PipelineRun(id=uuid.uuid4(), workspace_id=ws, content_item_id=item)
+            session.add(run)
+            await session.flush()
+            await controller.start_run(session, run=run, definition=definition)
+
+            dispatched = await dispatcher.dispatch_stage(
+                session,
+                workspace_id=ws,
+                pipeline_run_id=run.id,
+                stage="scripting",
+                attempt_number=1,
+                correlation_id=run.correlation_id,
+                trace_id=run.trace_id,
+            )
+            await session.commit()
+            run_id = run.id
+            assert dispatched.assignment is not None
+            assignment_id = dispatched.assignment.id
+
+        http = httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+        admin_headers = {"Authorization": "Bearer " + make_token(user_id=admin_user)}
+
+        async def _provision_client(name: str) -> ReferenceWorkerClient:
+            provision = await http.post(
+                f"/workspaces/{ws}/workers",
+                headers=admin_headers,
+                json={"name": name, "supported_stages": ["scripting"], "max_concurrency": 1},
+            )
+            assert provision.status_code == 201, provision.text
+            provisioned = provision.json()
+            client = ReferenceWorkerClient(
+                name=name,
+                supported_stages=["scripting"],
+                http=http,
+                credential=provisioned["worker_secret"],
+                worker_id=provisioned["worker_id"],
+                heartbeat_interval_seconds=1,
+                lease_seconds=1,
+            )
+            await client.register()
+            await client.heartbeat()
+            return client
+
+        slow_client = await _provision_client("ref-slow-1")
+        rival_client = await _provision_client("ref-slow-2")
+
+        claimed = await slow_client.claim_next()
+        assert claimed is not None
+        assert claimed["id"] == str(assignment_id)
+
+        started = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def _slow_executor(_context):
+            started.set()
+            await finish.wait()
+            return True, {"ok": True}, ""
+
+        slow_client.executor = _slow_executor
+        run_task = asyncio.create_task(slow_client.run_one(assignment=claimed))
+        await asyncio.wait_for(started.wait(), timeout=5)
+
+        await asyncio.sleep(1.3)
+
+        async with AsyncSessionLocal() as session:
+            reaped = await dispatcher.reap_expired_leases(session)
+            await session.commit()
+        assert assignment_id not in {result.assignment.id for result in reaped}
+
+        rival_claim = await rival_client.claim_next()
+        assert rival_claim is None
+
+        finish.set()
+        await asyncio.wait_for(run_task, timeout=5)
+        await http.aclose()
+
+        async with AsyncSessionLocal() as session:
+            refreshed = (
+                await session.execute(select(PipelineRun).where(PipelineRun.id == run_id))
+            ).scalar_one()
+            assert refreshed.status == "succeeded"
+            assignment = await session.get(StageAssignment, assignment_id)
+            assert assignment.status == StageAssignmentStatus.COMPLETED
+            assert assignment.attempt_number == 1
+            assert assignment.claim_count == 1
+    finally:
+        settings.assignment_lease_seconds = original_lease_seconds

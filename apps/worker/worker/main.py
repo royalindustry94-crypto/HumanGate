@@ -44,6 +44,7 @@ async def _run_http_loop(stop_event: asyncio.Event) -> None:
             worker_id=uuid.UUID(worker_id) if isinstance(worker_id, str) else worker_id,
             max_concurrency=settings.max_concurrency,
             heartbeat_interval_seconds=settings.heartbeat_interval_seconds,
+            lease_seconds=settings.assignment_lease_seconds,
             executor=draft_desk_executor,
         )
         await client.register()
