@@ -312,10 +312,16 @@ jobs:
           for workflow_path in workflow_paths:
               workflow_doc = yaml.safe_load(workflow_path.read_text()) or {}
               for job_name, job in (workflow_doc.get("jobs") or {}).items():
+                  assert isinstance(job, dict), (
+                      f"{workflow_path}:{job_name} must be a mapping"
+                  )
                   job_uses = job.get("uses")
                   if job_uses:
                       assert_pinned(job_uses, f"{workflow_path}:{job_name}")
                   for step_index, step in enumerate(job.get("steps") or [], start=1):
+                      assert isinstance(step, dict), (
+                          f"{workflow_path}:{job_name}:step{step_index} must be a mapping"
+                      )
                       step_uses = step.get("uses")
                       if not step_uses:
                           continue
