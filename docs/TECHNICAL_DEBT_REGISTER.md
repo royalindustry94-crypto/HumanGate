@@ -1,7 +1,7 @@
 # Technical Debt Register
 
 **Repository:** HumanGate (renamed from Content Orchestrator, PR #127, 2026-09-13; historical entries below predate the rename and are left as originally written)  
-**Updated:** 2026-09-16 (TD-091 worker lease-renewal investigation/closure on PR #153; older exact-`main` baseline notes below remain as historical reference where still applicable)  
+**Updated:** 2026-09-16 (TD-096 CI supply-chain gate investigation/closure on PR #157; older exact-`main` baseline notes below remain as historical reference where still applicable)  
 **Current reference:** `main` @ `dfacbbd1f941c98e9c437d828575acd35bf7d96c` (`CODEX_BASELINE: PASS` posted on coordination issue #90, 2026-09-14T15:02:54Z; exact-head CI run [34858778445](https://github.com/royalindustry94-crypto/HumanGate/actions/runs/34858778445) green on all 6 required jobs — `api`, `worker`, `web`, `docker-build`, `browser-smoke`, `security`). Supersedes the `2ca92f8` reference throughout the rest of this document.
 
 Severity: CRITICAL · HIGH · MEDIUM · LOW · INFO
@@ -82,13 +82,16 @@ Issue #126 itself is **closed** (`state_reason: completed`, 2026-09-14T15:03:10Z
 | Status | **CLOSED.** The gap is now bounded with explicit runtime/config enforcement and regression coverage for both API response headers and the repository's non-cookie session contract. |
 
 ### TD-095 — Oversized modules / duplicated business logic — **OPEN / UNTRIAGED**
-### TD-096 — CI security supply-chain gates could go further — **OPEN / UNTRIAGED**
+### TD-096 — CI security supply-chain gates could go further — **CLOSED (2026-09-16)**
 
 | Field | Value |
 |---|---|
-| Evidence | Named verbatim in issue #126's "Follow-up warnings" paragraph (closed 2026-09-14). No file/line-level evidence has been gathered for any of these eight items by this pass — that is explicitly out of scope for this docs-reconciliation task. |
-| Recommendation | Each needs a dedicated read-the-code pass (matching this register's own standard: no HIGH/CRITICAL without exact evidence) before it can be prioritized, assigned a real severity, or closed. Do not infer severity from ordering above — the list is copied in the order issue #126 stated it, not a ranking. |
-| Effort | Unknown until triaged |
+| Severity | LOW |
+| Evidence | Issue #56 ("Hardening: immutable CI actions and reproducible dependency builds") is already closed via merged PR #113, and the current workflow set keeps third-party action refs immutable: `ci.yml` pins `actions/checkout`, `actions/setup-python`, `actions/setup-node`, `actions/upload-artifact`, and `gitleaks/gitleaks-action` to full commit SHAs (`.github/workflows/ci.yml:36-37,63-64,82-83,131,134,137,200,210,214,217,377`), `claude.yml` pins `actions/github-script`, `actions/checkout`, and `anthropics/claude-code-action` (`.github/workflows/claude.yml:34,149,158`), and `codex-audit-gate.yml` pins `actions/github-script` (`.github/workflows/codex-audit-gate.yml:25`). Dependency-lock coverage is active in CI: Python installs are constrained by deterministic lock files (`pip install -e ".[dev]" -c constraints-prod.txt` in `.github/workflows/ci.yml:41,68,150,357,367`; exact pins in `apps/api/constraints-prod.txt:1-46` and `apps/worker/constraints-prod.txt:1-24`), and web uses `npm ci` with `apps/web/package-lock.json` (`.github/workflows/ci.yml:87,89,141,153`; `apps/web/package-lock.json:1-6`). Privileged-trigger review found `pull_request_target` only in Codex audit gate (`.github/workflows/codex-audit-gate.yml:4-7`), and that workflow never checks out or executes PR code (`.github/workflows/codex-audit-gate.yml:9-10,25-61`). |
+| Real exposure | Remaining live gap before this PR: `ci.yml` had no explicit `permissions:` block (`.github/workflows/ci.yml:1-9` pre-fix), so token scope depended on repository defaults. If defaults were ever widened, a compromised action commit (even when SHA-pinned) could inherit broader-than-needed token rights during CI runs. No direct untrusted-PR secret execution path was found in `pull_request_target` flows because the only privileged trigger is metadata-only and does not execute PR content. |
+| Fix | Added explicit least-privilege workflow permissions for CI (`permissions: contents: read`) so all CI jobs run with a read-only token by default regardless of repository-level defaults (`.github/workflows/ci.yml:9-10`). Added a regression meta-check in the existing security guard script to fail CI if any workflow introduces a third-party `uses:` ref without a full 40-character commit SHA, and to fail if CI permissions drift to write access (`.github/workflows/ci.yml:223-303`). |
+| Tests | Regression coverage is enforced in the existing required `security` CI job via the updated "Validate Claude/Codex exact-head gate" script (`.github/workflows/ci.yml:223-303`). Local validation in this pass executed the same new invariant logic directly with a stdlib Python probe from repo root (checks passed: CI preamble permissions pinned to `contents: read`, and all workflow `uses:` refs pin full 40-char SHAs). |
+| Status | **CLOSED.** Investigation confirmed issue #56 already landed the core SHA-pinning + lockfile hardening; this TD is now bounded further by explicit read-only CI token permissions plus a guardrail that blocks future mutable action refs. |
 
 ---
 

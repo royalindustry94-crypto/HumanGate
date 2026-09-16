@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   api:
     runs-on: ubuntu-latest
@@ -220,6 +223,7 @@ jobs:
       - name: Validate Claude/Codex exact-head gate
         run: |
           python - <<'PY'
+          import re
           from pathlib import Path
 
           def service_block(text: str, service: str) -> str:
@@ -276,12 +280,31 @@ jobs:
           assert "actions/checkout" not in gate
 
           ci = Path(".github/workflows/ci.yml").read_text()
+          ci_preamble = ci.split("\njobs:\n", 1)[0]
+          assert "permissions:\n  contents: read" in ci_preamble
+          assert "write" not in ci_preamble
           smoke = ci.split("  browser-smoke:", 1)[1].split("\n  security:", 1)[0]
           assert "SUPABASE_JWT_SECRET:" not in smoke, (
               "browser-smoke must not pin SUPABASE_JWT_SECRET; generate it at runtime"
           )
           assert "token_urlsafe" in smoke
           assert "GITHUB_ENV" in smoke
+
+          for workflow_path in Path(".github/workflows").glob("*.yml"):
+              for line_no, line in enumerate(workflow_path.read_text().splitlines(), start=1):
+                  stripped = line.strip()
+                  if not (stripped.startswith("uses:") or stripped.startswith("- uses:")):
+                      continue
+                  action_ref = stripped.split("uses:", 1)[1].strip().split()[0]
+                  if action_ref.startswith("./") or action_ref.startswith("docker://"):
+                      continue
+                  assert "@" in action_ref, (
+                      f"{workflow_path}:{line_no} missing action ref: {line.strip()}"
+                  )
+                  _, ref = action_ref.rsplit("@", 1)
+                  assert re.fullmatch(r"[0-9a-f]{40}", ref), (
+                      f"{workflow_path}:{line_no} must pin full commit SHA: {action_ref}"
+                  )
 
           staging = Path("docker-compose.staging.yml").read_text()
           assert "5432:5432" not in staging
