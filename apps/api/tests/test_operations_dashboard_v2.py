@@ -255,6 +255,7 @@ async def test_leads_list_is_paginated_and_reports_full_total(client, new_user):
     )
     assert workspace.status_code == 201
     workspace_id = uuid.UUID(workspace.json()["id"])
+    now = datetime.now(UTC)
 
     async with AsyncSessionLocal() as session:
         for i in range(260):
@@ -265,6 +266,8 @@ async def test_leads_list_is_paginated_and_reports_full_total(client, new_user):
                     email=f"lead-{i}@example.com",
                     source="inbound",
                     status="new",
+                    created_at=now + timedelta(seconds=i),
+                    updated_at=now + timedelta(seconds=i),
                 )
             )
         await session.commit()
@@ -277,6 +280,8 @@ async def test_leads_list_is_paginated_and_reports_full_total(client, new_user):
     first_body = first_page.json()
     assert first_body["total"] == 260
     assert len(first_body["leads"]) == 200
+    first_indices = [int(row["name"].split(" ")[1]) for row in first_body["leads"]]
+    assert first_indices == list(range(259, 59, -1))
 
     second_page = await client.get(
         f"/workspaces/{workspace_id}/operations/leads",
@@ -287,6 +292,8 @@ async def test_leads_list_is_paginated_and_reports_full_total(client, new_user):
     second_body = second_page.json()
     assert second_body["total"] == 260
     assert len(second_body["leads"]) == 50
+    second_indices = [int(row["name"].split(" ")[1]) for row in second_body["leads"]]
+    assert second_indices == list(range(59, 9, -1))
 
     first_ids = {row["id"] for row in first_body["leads"]}
     second_ids = {row["id"] for row in second_body["leads"]}
