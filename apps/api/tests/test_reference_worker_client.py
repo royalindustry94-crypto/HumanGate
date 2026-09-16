@@ -177,6 +177,110 @@ async def test_reference_worker_client_completes_a_stage_end_to_end():
 
 
 @pytest.mark.asyncio
+async def test_reference_worker_client_submits_executor_failures():
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text(
+                "UPDATE worker_registry SET status = 'offline'::worker_status "
+                "WHERE status IN ('online'::worker_status, 'busy'::worker_status)"
+            )
+        )
+
+        ws, item, admin_user = await _make_workspace_item(session)
+        definition = WorkflowDefinition(
+            id=uuid.uuid4(),
+            workspace_id=ws,
+            name="one-stage-error",
+            version=1,
+        )
+        session.add(definition)
+        await session.flush()
+        session.add(
+            WorkflowStage(
+                id=uuid.uuid4(),
+                workspace_id=ws,
+                definition_id=definition.id,
+                stage_key="scripting",
+                ordinal=1,
+                is_terminal=True,
+            )
+        )
+        await session.flush()
+
+        run = PipelineRun(id=uuid.uuid4(), workspace_id=ws, content_item_id=item)
+        session.add(run)
+        await session.flush()
+        await controller.start_run(session, run=run, definition=definition)
+
+        dispatched = await dispatcher.dispatch_stage(
+            session,
+            workspace_id=ws,
+            pipeline_run_id=run.id,
+            stage="scripting",
+            attempt_number=1,
+            correlation_id=run.correlation_id,
+            trace_id=run.trace_id,
+        )
+        await session.commit()
+        run_id = run.id
+        assert dispatched.assignment is not None
+        assignment_id = dispatched.assignment.id
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        admin_headers = {"Authorization": "Bearer " + make_token(user_id=admin_user)}
+        provision = await http.post(
+            f"/workspaces/{ws}/workers",
+            headers=admin_headers,
+            json={"name": "ref-error-1", "supported_stages": ["scripting"], "max_concurrency": 1},
+        )
+        assert provision.status_code == 201, provision.text
+        provisioned = provision.json()
+
+        client = ReferenceWorkerClient(
+            name="ref-error-1",
+            supported_stages=["scripting"],
+            http=http,
+            credential=provisioned["worker_secret"],
+            worker_id=provisioned["worker_id"],
+        )
+        await client.register()
+        await client.heartbeat()
+
+        claimed = await client.claim_next()
+        assert claimed is not None
+        assert claimed["id"] == str(assignment_id)
+
+        async def _raising_executor(_context):
+            raise RuntimeError("executor boom")
+
+        client.executor = _raising_executor
+        await client.run_one(assignment=claimed)
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(PipelineRun).where(PipelineRun.id == run_id))
+        refreshed = result.scalar_one()
+        assert refreshed.status == "failed"
+        from app.models.pipeline import PipelineStageRun
+
+        assignment = await session.get(StageAssignment, assignment_id)
+        assert assignment.status == StageAssignmentStatus.FAILED
+        stage_run = (
+            (
+                await session.execute(
+                    select(PipelineStageRun)
+                    .where(PipelineStageRun.pipeline_run_id == run_id)
+                    .order_by(PipelineStageRun.completed_at.desc())
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert stage_run is not None
+        assert stage_run.status == "failed"
+        assert "executor boom" in (stage_run.error_message or "")
+
+
+@pytest.mark.asyncio
 async def test_reference_worker_client_refuses_to_reexecute_after_crash_recovery():
     """Regression (2026-09-07 audit finding / TD-077, client-side half):
     if a *prior* attempt of this assignment already reserved the provider

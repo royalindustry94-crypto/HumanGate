@@ -321,6 +321,14 @@ class ReferenceWorkerClient:
                     context[key] = assignment[key]
         try:
             success, result, error = await self.executor(context)
+        except Exception as exc:
+            logger.exception(
+                "stage execution failed",
+                extra={"assignment_id": str(assignment_id), "stage": str(stage)},
+            )
+            success = False
+            result = None
+            error = str(exc) or exc.__class__.__name__
         finally:
             stop_renewals.set()
             await renew_task
