@@ -586,6 +586,49 @@ async def cost_control(session: AsyncSession, workspace_id: uuid.UUID) -> CostCo
     )
 
 
+async def _recent_assignments_by_worker(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    worker_ids: list[uuid.UUID],
+    *,
+    per_worker_limit: int = 20,
+) -> dict[uuid.UUID, list[StageAssignment]]:
+    if not worker_ids:
+        return {}
+    ranked = (
+        select(
+            StageAssignment.id.label("id"),
+            func.row_number()
+            .over(
+                partition_by=StageAssignment.worker_id,
+                order_by=(StageAssignment.updated_at.desc(), StageAssignment.id.desc()),
+            )
+            .label("row_number"),
+        )
+        .where(
+            StageAssignment.workspace_id == workspace_id,
+            StageAssignment.worker_id.in_(worker_ids),
+        )
+        .subquery()
+    )
+    assignments = (
+        (
+            await session.execute(
+                select(StageAssignment)
+                .join(ranked, StageAssignment.id == ranked.c.id)
+                .where(ranked.c.row_number <= per_worker_limit)
+                .order_by(StageAssignment.worker_id, StageAssignment.updated_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    grouped: dict[uuid.UUID, list[StageAssignment]] = {}
+    for assignment in assignments:
+        grouped.setdefault(assignment.worker_id, []).append(assignment)
+    return grouped
+
+
 async def worker_timeline(session: AsyncSession, workspace_id: uuid.UUID) -> WorkerTimelineOut:
     settings = get_settings()
     now = datetime.now(UTC)
@@ -606,23 +649,14 @@ async def worker_timeline(session: AsyncSession, workspace_id: uuid.UUID) -> Wor
         .scalars()
         .all()
     )
+    assignments_by_worker = await _recent_assignments_by_worker(
+        session,
+        workspace_id,
+        [worker.id for worker in workers],
+    )
     rows: list[WorkerTimelineRow] = []
     for worker in workers:
-        assignments = (
-            (
-                await session.execute(
-                    select(StageAssignment)
-                    .where(
-                        StageAssignment.workspace_id == workspace_id,
-                        StageAssignment.worker_id == worker.id,
-                    )
-                    .order_by(StageAssignment.updated_at.desc())
-                    .limit(20)
-                )
-            )
-            .scalars()
-            .all()
-        )
+        assignments = assignments_by_worker.get(worker.id, [])
         durations: list[float] = []
         failed = 0
         retried = 0

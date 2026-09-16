@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy import event, text
 
 from app.db.session import AsyncSessionLocal, engine
-from app.services import operations_dashboard
+from app.services import operations_dashboard, operations_mission
 
 
 @contextmanager
@@ -190,3 +190,27 @@ async def test_aggregate_helpers_short_circuit_on_an_empty_worker_set():
     assert totals == {}
     assert active == {}
     assert counter["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_worker_timeline_query_count_does_not_grow_with_worker_count(client, new_user):
+    """Mission worker timeline should remain set-based for assignment history."""
+    _user_id, _token, headers = new_user
+
+    one = await _workspace_with_workers(client, headers, 1)
+    many = await _workspace_with_workers(client, headers, 5)
+
+    async with AsyncSessionLocal() as session:
+        with count_queries() as counter:
+            await operations_mission.worker_timeline(session, uuid.UUID(one))
+        one_worker_queries = counter["n"]
+
+        with count_queries() as counter:
+            await operations_mission.worker_timeline(session, uuid.UUID(many))
+        five_worker_queries = counter["n"]
+
+    assert one_worker_queries == five_worker_queries, (
+        f"worker timeline issued {one_worker_queries} queries for 1 worker and "
+        f"{five_worker_queries} for 5 — the per-worker N+1 has regressed"
+    )
+    assert five_worker_queries <= 2
