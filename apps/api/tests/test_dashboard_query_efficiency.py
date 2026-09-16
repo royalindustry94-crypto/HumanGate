@@ -202,12 +202,18 @@ async def test_worker_timeline_query_count_does_not_grow_with_worker_count(clien
 
     async with AsyncSessionLocal() as session:
         with count_queries() as counter:
-            await operations_mission.worker_timeline(session, uuid.UUID(one))
+            one_out = await operations_mission.worker_timeline(session, uuid.UUID(one))
         one_worker_queries = counter["n"]
 
         with count_queries() as counter:
-            await operations_mission.worker_timeline(session, uuid.UUID(many))
+            many_out = await operations_mission.worker_timeline(session, uuid.UUID(many))
         five_worker_queries = counter["n"]
+
+    one_seeded = [row for row in one_out.workers if row.name.startswith("qe-worker-")]
+    many_seeded = [row for row in many_out.workers if row.name.startswith("qe-worker-")]
+    assert len(one_seeded) == 1
+    assert len(many_seeded) == 5
+    assert all(worker.jobs for worker in one_seeded + many_seeded)
 
     assert one_worker_queries == five_worker_queries, (
         f"worker timeline issued {one_worker_queries} queries for 1 worker and "
