@@ -199,6 +199,7 @@ async def test_worker_timeline_query_count_does_not_grow_with_worker_count(clien
 
     one = await _workspace_with_workers(client, headers, 1)
     many = await _workspace_with_workers(client, headers, 5)
+    large = await _workspace_with_workers(client, headers, 25)
 
     async with AsyncSessionLocal() as session:
         with count_queries() as counter:
@@ -209,14 +210,21 @@ async def test_worker_timeline_query_count_does_not_grow_with_worker_count(clien
             many_out = await operations_mission.worker_timeline(session, uuid.UUID(many))
         five_worker_queries = counter["n"]
 
+        with count_queries() as counter:
+            large_out = await operations_mission.worker_timeline(session, uuid.UUID(large))
+        twenty_five_worker_queries = counter["n"]
+
     one_seeded = [row for row in one_out.workers if row.name.startswith("qe-worker-")]
     many_seeded = [row for row in many_out.workers if row.name.startswith("qe-worker-")]
+    large_seeded = [row for row in large_out.workers if row.name.startswith("qe-worker-")]
     assert len(one_seeded) == 1
     assert len(many_seeded) == 5
-    assert all(worker.jobs for worker in one_seeded + many_seeded)
+    assert len(large_seeded) == 25
+    assert all(worker.jobs for worker in one_seeded + many_seeded + large_seeded)
 
-    assert one_worker_queries == five_worker_queries, (
+    assert one_worker_queries == five_worker_queries == twenty_five_worker_queries, (
         f"worker timeline issued {one_worker_queries} queries for 1 worker and "
-        f"{five_worker_queries} for 5 — the per-worker N+1 has regressed"
+        f"{five_worker_queries} for 5 and {twenty_five_worker_queries} for 25 "
+        "— the per-worker N+1 has regressed"
     )
-    assert five_worker_queries <= 2
+    assert twenty_five_worker_queries <= 2
