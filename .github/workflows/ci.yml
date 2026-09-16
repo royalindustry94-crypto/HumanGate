@@ -283,9 +283,26 @@ jobs:
           ci = Path(".github/workflows/ci.yml").read_text()
           ci_workflow = yaml.safe_load(ci) or {}
           ci_permissions = ci_workflow.get("permissions")
-          assert isinstance(ci_permissions, dict), "ci.yml must define permissions"
-          assert ci_permissions.get("contents") == "read"
-          assert all(level != "write" for level in ci_permissions.values())
+          assert ci_permissions is not None, "ci.yml must define permissions"
+          if isinstance(ci_permissions, str):
+              assert ci_permissions == "read-all", (
+                  f"ci.yml permissions must be read-only, got scalar '{ci_permissions}'"
+              )
+          else:
+              assert isinstance(ci_permissions, dict), (
+                  f"ci.yml permissions must be mapping or read-all, got {type(ci_permissions)!r}"
+              )
+              assert ci_permissions.get("contents") == "read", (
+                  "ci.yml permissions.contents must be read"
+              )
+              non_read_only = [
+                  f"{name}:{level}"
+                  for name, level in ci_permissions.items()
+                  if level not in {"read", "none"}
+              ]
+              assert not non_read_only, (
+                  f"ci.yml permissions must be read/none only, found {non_read_only}"
+              )
           smoke = ci.split("  browser-smoke:", 1)[1].split("\n  security:", 1)[0]
           assert "SUPABASE_JWT_SECRET:" not in smoke, (
               "browser-smoke must not pin SUPABASE_JWT_SECRET; generate it at runtime"
