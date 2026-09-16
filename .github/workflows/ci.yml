@@ -296,7 +296,7 @@ jobs:
                   return
               assert "@" in ref, f"{source} missing action ref: {ref}"
               _, revision = ref.rsplit("@", 1)
-              assert re.fullmatch(r"[0-9a-f]{40}", revision), (
+              assert re.fullmatch(r"[0-9A-Fa-f]{40}", revision), (
                   f"{source} must pin full commit SHA: {ref}"
               )
 
