@@ -617,7 +617,11 @@ async def _recent_assignments_by_worker(
                 select(StageAssignment)
                 .join(ranked, StageAssignment.id == ranked.c.id)
                 .where(ranked.c.row_number <= per_worker_limit)
-                .order_by(StageAssignment.worker_id, StageAssignment.updated_at.desc())
+                .order_by(
+                    StageAssignment.worker_id,
+                    StageAssignment.updated_at.desc(),
+                    StageAssignment.id.desc(),
+                )
             )
         )
         .scalars()
