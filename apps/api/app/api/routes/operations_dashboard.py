@@ -106,6 +106,8 @@ async def list_leads(
     search: str | None = Query(default=None, max_length=200),
     status_filter: str | None = Query(default=None, alias="status", max_length=32),
     source: str | None = Query(default=None, max_length=100),
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0, le=10_000),
     membership: WorkspaceMembership = Depends(require_workspace_admin),
     db: AsyncSession = Depends(get_current_session),
 ) -> LeadsOut:
@@ -115,6 +117,8 @@ async def list_leads(
         search=search,
         status=status_filter,
         source=source,
+        limit=limit,
+        offset=offset,
     )
 
 

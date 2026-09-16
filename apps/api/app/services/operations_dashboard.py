@@ -524,6 +524,8 @@ async def list_leads(
     search: str | None = None,
     status: str | None = None,
     source: str | None = None,
+    limit: int = 200,
+    offset: int = 0,
 ) -> LeadsOut:
     stmt = select(Lead).where(Lead.workspace_id == workspace_id)
     if status:
@@ -540,11 +542,12 @@ async def list_leads(
                 Lead.notes.ilike(pattern),
             )
         )
-    stmt = stmt.order_by(Lead.updated_at.desc())
+    total = await count_rows(session, select(func.count()).select_from(stmt.subquery()))
+    stmt = stmt.order_by(Lead.updated_at.desc(), Lead.id.desc()).limit(limit).offset(offset)
     rows = list((await session.execute(stmt)).scalars().all())
     return LeadsOut(
         leads=[_lead_out(row) for row in rows],
-        total=len(rows),
+        total=total,
         generated_at=datetime.now(UTC),
     )
 

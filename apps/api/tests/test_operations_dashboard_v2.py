@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
+from app.models.leads import Lead
 
 
 @pytest.mark.asyncio
@@ -244,3 +245,56 @@ async def test_founder_endpoints_require_admin(client, new_user):
             headers=outsider_headers,
         )
         assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_leads_list_is_paginated_and_reports_full_total(client, new_user):
+    _owner_id, _token, headers = new_user
+    workspace = await client.post(
+        "/workspaces", headers=headers, json={"name": "Founder Leads Paging"}
+    )
+    assert workspace.status_code == 201
+    workspace_id = uuid.UUID(workspace.json()["id"])
+    now = datetime.now(UTC)
+
+    async with AsyncSessionLocal() as session:
+        for i in range(260):
+            session.add(
+                Lead(
+                    workspace_id=workspace_id,
+                    name=f"Lead {i}",
+                    email=f"lead-{i}@example.com",
+                    source="inbound",
+                    status="new",
+                    created_at=now + timedelta(seconds=i),
+                    updated_at=now + timedelta(seconds=i),
+                )
+            )
+        await session.commit()
+
+    first_page = await client.get(
+        f"/workspaces/{workspace_id}/operations/leads",
+        headers=headers,
+    )
+    assert first_page.status_code == 200, first_page.text
+    first_body = first_page.json()
+    assert first_body["total"] == 260
+    assert len(first_body["leads"]) == 200
+    first_indices = [int(row["name"].split(" ")[1]) for row in first_body["leads"]]
+    assert first_indices == list(range(259, 59, -1))
+
+    second_page = await client.get(
+        f"/workspaces/{workspace_id}/operations/leads",
+        headers=headers,
+        params={"limit": 50, "offset": 200},
+    )
+    assert second_page.status_code == 200, second_page.text
+    second_body = second_page.json()
+    assert second_body["total"] == 260
+    assert len(second_body["leads"]) == 50
+    second_indices = [int(row["name"].split(" ")[1]) for row in second_body["leads"]]
+    assert second_indices == list(range(59, 9, -1))
+
+    first_ids = {row["id"] for row in first_body["leads"]}
+    second_ids = {row["id"] for row in second_body["leads"]}
+    assert first_ids.isdisjoint(second_ids)
