@@ -1,1 +1,468 @@
-bmFtZTogQ0kKCm9uOgogIHB1c2g6CiAgICBicmFuY2hlczogW21haW5dCiAgcHVsbF9yZXF1ZXN0OgogIHdvcmtmbG93X2Rpc3BhdGNoOgoKcGVybWlzc2lvbnM6CiAgY29udGVudHM6IHJlYWQKCmpvYnM6CiAgYXBpOgogICAgcnVucy1vbjogdWJ1bnR1LWxhdGVzdAogICAgc2VydmljZXM6CiAgICAgIHBvc3RncmVzOgogICAgICAgIGltYWdlOiBwb3N0Z3JlczoxNi1hbHBpbmUKICAgICAgICBlbnY6CiAgICAgICAgICBQT1NUR1JFU19VU0VSOiBwb3N0Z3JlcwogICAgICAgICAgUE9TVEdSRVNfUEFTU1dPUkQ6IHBvc3RncmVzCiAgICAgICAgICBQT1NUR1JFU19EQjogY29udGVudF9vcmNoZXN0cmF0b3JfdGVzdAogICAgICAgIHBvcnRzOgogICAgICAgICAgLSA1NDMyOjU0MzIKICAgICAgICBvcHRpb25zOiA+LQogICAgICAgICAgLS1oZWFsdGgtY21kICJwZ19pc3JlYWR5IC1VIHBvc3RncmVzIgogICAgICAgICAgLS1oZWFsdGgtaW50ZXJ2YWwgNXMKICAgICAgICAgIC0taGVhbHRoLXRpbWVvdXQgNXMKICAgICAgICAgIC0taGVhbHRoLXJldHJpZXMgMTAKICAgIGVudjoKICAgICAgREFUQUJBU0VfVVJMOiBwb3N0Z3Jlc3FsOi8vcG9zdGdyZXM6cG9zdGdyZXNAbG9jYWxob3N0OjU0MzIvY29udGVudF9vcmNoZXN0cmF0b3JfdGVzdAogICAgICBBUFBfREFUQUJBU0VfVVJMOiBwb3N0Z3Jlc3FsOi8vYXBwX3J1bnRpbWU6YXBwX3J1bnRpbWVAbG9jYWxob3N0OjU0MzIvY29udGVudF9vcmNoZXN0cmF0b3JfdGVzdAogICAgICBTVVBBQkFTRV9KV1RfU0VDUkVUOiBjaS10ZXN0LXN1cGFiYXNlLWp3dC1zZWNyZXQKICAgICAgRU5WSVJPTk1FTlQ6IHRlc3QKICAgICAgQVVUSF9NT0RFOiBsb2NhbAogICAgZGVmYXVsdHM6CiAgICAgIHJ1bjoKICAgICAgICB3b3JraW5nLWRpcmVjdG9yeTogYXBwcy9hcGkKICAgIHN0ZXBzOgogICAgICAtIHVzZXM6IGFjdGlvbnMvY2hlY2tvdXRAMTFkNTk2MGEzMjY3NTBkNTgzODA3OGUzNmNmMzhiODVhZjY3NzI2MiAjIHY0CiAgICAgIC0gdXNlczogYWN0aW9ucy9zZXR1cC1weXRob25AYTI2YWY2OWJlOTUxYTIxM2Q0OTVhNGMzZTRlNGUyMmUxNmQ4NzA2NSAjIHY1CiAgICAgICAgd2l0aDoKICAgICAgICAgIHB5dGhvbi12ZXJzaW9uOiAiMy4xMiIKICAgICAgLSBuYW1lOiBJbnN0YWxsIGRlcGVuZGVuY2llcwogICAgICAgIHJ1bjogcGlwIGluc3RhbGwgLWUgIi5bZGV2XSIgLWMgY29uc3RyYWludHMtcHJvZC50eHQKICAgICAgLSBuYW1lOiBSdW4gbWlncmF0aW9ucwogICAgICAgIHJ1bjogYWxlbWJpYyB1cGdyYWRlIGhlYWQKICAgICAgLSBuYW1lOiBNaWdyYXRpb24gcmVwbGF5CiAgICAgICAgcnVuOiB8CiAgICAgICAgICBhbGVtYmljIGRvd25ncmFkZSBiYXNlCiAgICAgICAgICBhbGVtYmljIHVwZ3JhZGUgaGVhZAogICAgICAtIG5hbWU6IExpbnQKICAgICAgICBydW46IHJ1ZmYgY2hlY2sgLgogICAgICAtIG5hbWU6IEZvcm1hdCBjaGVjawogICAgICAgIHJ1bjogcnVmZiBmb3JtYXQgLS1jaGVjayAuCiAgICAgIC0gbmFtZTogVHlwZSBjaGVjawogICAgICAgIHJ1bjogbXlweSBhcHAvCiAgICAgIC0gbmFtZTogVGVzdCB3aXRoIGNvdmVyYWdlIGdhdGUKICAgICAgICBydW46IHB5dGVzdCAtLWNvdj1hcHAgLS1jb3YtZmFpbC11bmRlcj03OQoKICB3b3JrZXI6CiAgICBydW5zLW9uOiB1YnVudHUtbGF0ZXN0CiAgICBkZWZhdWx0czoKICAgICAgcnVuOgogICAgICAgIHdvcmtpbmctZGlyZWN0b3J5OiBhcHBzL3dvcmtlcgogICAgc3RlcHM6CiAgICAgIC0gdXNlczogYWN0aW9ucy9jaGVja291dEAxMWQ1OTYwYTMyNjc1MGQ1ODM4MDc4ZTM2Y2YzOGI4NWFmNjc3MjYyICMgdjQKICAgICAgLSB1c2VzOiBhY3Rpb25zL3NldHVwLXB5dGhvbkBhMjZhZjY5YmU5NTFhMjEzZDQ5NWE0YzNlNGU0ZTIyZTE2ZDg3MDY1ICMgdjUKICAgICAgICB3aXRoOgogICAgICAgICAgcHl0aG9uLXZlcnNpb246ICIzLjEyIgogICAgICAtIG5hbWU6IEluc3RhbGwgZGVwZW5kZW5jaWVzCiAgICAgICAgcnVuOiBwaXAgaW5zdGFsbCAtZSAiLltkZXZdIiAtYyBjb25zdHJhaW50cy1wcm9kLnR4dAogICAgICAtIG5hbWU6IExpbnQKICAgICAgICBydW46IHJ1ZmYgY2hlY2sgLgogICAgICAtIG5hbWU6IEZvcm1hdCBjaGVjawogICAgICAgIHJ1bjogcnVmZiBmb3JtYXQgLS1jaGVjayAuCiAgICAgIC0gbmFtZTogVGVzdAogICAgICAgIHJ1bjogcHl0ZXN0CgogIHdlYjoKICAgIHJ1bnMtb246IHVidW50dS1sYXRlc3QKICAgIGRlZmF1bHRzOgogICAgICBydW46CiAgICAgICAgd29ya2luZy1kaXJlY3Rvcnk6IGFwcHMvd2ViCiAgICBzdGVwczoKICAgICAgLSB1c2VzOiBhY3Rpb25zL2NoZWNrb3V0QDExZDU5NjBhMzI2NzUwZDU4MzgwNzhlMzZjZjM4Yjg1YWY2NzcyNjIgIyB2NAogICAgICAtIHVzZXM6IGFjdGlvbnMvc2V0dXAtbm9kZUA0OTkzM2VhNTI4OGNhZWNhODY0MmQxZTg0YWZiZDNmN2Q2ODIwMDIwICMgdjQKICAgICAgICB3aXRoOgogICAgICAgICAgbm9kZS12ZXJzaW9uOiAiMjIiCiAgICAgICAgICBjYWNoZTogIm5wbSIKICAgICAgICAgIGNhY2hlLWRlcGVuZGVuY3ktcGF0aDogYXBwcy93ZWIvcGFja2FnZS1sb2NrLmpzb24KICAgICAgLSBuYW1lOiBJbnN0YWxsIGRlcGVuZGVuY2llcwogICAgICAgIHJ1bjogbnBtIGNpCiAgICAgIC0gbmFtZTogTGludAogICAgICAgIHJ1bjogbnBtIHJ1biBsaW50CiAgICAgIC0gbmFtZTogVHlwZWNoZWNrCiAgICAgICAgcnVuOiBucHggdHNjIC0tbm9FbWl0CiAgICAgIC0gbmFtZTogQnVpbGQKICAgICAgICBydW46IG5wbSBydW4gYnVpbGQKICAgICAgLSBuYW1lOiBUZXN0CiAgICAgICAgcnVuOiBucG0gdGVzdAogICAgICAtIG5hbWU6IG5wbSBhdWRpdCAoaGlnaCspCiAgICAgICAgcnVuOiBucG0gYXVkaXQgLS1hdWRpdC1sZXZlbD1oaWdoCgogIGJyb3dzZXItc21va2U6CiAgICBydW5zLW9uOiB1YnVudHUtbGF0ZXN0CiAgICBzZXJ2aWNlczoKICAgICAgcG9zdGdyZXM6CiAgICAgICAgaW1hZ2U6IHBvc3RncmVzOjE2LWFscGluZQogICAgICAgIGVudjoKICAgICAgICAgIFBPU1RHUkVTX1VTRVI6IHBvc3RncmVzCiAgICAgICAgICBQT1NUR1JFU19QQVNTV09SRDogcG9zdGdyZXMKICAgICAgICAgIFBPU1RHUkVTX0RCOiBjb250ZW50X29yY2hlc3RyYXRvcl90ZXN0CiAgICAgICAgcG9ydHM6CiAgICAgICAgICAtIDU0MzI6NTQzMgogICAgICAgIG9wdGlvbnM6ID4tCiAgICAgICAgICAtLWhlYWx0aC1jbWQgInBnX2lzcmVhZHkgLVUgcG9zdGdyZXMiCiAgICAgICAgICAtLWhlYWx0aC1pbnRlcnZhbCA1cwogICAgICAgICAgLS1oZWFsdGgtdGltZW91dCA1cwogICAgICAgICAgLS1oZWFsdGgtcmV0cmllcyAxMAogICAgZW52OgogICAgICBDQU5ESURBVEVfU0hBOiAke3sgZ2l0aHViLmV2ZW50LnB1bGxfcmVxdWVzdC5oZWFkLnNoYSB8fCBnaXRodWIuc2hhIH19CiAgICAgIERBVEFCQVNFX1VSTDogcG9zdGdyZXNxbDovL3Bvc3RncmVzOnBvc3RncmVzQGxvY2FsaG9zdDo1NDMyL2NvbnRlbnRfb3JjaGVzdHJhdG9yX3Rlc3QKICAgICAgQVBQX0RBVEFCQVNFX1VSTDogcG9zdGdyZXNxbDovL2FwcF9ydW50aW1lOmFwcF9ydW50aW1lQGxvY2FsaG9zdDo1NDMyL2NvbnRlbnRfb3JjaGVzdHJhdG9yX3Rlc3QKICAgICAgRU5WSVJPTk1FTlQ6IGRldmVsb3BtZW50CiAgICAgIEFVVEhfTU9ERTogbG9jYWwKICAgICAgQ09SU19BTExPV19PUklHSU5TOiAnWyJodHRwOi8vMTI3LjAuMC4xOjUxNzMiLCJodHRwOi8vbG9jYWxob3N0OjUxNzMiXScKICAgICAgT1BTX1BSRVZJRVdfRU1BSUw6IGJyb3dzZXItc21va2VAZXhhbXBsZS5jb20KICAgICAgT1BTX1BSRVZJRVdfUEFTU1dPUkQ6IGJyb3dzZXItc21va2UtcGFzc3dvcmQtMjAyNgogICAgICBERU1PX0VNQUlMOiBicm93c2VyLXNtb2tlQGV4YW1wbGUuY29tCiAgICAgIERFTU9fUEFTU1dPUkQ6IGJyb3dzZXItc21va2UtcGFzc3dvcmQtMjAyNgogICAgICBVSV9TTU9LRV9CQVNFOiBodHRwOi8vMTI3LjAuMC4xOjUxNzMKICAgICAgVUlfU01PS0VfT1VUOiAvdG1wL2NvbnRlbnQtb3JjaGVzdHJhdG9yLWJyb3dzZXItc21va2UKICAgIHN0ZXBzOgogICAgICAtIHVzZXM6IGFjdGlvbnMvY2hlY2tvdXRAMTFkNTk2MGEzMjY3NTBkNTgzODA3OGUzNmNmMzhiODVhZjY3NzI2MiAjIHY0CiAgICAgICAgd2l0aDoKICAgICAgICAgIHJlZjogJHt7IGVudi5DQU5ESURBVEVfU0hBIH19CiAgICAgIC0gdXNlczogYWN0aW9ucy9zZXR1cC1weXRob25AYTI2YWY2OWJlOTUxYTIxM2Q0OTVhNGMzZTRlNGUyMmUxNmQ4NzA2NSAjIHY1CiAgICAgIC0gdXNlczogYWN0aW9ucy9zZXR1cC1ub2RlQDQ5OTMzZWE1Mjg4Y2FlY2E4NjQyZDFlODRhZmJkM2Y3ZDY4MjAwMjAgIyB2NAogICAgICAgIHdpdGg6CiAgICAgICAgICBub2RlLXZlcnNpb246ICIyMiIKICAgICAgICAgIGNhY2hlOiAibnBtIgogICAgICAgICAgY2FjaGUtZGVwZW5kZW5jeS1wYXRoOiBhcHBzL3dlYi9wYWNrYWdlLWxvY2suanNvbgogICAgICAtIG5hbWU6IFZlcmlmeSBleGFjdCBjYW5kaWRhdGUgY2hlY2tvdXQKICAgICAgICBydW46IHRlc3QgIiQoZ2l0IHJldi1wYXJzZSBIRUFEKSIgPSAiJENBTkRJREFURV9TSEEiCiAgICAgIC0gbmFtZTogR2VuZXJhdGUgZXBoZW1lcmFsIGJyb3dzZXItc21va2UgSldUIHNlY3JldAogICAgICAgIHJ1bjogfAogICAgICAgICAgc2VjcmV0PSIkKHB5dGhvbjMgLWMgJ2ltcG9ydCBzZWNyZXRzOyBwcmludChzZWNyZXRzLnRva2VuX3VybHNhZmUoNDgpKSInKSIKICAgICAgICAgIGVjaG8gIlNVUEFCQVNFX0pXVF9TRUNSRVQ9JHNlY3JldCIgPj4gIiRHSVRIVUJfRU5WIgogICAgICAtIG5hbWU6IEluc3RhbGwgQVBJIGRlcGVuZGVuY2llcwogICAgICAgIHdvcmtpbmctZGlyZWN0b3J5OiBhcHBzL2FwaQogICAgICAgIHJ1bjogcGlwIGluc3RhbGwgLWUgIi5bZGV2XSIgLWMgY29uc3RyYWludHMtcHJvZC50eHQKICAgICAgLSBuYW1lOiBJbnN0YWxsIHdlYiBkZXBlbmRlbmNpZXMKICAgICAgICB3b3JraW5nLWRpcmVjdG9yeTogYXBwcy93ZWIKICAgICAgICBydW46IG5wbSBjaQogICAgICAtIG5hbWU6IE1pZ3JhdGUgcHJldmlldyBkYXRhYmFzZQogICAgICAgIHdvcmtpbmctZGlyZWN0b3J5OiBhcHBzL2FwaQogICAgICAgIHJ1bjogYWxlbWJpYyB1cGdyYWRlIGhlYWQKICAgICAgLSBuYW1lOiBTdGFydCBBUEkgYW5kIHdlYgogICAgICAgIHJ1bjogfAogICAgICAgICAgbWtkaXIgLXAgIiRVSV9TTU9LRV9PVVQiCiAgICAgICAgICAoY2QgYXBwcy9hcGkgJiYgdXZpY29ybiBhcHAubWFpbjphcHAgLS1ob3N0IDEyNy4wLjAuMSAtLXBvcnQgODAwMCA+IiRVSV9TTU9LRV9PVVQvYXBpLmxvZyIgMj4mMSAmIGVjaG8gJCEgPiIkVUlfU01PS0VfT1VUL2FwaS5waWQiKQogICAgICAgICAgKGNkIGFwcHMvd2ViICYmIG5wbSBydW4gZGV2IC0tIC0taG9zdCAxMjcuMC4wLjEgLS1wb3J0IDUxNzMgLS1zdHJpY3RQb3J0ID4iJFVJX1NNT0tFX09VVC93ZWIubG9nIiAyPiYxICYgZWNobyAkISA+IiRVSV9TTU9LRV9PVVQvd2ViLnBpZCIpCiAgICAgICAgICBmb3IgaSBpbiAkKHNlcSAxIDYwKTsgZG8KICAgICAgICAgICAgaWYgY3VybCAtc2YgaHR0cDovLzEyNy4wLjAuMTo4MDAwL2hlYWx0aC9yZWFkeSA+L2Rldi9udWxsICYmIGN1cmwgLXNmIGh0dHA6Ly8xMjcuMC4wLjE6NTE3My8gPi9kZXYvbnVsbDsgdGhlbgogICAgICAgICAgICAgIGV4aXQgMAogICAgICAgICAgICBmaQogICAgICAgICAgICBzbGVlcCAxCiAgICAgICAgICBkb25lCiAgICAgICAgICBlY2hvICJQcmV2aWV3IHNlcnZpY2VzIGZhaWxlZCByZWFkaW5lc3MiID4mMgogICAgICAgICAgY2F0ICIkVUlfU01PS0VfT1VUL2FwaS5sb2ciIHx8IHRydWUKICAgICAgICAgIGNhdCAiJFVJX1NNT0tFX09VVC93ZWIubG9nIiB8fCB0cnVlCiAgICAgICAgICBleGl0IDEKICAgICAgLSBuYW1lOiBTZWVkIGJyb3dzZXItc21va2Ugd29ya3NwYWNlCiAgICAgICAgcnVuOiBBUElfQkFTRV9VUkw9aHR0cDovLzEyNy4wLjAuMTo4MDAwIHB5dGhvbjMgc2NyaXB0cy9zZWVkX29wc19wcmV2aWV3LnB5ID4iJFVJX1NNT0tFX09VVC9zZWVkLmxvZyIgMj4mMQogICAgICAtIG5hbWU6IFN0YXJ0IGhlYWRsZXNzIENocm9tZSB3aXRoIENEUAogICAgICAgIHJ1bjogfAogICAgICAgICAgQ0hST01FX0JJTj0iJChjb21tYW5kIC12IGdvb2dsZS1jaHJvbWUgfHwgY29tbWFuZCAtdiBjaHJvbWl1bSB8fCBjb21tYW5kIC12IGNocm9taXVtLWJyb3dzZXIgfHwgdHJ1ZSkiCiAgICAgICAgICBpZiBbIC16ICIkQ0hST01FX0JJTiIgXTsgdGhlbgogICAgICAgICAgICBlY2hvICJObyBDaHJvbWUvQ2hyb21pdW0gYmluYXJ5IGZvdW5kIG9uIHJ1bm5lciIgPiYyCiAgICAgICAgICAgIGV4aXQgMQogICAgICAgICAgZmkKICAgICAgICAgICIkQ0hST01FX0JJTiIgLS1oZWFkbGVzcz1uZXcgLS1uby1zYW5kYm94IC0tZGlzYWJsZS1kZXYtc2htLXVzYWdlIC0tcmVtb3RlLWRlYnVnZ2luZy1hZGRyZXNzPTEyNy4wLjAuMSAtLXJlbW90ZS1kZWJ1Z2dpbmctcG9ydD05MjIyIGFib3V0OmJsYW5rID4iJFVJX1NNT0tFX09VVC9jaHJvbWUubG9nIiAyPiYxICYKICAgICAgICAgIGVjaG8gJCEgPiIkVUlfU01PS0VfT1VUL2Nocm9tZS5waWQiCiAgICAgICAgICBmb3IgaSBpbiAkKHNlcSAxIDMwKTsgZG8KICAgICAgICAgICAgaWYgY3VybCAtc2YgaHR0cDovLzEyNy4wLjAuMTo5MjIyL2pzb24vdmVyc2lvbiA+L2Rldi9udWxsOyB0aGVuCiAgICAgICAgICAgICAgZXhpdCAwCiAgICAgICAgICAgIGZpCiAgICAgICAgICAgIHNsZWVwIDEKICAgICAgICAgIGRvbmUKICAgICAgICAgIGVjaG8gIkNocm9tZSBDRFAgZmFpbGVkIHJlYWRpbmVzcyIgPiYyCiAgICAgICAgICBjYXQgIiRVSV9TTU9LRV9PVVQvY2hyb21lLmxvZyIgfHwgdHJ1ZQogICAgICAgICAgZXhpdCAxCiAgICAgIC0gbmFtZTogUnVuIGV4YWN0IGRlc2t0b3AgYW5kIDM5MHB4IHNtb2tlCiAgICAgICAgcnVuOiBub2RlIHNjcmlwdHMvdWlfc21va2VfY2RwLm1qcyAyPiYxIHwgdGVlICIkVUlfU01PS0VfT1VUL3Ntb2tlLmxvZyIKICAgICAgLSBuYW1lOiBSZWNvcmQgY2FuZGlkYXRlIGlkZW50aXR5CiAgICAgICAgaWY6IGFsd2F5cygpCiAgICAgICAgcnVuOiB8CiAgICAgICAgICBwcmludGYgJ2NhbmRpZGF0ZV9zaGE9JXNcbmNoZWNrZWRfb3V0X3NoYT0lc1xud29ya2Zsb3dfaGVhZF9zaGE9JXNcbnJ1bl9pZD0lc1xucnVuX2F0dGVtcHQ9JXNcbicgIiRDQU5ESURBVEVfU0hBIiAiJChnaXQgcmV2LXBhcnNlIEhFQUQpIiAiJHt7IGdpdGh1Yi5ldmVudC5wdWxsX3JlcXVlc3QuaGVhZC5zaGEgfHwgZ2l0aHViLnNoYSB9fSIgIiRHSVRIVUJfUlVOX0lEIiAiJEdJVEhVQl9SVU5fQVRURU1QVCIgPiIkVUlfU01PS0VfT1VUL2NhbmRpZGF0ZS50eHQiCiAgICAgIC0gbmFtZTogVXBsb2FkIGJyb3dzZXItc21va2UgZXZpZGVuY2UKICAgICAgICBpZjogYWx3YXlzKCkKICAgICAgICB1c2VzOiBhY3Rpb25zL3VwbG9hZC1hcnRpZmFjdEBlYTE2NWY4ZDY1YjZlNzVmNTQwNDQ5ZTkyYjRiODg2ZjQzNjA3ZmEwMiAjIHY0CiAgICAgICAgd2l0aDoKICAgICAgICAgIG5hbWU6IGJyb3dzZXItc21va2UtJHt7IGVudi5DQU5ESURBVEVfU0hBIH19CiAgICAgICAgICBwYXRoOiAvdG1wL2NvbnRlbnQtb3JjaGVzdHJhdG9yLWJyb3dzZXItc21va2UKICAgICAgICAgIGlmLW5vLWZpbGVzLWZvdW5kOiBlcnJvcgogICAgICAgICAgcmV0ZW50aW9uLWRheXM6IDMwCgogIHNlY3VyaXR5OgogICAgcnVucy1vbjogdWJ1bnR1LWxhdGVzdAogICAgc3RlcHM6CiAgICAgIC0gdXNlczogYWN0aW9ucy9jaGVja291dEAxMWQ1OTYwYTMyNjc1MGQ1ODM4MDc4ZTM2Y2YzOGI4NWFmNjc3MjYyICMgdjQKICAgICAgICB3aXRoOgogICAgICAgICAgZmV0Y2gtZGVwdGg6IDAKICAgICAgLSBuYW1lOiBHaXRsZWFrcwogICAgICAgIHVzZXM6IGdpdGxlYWtzL2dpdGxlYWtzLWFjdGlvbkBmZjk4MTA2ZTRjN2IyYmMyODdiMjRlYWY0MjkwNzE5NjMyOTA3MGM3ICMgdjIKICAgICAgICBlbnY6CiAgICAgICAgICBHSVRIVUJfVE9LRU46ICR7eyBzZWNyZXRzLkdJVEhVQl9UT0tFTiB9fQogICAgICAtIHVzZXM6IGFjdGlvbnMvc2V0dXAtcHl0aG9uQGEyNmFmNjliZTk1MWEyMTNkNDk1YTRjM2U0ZTRlMjJlMTZkODcwNjUgIyB2NQogICAgICAgIHdpdGg6CiAgICAgICAgICBweXRob24tdmVyc2lvbjogIjMuMTIiCiAgICAgIC0gbmFtZTogSW5zdGFsbCBZQU1MIHBhcnNlciBmb3Igc2VjdXJpdHkgaW52YXJpYW50IGNoZWNrcwogICAgICAgIHJ1bjogcGlwIGluc3RhbGwgcHlhbWwKICAgICAgLSBuYW1lOiBWYWxpZGF0ZSBDbGF1ZGUvQ29kZXggZXhhY3QtaGVhZCBnYXRlCiAgICAgICAgcnVuOiB8CiAgICAgICAgICBweXRob24gLSA8PCdQWScKICAgICAgICAgIGltcG9ydCByZQogICAgICAgICAgZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCiAgICAgICAgICBpbXBvcnQgeWFtbAoKICAgICAgICAgIGRlZiBzZXJ2aWNlX2Jsb2NrKHRleHQ6IHN0ciwgc2VydmljZTogc3RyKSAtPiBzdHI6CiAgICAgICAgICAgICAgYm9keSA9IFtdCiAgICAgICAgICAgICAgY2FwdHVyZSA9IEZhbHNlCiAgICAgICAgICAgICAgZm9yIGxpbmUgaW4gdGV4dC5zcGxpdGxpbmVzKCk6CiAgICAgICAgICAgICAgICAgIGlmIG5vdCBjYXB0dXJlOgogICAgICAgICAgICAgICAgICAgICAgaWYgbGluZSA9PSBmIiAge3NlcnZpY2V9OiI6CiAgICAgICAgICAgICAgICAgICAgICAgICAgY2FwdHVyZSA9IFRydWUKICAgICAgICAgICAgICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgICAgICAgICAgIGlmIGxpbmUuc3RhcnRzd2l0aCgiICAiKSBhbmQgbm90IGxpbmUuc3RhcnRzd2l0aCgiICAgICIpOgogICAgICAgICAgICAgICAgICAgICAgYnJlYWsKICAgICAgICAgICAgICAgICAgYm9keS5hcHBlbmQobGluZSkKICAgICAgICAgICAgICBhc3NlcnQgY2FwdHVyZSwgZiJtaXNzaW5nIHNlcnZpY2UgYmxvY2s6IHtzZXJ2aWNlfSIKICAgICAgICAgICAgICByZXR1cm4gIlxuIi5qb2luKGJvZHkpCgogICAgICAgICAgd29ya2Zsb3cgPSBQYXRoKCIuZ2l0aHViL3dvcmtmbG93cy9jbGF1ZGUueW1sIikucmVhZF90ZXh0KCkKICAgICAgICAgIGV4cGVjdGVkX2dyb3VwID0gKAogICAgICAgICAgICAgICJncm91cDogY2xhdWRlLWxlYWQtIgogICAgICAgICAgICAgICsgIiQiCiAgICAgICAgICAgICAgKyAie3sgZ2l0aHViLnJlcG9zaXRvcnkgfX0iCiAgICAgICAgICApCiAgICAgICAgICByZXF1aXJlZCA9ICgKICAgICAgICAgICAgICBleHBlY3RlZF9ncm91cCwKICAgICAgICAgICAgICAidGltZW91dC1taW51dGVzOiAzMCIsCiAgICAgICAgICAgICAgImNvbnRlbnRzOiB3cml0ZSIsCiAgICAgICAgICAgICAgInB1bGwtcmVxdWVzdHM6IHdyaXRlIiwKICAgICAgICAgICAgICAiYWRkaXRpb25hbF9wZXJtaXNzaW9uczogfCIsCiAgICAgICAgICAgICAgIkNPREVYX0JBU0VMSU5FOiBQQVNTIiwKICAgICAgICAgICAgICAiQ09ERVhfQVVESVQ6ICR7dmVyZGljdH0iLAogICAgICAgICAgICAgICJBdXRob3JpemVkIHN0YXJ0aW5nIFNIQSIsCiAgICAgICAgICAgICAgImF1dGhvcml6ZWRfcmVmIiwKICAgICAgICAgICAgICAiVmVyaWZ5IGV4YWN0IGF1dGhvcml6ZWQgY2hlY2tvdXQiLAogICAgICAgICAgICAgICJDT0RFWF9SRU1FRElBVElPTjogQVBQUk9WRUQiLAogICAgICAgICAgICAgICJCZWdpbiB0aGUgZmluYWwgaGFuZG9mZiBieSBtaW51dGUgMjUiLAogICAgICAgICAgICAgICJEbyBub3QgbWVyZ2UsIGFwcHJvdmUsIHNlbGYtY2VydGlmeSIsCiAgICAgICAgICAgICAgImdpdGh1Yi5ldmVudC5jb21tZW50LnVzZXIubG9naW4gPT0gZ2l0aHViLnJlcG9zaXRvcnlfb3duZXIiLAogICAgICAgICAgKQogICAgICAgICAgbWlzc2luZyA9IFt2YWx1ZSBmb3IgdmFsdWUgaW4gcmVxdWlyZWQgaWYgdmFsdWUgbm90IGluIHdvcmtmbG93XQogICAgICAgICAgYXNzZXJ0IG5vdCBtaXNzaW5nLCBmIkNsYXVkZSB3b3JrZmxvdyBndWFyZCBtaXNzaW5nOiB7bWlzc2luZ30iCgogICAgICAgICAgZ2F0ZSA9IFBhdGgoIi5naXRodWIvd29ya2Zsb3dzL2NvZGV4LWF1ZGl0LWdhdGUueW1sIikucmVhZF90ZXh0KCkKICAgICAgICAgIGdhdGVfcmVxdWlyZWQgPSAoCiAgICAgICAgICAgICAgInB1bGxfcmVxdWVzdF90YXJnZXQ6IiwKICAgICAgICAgICAgICAic3RhdHVzZXM6IHdyaXRlIiwKICAgICAgICAgICAgICAiQ09ERVhfQVVESVQ6IFBBU1MiLAogICAgICAgICAgICAgICJIRUFEX1NIQTogJHtwci5oZWFkLnNoYX0iLAogICAgICAgICAgICAgICJjb21tZW50LnVzZXI/LmxvZ2luICE9PSBvd25lciIsCiAgICAgICAgICAgICAgImNvbnRleHQ6ICdDb2RleCBBdWRpdCBHYXRlJyIsCiAgICAgICAgICAgICAgInN0YXRlOiBwYXNzZWQgPyAnc3VjY2VzcycgOiAnZmFpbHVyZSciLAogICAgICAgICAgKQogICAgICAgICAgbWlzc2luZyA9IFt2YWx1ZSBmb3IgdmFsdWUgaW4gZ2F0ZV9yZXF1aXJlZCBpZiB2YWx1ZSBub3QgaW4gZ2F0ZV0KICAgICAgICAgIGFzc2VydCBub3QgbWlzc2luZywgZiJDb2RleCBleGFjdC1oZWFkIGdhdGUgbWlzc2luZzoge21pc3Npbmd9IgogICAgICAgICAgYXNzZXJ0ICJhY3Rpb25zL2NoZWNrb3V0IiBub3QgaW4gZ2F0ZQoKICAgICAgICAgIGNpID0gUGF0aCgiLmdpdGh1Yi93b3JrZmxvd3MvY2kueW1sIikucmVhZF90ZXh0KCkKICAgICAgICAgIGNpX3dvcmtmbG93ID0geWFtbC5zYWZlX2xvYWQoY2kpIG9yIHt9CiAgICAgICAgICBjaV9wZXJtaXNzaW9ucyA9IGNpX3dvcmtmbG93LmdldCgicGVybWlzc2lvbnMiKQogICAgICAgICAgYXNzZXJ0IGNpX3Blcm1pc3Npb25zIGlzIG5vdCBOb25lLCAiY2kueW1sIG11c3QgZGVmaW5lIHBlcm1pc3Npb25zIgogICAgICAgICAgaWYgaXNpbnN0YW5jZShjaV9wZXJtaXNzaW9ucywgc3RyKToKICAgICAgICAgICAgICBhc3NlcnQgY2lfcGVybWlzc2lvbnMgPT0gInJlYWQtYWxsIiwgKAogICAgICAgICAgICAgICAgICBmImNpLnltbCBwZXJtaXNzaW9ucyBtdXN0IGJlIHJlYWQtb25seSwgZ290IHNjYWxhciAne2NpX3Blcm1pc3Npb25zfSciCiAgICAgICAgICAgICAgKQogICAgICAgICAgZWxzZToKICAgICAgICAgICAgICBhc3NlcnQgaXNpbnN0YW5jZShjaV9wZXJtaXNzaW9ucywgZGljdCksICgKICAgICAgICAgICAgICAgICAgZiJjaS55bWwgcGVybWlzc2lvbnMgbXVzdCBiZSBtYXBwaW5nIG9yIHJlYWQtYWxsLCBnb3Qge3R5cGUoY2lfcGVybWlzc2lvbnMpIXJ9IgogICAgICAgICAgICAgICkKICAgICAgICAgICAgICBhc3NlcnQgY2lfcGVybWlzc2lvbnMuZ2V0KCJjb250ZW50cyIpID09ICJyZWFkIiwgKAogICAgICAgICAgICAgICAgICAiY2kueW1sIHBlcm1pc3Npb25zLmNvbnRlbnRzIG11c3QgYmUgcmVhZCIKICAgICAgICAgICAgICApCiAgICAgICAgICAgICAgbm9uX3JlYWRfb25seSA9IFsKICAgICAgICAgICAgICAgICAgZiJ7bmFtZX06e2xldmVsfSIKICAgICAgICAgICAgICAgICAgZm9yIG5hbWUsIGxldmVsIGluIGNpX3Blcm1pc3Npb25zLml0ZW1zKCkKICAgICAgICAgICAgICAgICAgaWYgbGV2ZWwgbm90IGluIHsicmVhZCIsICJub25lIn0KICAgICAgICAgICAgICBdCiAgICAgICAgICAgICAgYXNzZXJ0IG5vdCBub25fcmVhZF9vbmx5LCAoCiAgICAgICAgICAgICAgICAgIGYiY2kueW1sIHBlcm1pc3Npb25zIG11c3QgYmUgcmVhZC9ub25lIG9ubHksIGZvdW5kIHtub25fcmVhZF9vbmx5fSIKICAgICAgICAgICAgICApCiAgICAgICAgICBzbW9rZSA9IGNpLnNwbGl0KCIgIGJyb3dzZXItc21va2U6IiwgMSlbMV0uc3BsaXQoIlxuICBzZWN1cml0eToiLCAxKVswXQogICAgICAgICAgYXNzZXJ0ICJTVVBBQkFTRV9KV1RfU0VDUkVUOiIgbm90IGluIHNtb2tlLCAoCiAgICAgICAgICAgICAgImJyb3dzZXItc21va2UgbXVzdCBub3QgcGluIFNVUEFCQVNFX0pXVF9TRUNSRVQ7IGdlbmVyYXRlIGl0IGF0IHJ1bnRpbWUiCiAgICAgICAgICApCiAgICAgICAgICBhc3NlcnQgInRva2VuX3VybHNhZmUiIGluIHNtb2tlCiAgICAgICAgICBhc3NlcnQgIkdJVEhVQl9FTlYiIGluIHNtb2tlCgogICAgICAgICAgZGVmIGFzc2VydF9waW5uZWQocmVmOiBzdHIsIHNvdXJjZTogc3RyKSAtPiBOb25lOgogICAgICAgICAgICAgIGlmIHJlZi5zdGFydHN3aXRoKCIuLyIpOgogICAgICAgICAgICAgICAgICByZXR1cm4KICAgICAgICAgICAgICBpZiByZWYuc3RhcnRzd2l0aCgiZG9ja2VyOi8vIik6CiAgICAgICAgICAgICAgICAgIGltYWdlX3JlZiA9IHJlZi5yZW1vdmVwcmVmaXgoImRvY2tlcjovLyIpCiAgICAgICAgICAgICAgICAgIGFzc2VydCByZS5mdWxsbWF0Y2gociIuK0BzaGEyNTY6WzAtOUEtRmEtZl17NjR9IiwgaW1hZ2VfcmVmKSwgKAogICAgICAgICAgICAgICAgICAgICAgZiJ7c291cmNlfSBtdXN0IHBpbiBkb2NrZXIgYWN0aW9ucyBieSBkaWdlc3Q6IHtyZWZ9IgogICAgICAgICAgICAgICAgICApCiAgICAgICAgICAgICAgICAgIHJldHVybgogICAgICAgICAgICAgIGFzc2VydCAiQCIgaW4gcmVmLCBmIntzb3VyY2V9IG1pc3NpbmcgYWN0aW9uIHJlZjoge3JlZn0iCiAgICAgICAgICAgICAgXywgcmV2aXNpb24gPSByZWYucnNwbGl0KCJAIiwgMSkKICAgICAgICAgICAgICBhc3NlcnQgcmUuZnVsbG1hdGNoKHIiWzAtOUEtRmEtZl17NDB9IiwgcmV2aXNpb24pLCAoCiAgICAgICAgICAgICAgICAgIGYie3NvdXJjZX0gbXVzdCBwaW4gZnVsbCBjb21taXQgU0hBOiB7cmVmfSIKICAgICAgICAgICAgICApCgogICAgICAgICAgd29ya2Zsb3dfcGF0aHMgPSBzb3J0ZWQoUGF0aCgiLmdpdGh1Yi93b3JrZmxvd3MiKS5yZ2xvYigiKi55bWwiKSkgKyBzb3J0ZWQoCiAgICAgICAgICAgICAgUGF0aCgiLmdpdGh1Yi93b3JrZmxvd3MiKS5yZ2xvYigiKi55YW1sIikKICAgICAgICAgICkKICAgICAgICAgIGZvciB3b3JrZmxvd19wYXRoIGluIHdvcmtmbG93X3BhdGhzOgogICAgICAgICAgICAgIHdvcmtmbG93X2RvYyA9IHlhbWwuc2FmZV9sb2FkKHdvcmtmbG93X3BhdGgucmVhZF90ZXh0KCkpIG9yIHt9CiAgICAgICAgICAgICAgZm9yIGpvYl9uYW1lLCBqb2IgaW4gKHdvcmtmbG93X2RvYy5nZXQoImpvYnMiKSBvciB7fSkuaXRlbXMoKToKICAgICAgICAgICAgICAgICAgYXNzZXJ0IGlzaW5zdGFuY2Uoam9iLCBkaWN0KSwgKAogICAgICAgICAgICAgICAgICAgICAgZiJ7d29ya2Zsb3dfcGF0aH06e2pvYl9uYW1lfSBtdXN0IGJlIGEgbWFwcGluZyIKICAgICAgICAgICAgICAgICAgKQogICAgICAgICAgICAgICAgICBqb2JfdXNlcyA9IGpvYi5nZXQoInVzZXMiKQogICAgICAgICAgICAgICAgICBpZiBqb2JfdXNlczoKICAgICAgICAgICAgICAgICAgICAgIGFzc2VydF9waW5uZWQoam9iX3VzZXMsIGYie3dvcmtmbG93X3BhdGh9Ontqb2JfbmFtZX0iKQogICAgICAgICAgICAgICAgICBmb3Igc3RlcF9pbmRleCwgc3RlcCBpbiBlbnVtZXJhdGUoam9iLmdldCgic3RlcHMiKSBvciBbXSwgc3RhcnQ9MSk6CiAgICAgICAgICAgICAgICAgICAgICBhc3NlcnQgaXNpbnN0YW5jZShzdGVwLCBkaWN0KSwgKAogICAgICAgICAgICAgICAgICAgICAgICAgIGYie3dvcmtmbG93X3BhdGh9Ontqb2JfbmFtZX06c3RlcHtzdGVwX2luZGV4fSBtdXN0IGJlIGEgbWFwcGluZyIKICAgICAgICAgICAgICAgICAgICAgICkKICAgICAgICAgICAgICAgICAgICAgIHN0ZXBfdXNlcyA9IHN0ZXAuZ2V0KCJ1c2VzIikKICAgICAgICAgICAgICAgICAgICAgIGlmIG5vdCBzdGVwX3VzZXM6CiAgICAgICAgICAgICAgICAgICAgICAgICAgY29udGludWUKICAgICAgICAgICAgICAgICAgICAgIGFzc2VydF9waW5uZWQoCiAgICAgICAgICAgICAgICAgICAgICAgICAgc3RlcF91c2VzLAogICAgICAgICAgICAgICAgICAgICAgICAgIGYie3dvcmtmbG93X3BhdGh9Ontqb2JfbmFtZX06c3RlcHtzdGVwX2luZGV4fSIsCiAgICAgICAgICAgICAgICAgICAgICApCgogICAgICAgICAgY29tcG9zaXRlX2FjdGlvbl9tYW5pZmVzdHMgPSBzb3J0ZWQoUGF0aCgiLmdpdGh1Yi9hY3Rpb25zIikucmdsb2IoImFjdGlvbi55bWwiKSkKICAgICAgICAgIGNvbXBvc2l0ZV9hY3Rpb25fbWFuaWZlc3RzICs9IHNvcnRlZChQYXRoKCIuZ2l0aHViL2FjdGlvbnMiKS5yZ2xvYigiYWN0aW9uLnlhbWwiKSkKICAgICAgICAgIGZvciBtYW5pZmVzdF9wYXRoIGluIGNvbXBvc2l0ZV9hY3Rpb25fbWFuaWZlc3RzOgogICAgICAgICAgICAgIGFjdGlvbl9kb2MgPSB5YW1sLnNhZmVfbG9hZChtYW5pZmVzdF9wYXRoLnJlYWRfdGV4dCgpKSBvciB7fQogICAgICAgICAgICAgIHJ1bnMgPSBhY3Rpb25fZG9jLmdldCgicnVucyIpIG9yIHt9CiAgICAgICAgICAgICAgaWYgcnVucy5nZXQoInVzaW5nIikgIT0gImNvbXBvc2l0ZSI6CiAgICAgICAgICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgICAgICAgZm9yIHN0ZXBfaW5kZXgsIHN0ZXAgaW4gZW51bWVyYXRlKHJ1bnMuZ2V0KCJzdGVwcyIpIG9yIFtdLCBzdGFydD0xKToKICAgICAgICAgICAgICAgICAgYXNzZXJ0IGlzaW5zdGFuY2Uoc3RlcCwgZGljdCksICgKICAgICAgICAgICAgICAgICAgICAgIGYie21hbmlmZXN0X3BhdGh9OnJ1bnMuc3RlcHNbe3N0ZXBfaW5kZXh9XSBtdXN0IGJlIGEgbWFwcGluZyIKICAgICAgICAgICAgICAgICAgKQogICAgICAgICAgICAgICAgICBzdGVwX3VzZXMgPSBzdGVwLmdldCgidXNlcyIpCiAgICAgICAgICAgICAgICAgIGlmIG5vdCBzdGVwX3VzZXM6CiAgICAgICAgICAgICAgICAgICAgICBjb250aW51ZQogICAgICAgICAgICAgICAgICBhc3NlcnRfcGlubmVkKAogICAgICAgICAgICAgICAgICAgICAgc3RlcF91c2VzLAogICAgICAgICAgICAgICAgICAgICAgZiJ7bWFuaWZlc3RfcGF0aH06Y29tcG9zaXRlLXN0ZXB7c3RlcF9pbmRleH0iLAogICAgICAgICAgICAgICAgICApCgogICAgICAgICAgc3RhZ2luZyA9IFBhdGgoImRvY2tlci1jb21wb3NlLnN0YWdpbmcueW1sIikucmVhZF90ZXh0KCkKICAgICAgICAgIGFzc2VydCAiNTQzMjo1NDMyIiBub3QgaW4gc3RhZ2luZwogICAgICAgICAgYXNzZXJ0ICIke1BPU1RHUkVTX1BBU1NXT1JEOj9yZXF1aXJlZH0iIGluIHN0YWdpbmcKICAgICAgICAgIGFzc2VydCAiJHtBUFBfUlVOVElNRV9QQVNTV09SRDo/cmVxdWlyZWR9IiBpbiBzdGFnaW5nCiAgICAgICAgICBhc3NlcnQgInBvc3RncmVzcWw6Ly9hcHBfcnVudGltZToke0FQUF9SVU5USU1FX1BBU1NXT1JEOj9yZXF1aXJlZH0iIGluIHN0YWdpbmcKICAgICAgICAgIGFzc2VydCAicG9zdGdyZXNxbDovL3Bvc3RncmVzOnBvc3RncmVzQCIgbm90IGluIHN0YWdpbmcKICAgICAgICAgIGFzc2VydCAicG9zdGdyZXNxbDovL2FwcF9ydW50aW1lOmFwcF9ydW50aW1lQCIgbm90IGluIHN0YWdpbmcKICAgICAgICAgIGFzc2VydCAiJHtFTlZJUk9OTUVOVCIgbm90IGluIHN0YWdpbmcKICAgICAgICAgIGFzc2VydCBzdGFnaW5nLmNvdW50KCJFTlZJUk9OTUVOVDogc3RhZ2luZyIpID49IDMKICAgICAgICAgIHdvcmtlciA9IHNlcnZpY2VfYmxvY2soc3RhZ2luZywgIndvcmtlciIpCiAgICAgICAgICBhc3NlcnQgIlxuICAgIGVudl9maWxlOiIgbm90IGluIHdvcmtlcgogICAgICAgICAgYXNzZXJ0ICJEQVRBQkFTRV9VUkwiIG5vdCBpbiB3b3JrZXIKICAgICAgICAgIGFzc2VydCAiUE9TVEdSRVNfUEFTU1dPUkQiIG5vdCBpbiB3b3JrZXIKICAgICAgICAgIGF1dG9tYXRpb24gPSBzZXJ2aWNlX2Jsb2NrKHN0YWdpbmcsICJhdXRvbWF0aW9uIikKICAgICAgICAgIGFzc2VydCAncmVzdGFydDogdW5sZXNzLXN0b3BwZWQnIGluIGF1dG9tYXRpb24KICAgICAgICAgIGFzc2VydCAnY29tbWFuZDogWyJweXRob24iLCAiLW0iLCAiYXBwLmF1dG9tYXRpb24iXScgaW4gYXV0b21hdGlvbgogICAgICAgICAgYXNzZXJ0ICJcbiAgICBwb3J0czoiIG5vdCBpbiBhdXRvbWF0aW9uCiAgICAgICAgICBhc3NlcnQgImhlYWx0aGNoZWNrOiIgaW4gYXV0b21hdGlvbgogICAgICAgICAgYXNzZXJ0ICJhdXRvbWF0aW9uX3Byb2Nlc3NfaGVhbHRoY2hlY2siIGluIGF1dG9tYXRpb24KICAgICAgICAgIGFzc2VydCAiX293bmVyX2lkIiBub3QgaW4gYXV0b21hdGlvbgogICAgICAgICAgYXNzZXJ0ICJhdXRvbWF0aW9uX2hlYWx0aF9zbmFwc2hvdCIgbm90IGluIGF1dG9tYXRpb24KICAgICAgICAgIGVudHJ5cG9pbnQgPSBQYXRoKCJhcHBzL2FwaS9kb2NrZXItZW50cnlwb2ludC5zaCIpLnJlYWRfdGV4dCgpCiAgICAgICAgICBhc3NlcnQgInB5dGhvbiAtbSBhcHAuZGIucnVudGltZV9yb2xlIiBpbiBlbnRyeXBvaW50CgogICAgICAgICAgd2F0Y2hkb2cgPSBQYXRoKCIuZ2l0aHViL3dvcmtmbG93cy9idWlsZC13YXRjaGRvZy55bWwiKS5yZWFkX3RleHQoKQogICAgICAgICAgYXNzZXJ0ICJmYWlsdXJlfGNhbmNlbGxlZHx0aW1lZF9vdXR8c3RhbGV8c3RhcnR1cF9mYWlsdXJlKSIgaW4gd2F0Y2hkb2cKICAgICAgICAgIGFzc2VydCAiYWN0aW9uX3JlcXVpcmVkKSIgaW4gd2F0Y2hkb2cKICAgICAgICAgIGFzc2VydCAic3RhbGV8YWN0aW9uX3JlcXVpcmVkKSIgbm90IGluIHdhdGNoZG9nCiAgICAgICAgICBhc3NlcnQgInN1Y2Nlc3N8bmV1dHJhbHxza2lwcGVkKSIgbm90IGluIHdhdGNoZG9nCiAgICAgICAgICBhc3NlcnQgImRpc3BhdGNoIFxcIiR7aGVhZF9icmFuY2g6LSRkZWZhdWx0X2JyYW5jaH1cXCIiIG5vdCBpbiB3YXRjaGRvZwogICAgICAgICAgYXNzZXJ0ICJDSSBleGhhdXN0ZWQgaXRzIHNpbmdsZSBzdGFsZS1ydW4gcmV0cnkiIGluIHdhdGNoZG9nCiAgICAgICAgICBhc3NlcnQgJ2FjdGlvbnMvcnVucy8kcnVuX2lkL3JlcnVuIicgaW4gd2F0Y2hkb2cKCiAgICAgICAgICBhc3NlcnQgInF1ZXVlZHxpbl9wcm9ncmVzc3xyZXF1ZXN0ZWR8d2FpdGluZ3xwZW5kaW5nKSIgbm90IGluIHdhdGNoZG9nCiAgICAgICAgICBhc3NlcnQgInF1ZXVlZHxpbl9wcm9ncmVzc3xyZXF1ZXN0ZWR8cGVuZGluZykiIGluIHdhdGNoZG9nCiAgICAgICAgICBhc3NlcnQgIndhaXRpbmcgb24gYSBkZXBsb3ltZW50LXByb3RlY3Rpb24gYXBwcm92YWwiIGluIHdhdGNoZG9nCgogICAgICAgICAgYXNzZXJ0ICJtb25pdG9ycyBvbmx5IHRoZSBsYXRlc3QgcmVwb3NpdG9yeSBDSSBydW4iIGluIHdhdGNoZG9nCiAgICAgICAgICBhc3NlcnQgImNhbm5vdCByZXN0YXJ0IHN0b3BwZWQgQUkgY29kaW5nIHNlc3Npb25zIiBpbiB3YXRjaGRvZwoKICAgICAgICAgIHByb3RvY29sID0gUGF0aCgiLmdpdGh1Yi9BR0VOVF9PUEVSQVRJTkdfUFJPVE9DT0wubWQiKS5yZWFkX3RleHQoKQogICAgICAgICAgYXNzZXJ0ICJsYXRlc3QgcmVwb3NpdG9yeSBDSSBydW4gb25seSIgaW4gcHJvdG9jb2wKICAgICAgICAgIGFzc2VydCAiY2Fubm90IHJlc3RhcnQgYSBzdG9wcGVkIGNvZGluZy1hZ2VudCBzZXNzaW9uIiBpbiBwcm90b2NvbAoKICAgICAgICAgIGFnZW50X2d1aWRlcyA9IHsKICAgICAgICAgICAgICAiQ0xBVURFLm1kIjogUGF0aCgiQ0xBVURFLm1kIikucmVhZF90ZXh0KCksCiAgICAgICAgICAgICAgIi5naXRodWIvY29waWxvdC1pbnN0cnVjdGlvbnMubWQiOiBQYXRoKAogICAgICAgICAgICAgICAgICAiLmdpdGh1Yi9jb3BpbG90LWluc3RydWN0aW9ucy5tZCIKICAgICAgICAgICAgICApLnJlYWRfdGV4dCgpLAogICAgICAgICAgICAgICIuY3Vyc29yL3J1bGVzL2FnZW50LWNvb3JkaW5hdGlvbi5tZGMiOiBQYXRoKAogICAgICAgICAgICAgICAgICAiLmN1cnNvci9ydWxlcy9hZ2VudC1jb29yZGluYXRpb24ubWRjIgogICAgICAgICAgICAgICkucmVhZF90ZXh0KCksCiAgICAgICAgICB9CiAgICAgICAgICByZXF1aXJlZF9yb3V0ZXMgPSAoCiAgICAgICAgICAgICAgIkFHRU5UUy5tZCIsCiAgICAgICAgICAgICAgIi5naXRodWIvQUdFTlRfT1BFUkFUSU5HX1BST1RPQ09MLm1kIiwKICAgICAgICAgICAgICAiaXNzdWVzLzkwIiwKICAgICAgICAgICkKICAgICAgICAgIGZvciBwYXRoLCBndWlkZSBpbiBhZ2VudF9ndWlkZXMuaXRlbXMoKToKICAgICAgICAgICAgICBtaXNzaW5nID0gW3JvdXRlIGZvciByb3V0ZSBpbiByZXF1aXJlZF9yb3V0ZXMgaWYgcm91dGUgbm90IGluIGd1aWRlXQogICAgICAgICAgICAgIGFzc2VydCBub3QgbWlzc2luZywgZiJ7cGF0aH0gY29vcmRpbmF0aW9uIHJvdXRlcyBtaXNzaW5nOiB7bWlzc2luZ30iCgogICAgICAgICAgYXNzZXJ0ICJwYWlyIGFzc2lzdGFudCIgaW4gYWdlbnRfZ3VpZGVzWwogICAgICAgICAgICAgICIuZ2l0aHViL2NvcGlsb3QtaW5zdHJ1Y3Rpb25zLm1kIgogICAgICAgICAgXS5sb3dlcigpCiAgICAgICAgICBhc3NlcnQgIm9uZSBCdWlsZGVyIiBpbiBhZ2VudF9ndWlkZXNbCiAgICAgICAgICAgICAgIi5jdXJzb3IvcnVsZXMvYWdlbnQtY29vcmRpbmF0aW9uLm1kYyIKICAgICAgICAgIF0KICAgICAgICAgIFBZCiAgICAgIC0gbmFtZTogSW5zdGFsbCBBUEkgcGFja2FnZSAoZm9yIGRlcGVuZGVuY3kgZ3JhcGgpCiAgICAgICAgd29ya2luZy1kaXJlY3Rvcnk6IGFwcHMvYXBpCiAgICAgICAgcnVuOiBwaXAgaW5zdGFsbCAtZSAiLltkZXZdIiAtYyBjb25zdHJhaW50cy1wcm9kLnR4dAogICAgICAtIG5hbWU6IHBpcC1hdWRpdCAoQVBJKQogICAgICAgICMgUC0wMDMvUC0wMDQ6IGZhaWwtY2xvc2VkIG9uIGtub3duIHZ1bG5lcmFiaWxpdGllcyBpbiB0aGUgaW5zdGFsbGVkCiAgICAgICAgIyBwcm9qZWN0IGdyYXBoLiBMb2NhbCBwYWNrYWdlcyBhcmUgc2tpcHBlZDsgUHlQSSBkZXBzIG11c3QgYmUgY2xlYW4uCiAgICAgICAgd29ya2luZy1kaXJlY3Rvcnk6IGFwcHMvYXBpCiAgICAgICAgcnVuOiB8CiAgICAgICAgICBwaXAgaW5zdGFsbCBwaXAtYXVkaXQKICAgICAgICAgIHBpcC1hdWRpdCAtLXByb2dyZXNzLXNwaW5uZXIgb2ZmCiAgICAgIC0gbmFtZTogSW5zdGFsbCB3b3JrZXIgcGFja2FnZSAoZm9yIGRlcGVuZGVuY3kgZ3JhcGgpCiAgICAgICAgd29ya2luZy1kaXJlY3Rvcnk6IGFwcHMvd29ya2VyCiAgICAgICAgcnVuOiBwaXAgaW5zdGFsbCAtZSAiLltkZXZdIiAtYyBjb25zdHJhaW50cy1wcm9kLnR4dAogICAgICAtIG5hbWU6IHBpcC1hdWRpdCAod29ya2VyKQogICAgICAgIHdvcmtpbmctZGlyZWN0b3J5OiBhcHBzL3dvcmtlcgogICAgICAgIHJ1bjogfAogICAgICAgICAgcGlwIGluc3RhbGwgcGlwLWF1ZGl0CiAgICAgICAgICBwaXAtYXVkaXQgLS1wcm9ncmVzcy1zcGlubmVyIG9mZgoKICBkb2NrZXItYnVpbGQ6CiAgICBydW5zLW9uOiB1YnVudHUtbGF0ZXN0CiAgICBzdGVwczoKICAgICAgLSB1c2VzOiBhY3Rpb25zL2NoZWNrb3V0QDExZDU5NjBhMzI2NzUwZDU4MzgwNzhlMzZjZjM4Yjg1YWY2NzcyNjIgIyB2NAogICAgICAtIG5hbWU6IEJ1aWxkIEFQSSBpbWFnZQogICAgICAgIHJ1bjogZG9ja2VyIGJ1aWxkIC10IGNvbnRlbnQtb3JjaGVzdHJhdG9yLWFwaTpjaSAuL2FwcHMvYXBpCiAgICAgIC0gbmFtZTogQnVpbGQgd29ya2VyIGltYWdlCiAgICAgICAgcnVuOiBkb2NrZXIgYnVpbGQgLXQgY29udGVudC1vcmNoZXN0cmF0b3Itd29ya2VyOmNpIC4vYXBwcy93b3JrZXIKICAgICAgLSBuYW1lOiBCdWlsZCB3ZWIgaW1hZ2UKICAgICAgICBydW46IGRvY2tlciBidWlsZCAtdCBjb250ZW50LW9yY2hlc3RyYXRvci13ZWI6Y2kgLi9hcHBzL3dlYgo=
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: content_orchestrator_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/content_orchestrator_test
+      APP_DATABASE_URL: postgresql://app_runtime:app_runtime@localhost:5432/content_orchestrator_test
+      SUPABASE_JWT_SECRET: ci-test-supabase-jwt-secret
+      ENVIRONMENT: test
+      AUTH_MODE: local
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4e22e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -e ".[dev]" -c constraints-prod.txt
+      - name: Run migrations
+        run: alembic upgrade head
+      - name: Migration replay
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+      - name: Lint
+        run: ruff check .
+      - name: Format check
+        run: ruff format --check .
+      - name: Type check
+        run: mypy app/
+      - name: Test with coverage gate
+        run: pytest --cov=app --cov-fail-under=79
+
+  worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/worker
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4e22e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -e ".[dev]" -c constraints-prod.txt
+      - name: Lint
+        run: ruff check .
+      - name: Format check
+        run: ruff format --check .
+      - name: Test
+        run: pytest
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build
+      - name: Test
+        run: npm test
+      - name: npm audit (high+)
+        run: npm audit --audit-level=high
+
+  browser-smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: content_orchestrator_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/content_orchestrator_test
+      APP_DATABASE_URL: postgresql://app_runtime:app_runtime@localhost:5432/content_orchestrator_test
+      ENVIRONMENT: development
+      AUTH_MODE: local
+      CORS_ALLOW_ORIGINS: '["http://127.0.0.1:5173","http://localhost:5173"]'
+      OPS_PREVIEW_EMAIL: browser-smoke@example.com
+      OPS_PREVIEW_PASSWORD: browser-smoke-password-2026
+      DEMO_EMAIL: browser-smoke@example.com
+      DEMO_PASSWORD: browser-smoke-password-2026
+      UI_SMOKE_BASE: http://127.0.0.1:5173
+      UI_SMOKE_OUT: /tmp/content-orchestrator-browser-smoke
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4e22e16d87065 # v5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Verify exact candidate checkout
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Generate ephemeral browser-smoke JWT secret
+        run: |
+          secret="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))"')"
+          echo "SUPABASE_JWT_SECRET=$secret" >> "$GITHUB_ENV"
+      - name: Install API dependencies
+        working-directory: apps/api
+        run: pip install -e ".[dev]" -c constraints-prod.txt
+      - name: Install web dependencies
+        working-directory: apps/web
+        run: npm ci
+      - name: Migrate preview database
+        working-directory: apps/api
+        run: alembic upgrade head
+      - name: Start API and web
+        run: |
+          mkdir -p "$UI_SMOKE_OUT"
+          (cd apps/api && uvicorn app.main:app --host 127.0.0.1 --port 8000 >"$UI_SMOKE_OUT/api.log" 2>&1 & echo $! >"$UI_SMOKE_OUT/api.pid")
+          (cd apps/web && npm run dev -- --host 127.0.0.1 --port 5173 --strictPort >"$UI_SMOKE_OUT/web.log" 2>&1 & echo $! >"$UI_SMOKE_OUT/web.pid")
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8000/health/ready >/dev/null && curl -sf http://127.0.0.1:5173/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Preview services failed readiness" >&2
+          cat "$UI_SMOKE_OUT/api.log" || true
+          cat "$UI_SMOKE_OUT/web.log" || true
+          exit 1
+      - name: Seed browser-smoke workspace
+        run: API_BASE_URL=http://127.0.0.1:8000 python3 scripts/seed_ops_preview.py >"$UI_SMOKE_OUT/seed.log" 2>&1
+      - name: Start headless Chrome with CDP
+        run: |
+          CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [ -z "$CHROME_BIN" ]; then
+            echo "No Chrome/Chromium binary found on runner" >&2
+            exit 1
+          fi
+          "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 about:blank >"$UI_SMOKE_OUT/chrome.log" 2>&1 &
+          echo $! >"$UI_SMOKE_OUT/chrome.pid"
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:9222/json/version >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Chrome CDP failed readiness" >&2
+          cat "$UI_SMOKE_OUT/chrome.log" || true
+          exit 1
+      - name: Run exact desktop and 390px smoke
+        run: node scripts/ui_smoke_cdp.mjs 2>&1 | tee "$UI_SMOKE_OUT/smoke.log"
+      - name: Record candidate identity
+        if: always()
+        run: |
+          printf 'candidate_sha=%s\nchecked_out_sha=%s\nworkflow_head_sha=%s\nrun_id=%s\nrun_attempt=%s\n' "$CANDIDATE_SHA" "$(git rev-parse HEAD)" "${{ github.event.pull_request.head.sha || github.sha }}" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >"$UI_SMOKE_OUT/candidate.txt"
+      - name: Upload browser-smoke evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75f540449e92b4b886f43607fa02 # v4
+        with:
+          name: browser-smoke-${{ env.CANDIDATE_SHA }}
+          path: /tmp/content-orchestrator-browser-smoke
+          if-no-files-found: error
+          retention-days: 30
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4e22e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install YAML parser for security invariant checks
+        run: pip install pyyaml
+      - name: Validate Claude/Codex exact-head gate
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          import yaml
+
+          def service_block(text: str, service: str) -> str:
+              body = []
+              capture = False
+              for line in text.splitlines():
+                  if not capture:
+                      if line == f"  {service}:":
+                          capture = True
+                      continue
+                  if line.startswith("  ") and not line.startswith("    "):
+                      break
+                  body.append(line)
+              assert capture, f"missing service block: {service}"
+              return "\n".join(body)
+
+          workflow = Path(".github/workflows/claude.yml").read_text()
+          expected_group = (
+              "group: claude-lead-"
+              + "$"
+              + "{{ github.repository }}"
+          )
+          required = (
+              expected_group,
+              "timeout-minutes: 30",
+              "contents: write",
+              "pull-requests: write",
+              "additional_permissions: |",
+              "CODEX_BASELINE: PASS",
+              "CODEX_AUDIT: ${verdict}",
+              "Authorized starting SHA",
+              "authorized_ref",
+              "Verify exact authorized checkout",
+              "CODEX_REMEDIATION: APPROVED",
+              "Begin the final handoff by minute 25",
+              "Do not merge, approve, self-certify",
+              "github.event.comment.user.login == github.repository_owner",
+          )
+          missing = [value for value in required if value not in workflow]
+          assert not missing, f"Claude workflow guard missing: {missing}"
+
+          gate = Path(".github/workflows/codex-audit-gate.yml").read_text()
+          gate_required = (
+              "pull_request_target:",
+              "statuses: write",
+              "CODEX_AUDIT: PASS",
+              "HEAD_SHA: ${pr.head.sha}",
+              "comment.user?.login !== owner",
+              "context: 'Codex Audit Gate'",
+              "state: passed ? 'success' : 'failure'",
+          )
+          missing = [value for value in gate_required if value not in gate]
+          assert not missing, f"Codex exact-head gate missing: {missing}"
+          assert "actions/checkout" not in gate
+
+          ci = Path(".github/workflows/ci.yml").read_text()
+          ci_workflow = yaml.safe_load(ci) or {}
+          ci_permissions = ci_workflow.get("permissions")
+          assert ci_permissions is not None, "ci.yml must define permissions"
+          if isinstance(ci_permissions, str):
+              assert ci_permissions == "read-all", (
+                  f"ci.yml permissions must be read-only, got scalar '{ci_permissions}'"
+              )
+          else:
+              assert isinstance(ci_permissions, dict), (
+                  f"ci.yml permissions must be mapping or read-all, got {type(ci_permissions)!r}"
+              )
+              assert ci_permissions.get("contents") == "read", (
+                  "ci.yml permissions.contents must be read"
+              )
+              non_read_only = [
+                  f"{name}:{level}"
+                  for name, level in ci_permissions.items()
+                  if level not in {"read", "none"}
+              ]
+              assert not non_read_only, (
+                  f"ci.yml permissions must be read/none only, found {non_read_only}"
+              )
+          smoke = ci.split("  browser-smoke:", 1)[1].split("\n  security:", 1)[0]
+          assert "SUPABASE_JWT_SECRET:" not in smoke, (
+              "browser-smoke must not pin SUPABASE_JWT_SECRET; generate it at runtime"
+          )
+          assert "token_urlsafe" in smoke
+          assert "GITHUB_ENV" in smoke
+
+          def assert_pinned(ref: str, source: str) -> None:
+              if ref.startswith("./"):
+                  return
+              if ref.startswith("docker://"):
+                  image_ref = ref.removeprefix("docker://")
+                  assert re.fullmatch(r".+@sha256:[0-9A-Fa-f]{64}", image_ref), (
+                      f"{source} must pin docker actions by digest: {ref}"
+                  )
+                  return
+              assert "@" in ref, f"{source} missing action ref: {ref}"
+              _, revision = ref.rsplit("@", 1)
+              assert re.fullmatch(r"[0-9A-Fa-f]{40}", revision), (
+                  f"{source} must pin full commit SHA: {ref}"
+              )
+
+          workflow_paths = sorted(Path(".github/workflows").rglob("*.yml")) + sorted(
+              Path(".github/workflows").rglob("*.yaml")
+          )
+          for workflow_path in workflow_paths:
+              workflow_doc = yaml.safe_load(workflow_path.read_text()) or {}
+              for job_name, job in (workflow_doc.get("jobs") or {}).items():
+                  assert isinstance(job, dict), (
+                      f"{workflow_path}:{job_name} must be a mapping"
+                  )
+                  job_uses = job.get("uses")
+                  if job_uses:
+                      assert_pinned(job_uses, f"{workflow_path}:{job_name}")
+                  for step_index, step in enumerate(job.get("steps") or [], start=1):
+                      assert isinstance(step, dict), (
+                          f"{workflow_path}:{job_name}:step{step_index} must be a mapping"
+                      )
+                      step_uses = step.get("uses")
+                      if not step_uses:
+                          continue
+                      assert_pinned(
+                          step_uses,
+                          f"{workflow_path}:{job_name}:step{step_index}",
+                      )
+
+          composite_action_manifests = sorted(Path(".github/actions").rglob("action.yml"))
+          composite_action_manifests += sorted(Path(".github/actions").rglob("action.yaml"))
+          for manifest_path in composite_action_manifests:
+              action_doc = yaml.safe_load(manifest_path.read_text()) or {}
+              runs = action_doc.get("runs") or {}
+              if runs.get("using") != "composite":
+                  continue
+              for step_index, step in enumerate(runs.get("steps") or [], start=1):
+                  assert isinstance(step, dict), (
+                      f"{manifest_path}:runs.steps[{step_index}] must be a mapping"
+                  )
+                  step_uses = step.get("uses")
+                  if not step_uses:
+                      continue
+                  assert_pinned(
+                      step_uses,
+                      f"{manifest_path}:composite-step{step_index}",
+                  )
+
+          staging = Path("docker-compose.staging.yml").read_text()
+          assert "5432:5432" not in staging
+          assert "${POSTGRES_PASSWORD:?required}" in staging
+          assert "${APP_RUNTIME_PASSWORD:?required}" in staging
+          assert "postgresql://app_runtime:${APP_RUNTIME_PASSWORD:?required}" in staging
+          assert "postgresql://postgres:postgres@" not in staging
+          assert "postgresql://app_runtime:app_runtime@" not in staging
+          assert "${ENVIRONMENT" not in staging
+          assert staging.count("ENVIRONMENT: staging") >= 3
+          worker = service_block(staging, "worker")
+          assert "\n    env_file:" not in worker
+          assert "DATABASE_URL" not in worker
+          assert "POSTGRES_PASSWORD" not in worker
+          automation = service_block(staging, "automation")
+          assert 'restart: unless-stopped' in automation
+          assert 'command: ["python", "-m", "app.automation"]' in automation
+          assert "\n    ports:" not in automation
+          assert "healthcheck:" in automation
+          assert "automation_process_healthcheck" in automation
+          assert "_owner_id" not in automation
+          assert "automation_health_snapshot" not in automation
+          entrypoint = Path("apps/api/docker-entrypoint.sh").read_text()
+          assert "python -m app.db.runtime_role" in entrypoint
+
+          watchdog = Path(".github/workflows/build-watchdog.yml").read_text()
+          assert "failure|cancelled|timed_out|stale|startup_failure)" in watchdog
+          assert "action_required)" in watchdog
+          assert "stale|action_required)" not in watchdog
+          assert "success|neutral|skipped)" not in watchdog
+          assert "dispatch \\"${head_branch:-$default_branch}\\"" not in watchdog
+          assert "CI exhausted its single stale-run retry" in watchdog
+          assert 'actions/runs/$run_id/rerun"' in watchdog
+
+          assert "queued|in_progress|requested|waiting|pending)" not in watchdog
+          assert "queued|in_progress|requested|pending)" in watchdog
+          assert "waiting on a deployment-protection approval" in watchdog
+
+          assert "monitors only the latest repository CI run" in watchdog
+          assert "cannot restart stopped AI coding sessions" in watchdog
+
+          protocol = Path(".github/AGENT_OPERATING_PROTOCOL.md").read_text()
+          assert "latest repository CI run only" in protocol
+          assert "cannot restart a stopped coding-agent session" in protocol
+
+          agent_guides = {
+              "CLAUDE.md": Path("CLAUDE.md").read_text(),
+              ".github/copilot-instructions.md": Path(
+                  ".github/copilot-instructions.md"
+              ).read_text(),
+              ".cursor/rules/agent-coordination.mdc": Path(
+                  ".cursor/rules/agent-coordination.mdc"
+              ).read_text(),
+          }
+          required_routes = (
+              "AGENTS.md",
+              ".github/AGENT_OPERATING_PROTOCOL.md",
+              "issues/90",
+          )
+          for path, guide in agent_guides.items():
+              missing = [route for route in required_routes if route not in guide]
+              assert not missing, f"{path} coordination routes missing: {missing}"
+
+          assert "pair assistant" in agent_guides[
+              ".github/copilot-instructions.md"
+          ].lower()
+          assert "one Builder" in agent_guides[
+              ".cursor/rules/agent-coordination.mdc"
+          ]
+          PY
+      - name: Install API package (for dependency graph)
+        working-directory: apps/api
+        run: pip install -e ".[dev]" -c constraints-prod.txt
+      - name: pip-audit (API)
+        # P-003/P-004: fail-closed on known vulnerabilities in the installed
+        # project graph. Local packages are skipped; PyPI deps must be clean.
+        working-directory: apps/api
+        run: |
+          pip install pip-audit
+          pip-audit --progress-spinner off
+      - name: Install worker package (for dependency graph)
+        working-directory: apps/worker
+        run: pip install -e ".[dev]" -c constraints-prod.txt
+      - name: pip-audit (worker)
+        working-directory: apps/worker
+        run: |
+          pip install pip-audit
+          pip-audit --progress-spinner off
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build API image
+        run: docker build -t content-orchestrator-api:ci ./apps/api
+      - name: Build worker image
+        run: docker build -t content-orchestrator-worker:ci ./apps/worker
+      - name: Build web image
+        run: docker build -t content-orchestrator-web:ci ./apps/web
