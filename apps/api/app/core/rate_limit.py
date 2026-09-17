@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import time
 from collections import OrderedDict
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from inspect import isawaitable
+from typing import Protocol
 
 from fastapi import Request
 from sqlalchemy import text
@@ -34,6 +36,13 @@ from app.db.session import RuntimeSessionLocal
 class _Window:
     started_at: float
     count: int
+
+
+type RateLimitCheckResult = tuple[bool, float]
+
+
+class RateLimiter(Protocol):
+    def check(self, key: str) -> RateLimitCheckResult | Awaitable[RateLimitCheckResult]: ...
 
 
 # Ceiling on simultaneously tracked keys. At ~100 bytes per entry this caps
@@ -244,7 +253,7 @@ class PostgresRateLimiter:
                 raise
 
         retry_after = max(float(row.retry_after_seconds or 0.0), 0.0)
-        allowed = row.count <= self.max_requests
+        allowed = int(row._mapping["count"]) <= self.max_requests
         return allowed, 0.0 if allowed else retry_after
 
 
@@ -267,8 +276,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self,
         app: ASGIApp,
         *,
-        global_limiter: InMemoryRateLimiter,
-        auth_limiter: InMemoryRateLimiter,
+        global_limiter: RateLimiter,
+        auth_limiter: RateLimiter,
         auth_path_prefixes: tuple[str, ...] = ("/auth/",),
         exempt_paths: frozenset[str] = frozenset(
             {"/health/live", "/health/ready", "/health/automation", "/metrics"}

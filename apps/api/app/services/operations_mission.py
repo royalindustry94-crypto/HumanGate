@@ -629,7 +629,10 @@ async def _recent_assignments_by_worker(
     )
     grouped: dict[uuid.UUID, list[StageAssignment]] = {}
     for assignment in assignments:
-        grouped.setdefault(assignment.worker_id, []).append(assignment)
+        worker_id = assignment.worker_id
+        if worker_id is None:
+            raise RuntimeError("recent assignment query returned a row without worker_id")
+        grouped.setdefault(worker_id, []).append(assignment)
     return grouped
 
 

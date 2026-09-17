@@ -475,6 +475,7 @@ async def test_reference_worker_client_renews_lease_during_slow_execution():
         async with httpx.AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as http:
+
             async def _provision_client(name: str) -> ReferenceWorkerClient:
                 provision = await http.post(
                     f"/workspaces/{ws}/workers",
