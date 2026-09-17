@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   api:
     runs-on: ubuntu-latest
@@ -217,10 +220,14 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
+      - name: Install YAML parser for security invariant checks
+        run: pip install pyyaml
       - name: Validate Claude/Codex exact-head gate
         run: |
           python - <<'PY'
+          import re
           from pathlib import Path
+          import yaml
 
           def service_block(text: str, service: str) -> str:
               body = []
@@ -276,12 +283,92 @@ jobs:
           assert "actions/checkout" not in gate
 
           ci = Path(".github/workflows/ci.yml").read_text()
+          ci_workflow = yaml.safe_load(ci) or {}
+          ci_permissions = ci_workflow.get("permissions")
+          assert ci_permissions is not None, "ci.yml must define permissions"
+          if isinstance(ci_permissions, str):
+              assert ci_permissions == "read-all", (
+                  f"ci.yml permissions must be read-only, got scalar '{ci_permissions}'"
+              )
+          else:
+              assert isinstance(ci_permissions, dict), (
+                  f"ci.yml permissions must be mapping or read-all, got {type(ci_permissions)!r}"
+              )
+              assert ci_permissions.get("contents") == "read", (
+                  "ci.yml permissions.contents must be read"
+              )
+              non_read_only = [
+                  f"{name}:{level}"
+                  for name, level in ci_permissions.items()
+                  if level not in {"read", "none"}
+              ]
+              assert not non_read_only, (
+                  f"ci.yml permissions must be read/none only, found {non_read_only}"
+              )
           smoke = ci.split("  browser-smoke:", 1)[1].split("\n  security:", 1)[0]
           assert "SUPABASE_JWT_SECRET:" not in smoke, (
               "browser-smoke must not pin SUPABASE_JWT_SECRET; generate it at runtime"
           )
           assert "token_urlsafe" in smoke
           assert "GITHUB_ENV" in smoke
+
+          def assert_pinned(ref: str, source: str) -> None:
+              if ref.startswith("./"):
+                  return
+              if ref.startswith("docker://"):
+                  image_ref = ref.removeprefix("docker://")
+                  assert re.fullmatch(r".+@sha256:[0-9A-Fa-f]{64}", image_ref), (
+                      f"{source} must pin docker actions by digest: {ref}"
+                  )
+                  return
+              assert "@" in ref, f"{source} missing action ref: {ref}"
+              _, revision = ref.rsplit("@", 1)
+              assert re.fullmatch(r"[0-9A-Fa-f]{40}", revision), (
+                  f"{source} must pin full commit SHA: {ref}"
+              )
+
+          workflow_paths = sorted(Path(".github/workflows").rglob("*.yml")) + sorted(
+              Path(".github/workflows").rglob("*.yaml")
+          )
+          for workflow_path in workflow_paths:
+              workflow_doc = yaml.safe_load(workflow_path.read_text()) or {}
+              for job_name, job in (workflow_doc.get("jobs") or {}).items():
+                  assert isinstance(job, dict), (
+                      f"{workflow_path}:{job_name} must be a mapping"
+                  )
+                  job_uses = job.get("uses")
+                  if job_uses:
+                      assert_pinned(job_uses, f"{workflow_path}:{job_name}")
+                  for step_index, step in enumerate(job.get("steps") or [], start=1):
+                      assert isinstance(step, dict), (
+                          f"{workflow_path}:{job_name}:step{step_index} must be a mapping"
+                      )
+                      step_uses = step.get("uses")
+                      if not step_uses:
+                          continue
+                      assert_pinned(
+                          step_uses,
+                          f"{workflow_path}:{job_name}:step{step_index}",
+                      )
+
+          composite_action_manifests = sorted(Path(".github/actions").rglob("action.yml"))
+          composite_action_manifests += sorted(Path(".github/actions").rglob("action.yaml"))
+          for manifest_path in composite_action_manifests:
+              action_doc = yaml.safe_load(manifest_path.read_text()) or {}
+              runs = action_doc.get("runs") or {}
+              if runs.get("using") != "composite":
+                  continue
+              for step_index, step in enumerate(runs.get("steps") or [], start=1):
+                  assert isinstance(step, dict), (
+                      f"{manifest_path}:runs.steps[{step_index}] must be a mapping"
+                  )
+                  step_uses = step.get("uses")
+                  if not step_uses:
+                      continue
+                  assert_pinned(
+                      step_uses,
+                      f"{manifest_path}:composite-step{step_index}",
+                  )
 
           staging = Path("docker-compose.staging.yml").read_text()
           assert "5432:5432" not in staging
