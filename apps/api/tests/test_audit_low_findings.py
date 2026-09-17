@@ -220,9 +220,7 @@ async def test_non_local_unauthenticated_health_and_metrics_shapes(client, monke
         assert metrics.status_code == 401
         assert metrics.json() == {"detail": "missing metrics bearer token"}
 
-        operations_health = await client.get(
-            f"/workspaces/{uuid.uuid4()}/operations/health"
-        )
+        operations_health = await client.get(f"/workspaces/{uuid.uuid4()}/operations/health")
         assert operations_health.status_code == 401
     finally:
         app.dependency_overrides.pop(get_db, None)

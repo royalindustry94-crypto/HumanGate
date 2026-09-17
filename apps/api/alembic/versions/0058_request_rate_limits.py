@@ -31,7 +31,9 @@ def upgrade() -> None:
         );
         """
     )
-    op.execute("CREATE INDEX ix_request_rate_limits_expires_at ON request_rate_limits (expires_at);")
+    op.execute(
+        "CREATE INDEX ix_request_rate_limits_expires_at ON request_rate_limits (expires_at);"
+    )
     op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON request_rate_limits TO app_runtime;")
 
 

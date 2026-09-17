@@ -81,9 +81,7 @@ def _build_app(
 
     app.add_middleware(
         RateLimitMiddleware,
-        global_limiter=limiter_cls(
-            max_requests=global_max, window_seconds=60, **limiter_kwargs
-        ),
+        global_limiter=limiter_cls(max_requests=global_max, window_seconds=60, **limiter_kwargs),
         auth_limiter=limiter_cls(max_requests=auth_max, window_seconds=60, **limiter_kwargs),
     )
     return app
