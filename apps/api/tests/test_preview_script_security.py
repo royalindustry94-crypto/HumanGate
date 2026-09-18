@@ -309,3 +309,61 @@ def test_preview_environment_rejects_weak_jwt_secret() -> None:
 
 def test_preview_environment_suppresses_openapi_docs() -> None:
     assert Settings(**_preview_settings_kwargs()).openapi_docs_enabled is False
+
+
+# --- The refusal diagnostic must name only the controls actually waived ---
+
+
+def _refusal_output(value: str) -> tuple[int, str]:
+    """Run the launcher's real refuse-to-start block for one ENVIRONMENT."""
+    raw = (REPOSITORY_ROOT / _replit_deployment_script()).read_text()
+    block = raw.split("# Belt and braces", 1)[1].split("unset _hg_refuse_env", 1)[0]
+    script = 'ENVIRONMENT="$1"\n# Belt and braces' + block
+    # S603: this repository's own launcher fragment, fixed argv, `value` passed
+    # as a positional argument rather than interpolated into the script.
+    result = subprocess.run(  # noqa: S603
+        ["bash", "-c", script, "bash", value],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode, result.stderr
+
+
+_CREDENTIAL_LINE = "database-credential validation is skipped"
+_DOCS_LINE = "/docs, /redoc and /openapi.json are published"
+_METRICS_LINE = "the /metrics scrape token is not required"
+
+
+@pytest.mark.parametrize("value", LOCAL_OR_TOKENLESS)
+def test_refusal_names_exactly_the_controls_that_value_waives(value: str) -> None:
+    """A refusal message that overclaims costs an operator real debugging time.
+
+    The two allow-lists are different sets -- `local` and `ci` are tokenless for
+    /metrics but are NOT local for credential validation or docs suppression,
+    and `test` is the only value in both. The message used to assert credential
+    validation and published docs for all five.
+    """
+    code, err = _refusal_output(value)
+    assert code == 1, f"ENVIRONMENT={value!r} must refuse to start"
+
+    is_local = value in Settings._LOCAL_ENVIRONMENTS
+    is_tokenless = value in TOKENLESS_METRICS_ENVIRONMENTS
+
+    assert (_CREDENTIAL_LINE in err) is is_local, (
+        f"ENVIRONMENT={value!r}: credential-validation claim must match "
+        f"Settings._LOCAL_ENVIRONMENTS membership ({is_local})"
+    )
+    assert (_DOCS_LINE in err) is is_local, (
+        f"ENVIRONMENT={value!r}: published-docs claim must match "
+        f"Settings._LOCAL_ENVIRONMENTS membership ({is_local})"
+    )
+    assert (_METRICS_LINE in err) is is_tokenless, (
+        f"ENVIRONMENT={value!r}: metrics-token claim must match "
+        f"TOKENLESS_METRICS_ENVIRONMENTS membership ({is_tokenless})"
+    )
+
+
+def test_a_non_local_environment_passes_the_refusal_gate() -> None:
+    code, err = _refusal_output(PREVIEW_ENVIRONMENT)
+    assert code == 0, f"ENVIRONMENT={PREVIEW_ENVIRONMENT!r} must be allowed to start: {err}"

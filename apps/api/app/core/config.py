@@ -130,8 +130,6 @@ class Settings(BaseSettings):
     queue_soft_limit_default: int = Field(default=50, ge=1)
     queue_hard_limit_default: int = Field(default=200, ge=1)
     backpressure_eval_interval_seconds: int = Field(default=15, ge=1)
-    # How many PENDING candidates a claim may lock while skipping saturated providers.
-    claim_candidate_batch_size: int = Field(default=32, ge=1)
 
     # --- Spend controls (defaults; per-workspace overrides live in DB) ---
     default_daily_spend_cap_usd: float = Field(default=50.0)

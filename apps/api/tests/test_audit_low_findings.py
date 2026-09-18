@@ -299,17 +299,27 @@ def test_exception_key_installs_the_server_error_handler_not_an_inner_one():
     below covers the re-raise the claim said was lost.
     """
     from starlette.middleware.errors import ServerErrorMiddleware
+    from starlette.middleware.exceptions import ExceptionMiddleware
 
     from app.main import _unhandled_exception_handler, app
 
-    app.build_middleware_stack()
-    layer = app.middleware_stack
-    assert isinstance(layer, ServerErrorMiddleware)
-    assert layer.handler is _unhandled_exception_handler
+    stack = app.build_middleware_stack()
+    assert isinstance(stack, ServerErrorMiddleware)
+    assert stack.handler is _unhandled_exception_handler
 
-    # And it is absent from the inner ExceptionMiddleware's table.
-    inner = {k for k in app.exception_handlers if k not in (500, Exception)}
-    assert Exception not in inner
+    # And it is absent from the REAL inner ExceptionMiddleware, found by
+    # walking the built stack. An earlier version of this check derived its
+    # set by filtering `Exception` out of app.exception_handlers and then
+    # asserted `Exception not in` it -- true by construction, so it passed
+    # whatever the stack did. Interrogate the actual instance instead.
+    layer = stack
+    while not isinstance(layer, ExceptionMiddleware):
+        layer = getattr(layer, "app", None)
+        assert layer is not None, "no ExceptionMiddleware in the built stack"
+
+    assert Exception not in layer._exception_handlers
+    assert _unhandled_exception_handler not in layer._exception_handlers.values()
+    assert _unhandled_exception_handler not in layer._status_handlers.values()
 
 
 @pytest.mark.asyncio

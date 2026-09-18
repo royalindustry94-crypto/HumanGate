@@ -79,13 +79,34 @@ unset _hg_env _hg_env_preset
 
 # Belt and braces: if a future edit reintroduces a local value here, refuse to
 # serve rather than silently waive the checks.
-case "$(printf '%s' "${ENVIRONMENT}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in
+#
+# The two allow-lists are NOT the same set, so the diagnostic names only the
+# controls each value actually waives. Settings._LOCAL_ENVIRONMENTS is
+# {test, development, dev}; TOKENLESS_METRICS_ENVIRONMENTS is {local, test,
+# ci}. `local` and `ci` do not skip credential validation and do not publish
+# docs, and `test` is the one value in both. Saying "waives database-credential
+# validation and publishes OpenAPI docs" for all five was wrong for `local` and
+# `ci`, and a misleading refusal message costs an operator real debugging time.
+_hg_refuse_env="$(printf '%s' "${ENVIRONMENT}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+case "$_hg_refuse_env" in
   development | dev | test | local | ci)
-    echo "refusing to start: ENVIRONMENT=${ENVIRONMENT} waives database-credential" >&2
-    echo "validation and publishes OpenAPI docs on a publicly reachable deployment" >&2
+    echo "refusing to start: ENVIRONMENT=${ENVIRONMENT} waives deployment safety" >&2
+    echo "controls on a publicly reachable deployment:" >&2
+    case "$_hg_refuse_env" in
+      development | dev | test)
+        echo "  - database-credential validation is skipped (is_local_environment)" >&2
+        echo "  - /docs, /redoc and /openapi.json are published" >&2
+        ;;
+    esac
+    case "$_hg_refuse_env" in
+      local | test | ci)
+        echo "  - the /metrics scrape token is not required" >&2
+        ;;
+    esac
     exit 1
     ;;
 esac
+unset _hg_refuse_env
 
 export AUTH_MODE="${AUTH_MODE:-local}"
 WEB_PORT="${PORT:-5000}"

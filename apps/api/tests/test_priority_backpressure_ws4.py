@@ -703,15 +703,18 @@ async def test_saturated_provider_retires_in_one_pass_not_row_by_row(ctx):
     """Audit M-2: a saturated provider must not exhaust the candidate budget.
 
     The claim loop used to exclude each skipped candidate by its own id, so a
-    saturated provider was re-discovered once per row. With more saturated
-    rows ahead of the eligible one than `claim_candidate_batch_size` allows
-    passes, the loop ran out of iterations and reported `capacity` even though
-    a claimable assignment existed. Excluding the whole (workspace, provider)
-    pair retires them together, so the eligible row is still reached.
-    """
-    from app.core.config import get_settings
+    saturated provider was re-discovered once per row. With more saturated rows
+    ahead of the eligible one than the loop had passes, it ran out of
+    iterations and reported `capacity` even though a claimable assignment
+    existed. The scan now excludes saturated (workspace, provider) pairs in
+    SQL, so the eligible row is reached whatever the count.
 
-    batch = get_settings().claim_candidate_batch_size
+    The row count is an explicit constant rather than the former
+    `claim_candidate_batch_size` setting, which no longer exists: reading a
+    knob the production path ignored made this test look configurable when it
+    was not.
+    """
+    saturated_rows = 37
 
     await ctx["client"].put(
         f"/workspaces/{ctx['ws']}/provider-budgets/openai",
@@ -726,9 +729,8 @@ async def test_saturated_provider_retires_in_one_pass_not_row_by_row(ctx):
         a.dispatched_at = datetime.now(UTC)
         await s.commit()
 
-    # More blocked-provider candidates than the loop has passes, all ranked
-    # above the one claimable row.
-    for _ in range(batch + 5):
+    # Many blocked-provider candidates, all ranked above the one claimable row.
+    for _ in range(saturated_rows):
         await _seed_assignment(ctx["ws"], provider="openai", priority=99)
     claimable = await _seed_assignment(ctx["ws"], provider="anthropic", priority=1)
 
@@ -782,7 +784,7 @@ async def test_saturated_pair_cost_is_flat_and_the_claimable_row_is_still_reache
     fixed the row-by-row rescan, but the scan then walked one pair per pass and
     fed the retired pairs back as `tuple_(...).notin_(saturated)`:
 
-      * capped at `claim_candidate_batch_size`, then at a flat 10,000, it
+      * capped first at a configured batch size, then at a flat 10,000, it
         stopped with a claimable row still behind the retired pairs and
         reported `capacity` -- the false-capacity bug (C3); and
       * uncapped, the pair list was bounded by nothing but the data. Each pair
