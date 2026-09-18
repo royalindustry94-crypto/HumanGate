@@ -501,3 +501,95 @@ async def test_emergency_stop_never_revokes_a_foreign_workspaces_credential(clie
             "workspace A's emergency-stop must never revoke a credential "
             "stamped with a different workspace_id"
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dlq_entries", [2, 6])
+async def test_retry_failed_jobs_query_count_does_not_grow_with_the_queue(
+    client, new_user, dlq_entries
+):
+    """The sweep must cost a fixed number of round trips, not N per entry.
+
+    Both loops were per-row. The DLQ loop issued a `session.get(PipelineRun)`
+    for every pending entry, plus a second and third `session.get` whenever the
+    entry's related_id turned out to be an assignment rather than a run; the
+    failed-assignment loop issued a COUNT and a `session.get` per assignment.
+    The DLQ select was also unbounded, so a workspace that had accumulated
+    failures loaded all of them before any of that began.
+
+    Asserting the statement count is flat as the queue grows is the property
+    that matters -- tripling the entries while the cost stays put is what
+    distinguishes batch resolution from any per-row variant.
+    """
+    from sqlalchemy import event
+
+    # Listen on BOTH engines. API requests are served through the non-owner
+    # `app_runtime` role (runtime_engine); an earlier version of this test
+    # listened only on the owner engine, captured zero statements, and so
+    # passed against the per-row implementation it exists to reject.
+    from app.db.session import engine as _owner_engine
+    from app.db.session import runtime_engine as _runtime_engine
+
+    _uid, _tok, headers = new_user
+    ws = (await client.post("/workspaces", headers=headers, json={"name": "Retry cost"})).json()[
+        "id"
+    ]
+
+    for n in range(dlq_entries):
+        created = await client.post(
+            f"/workspaces/{ws}/content-jobs",
+            headers=headers,
+            json={"topic": f"Retry cost {n}", "script_body": "draft"},
+        )
+        assert created.status_code == 201, created.text
+        run_id = created.json()["pipeline_run_id"]
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                text("UPDATE pipeline_runs SET status = 'failed' WHERE id = :id"),
+                {"id": run_id},
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO dead_letter_jobs (
+                        id, workspace_id, related_table, related_id, job_type,
+                        failure_reason, attempt_count, first_failed_at,
+                        last_failed_at, status
+                    ) VALUES (
+                        :id, :ws, 'pipeline_runs', :run, 'scripting',
+                        'boom', 1, now(), now(), 'pending'::dead_letter_status
+                    )
+                    """
+                ),
+                {"id": str(uuid.uuid4()), "ws": ws, "run": run_id},
+            )
+            await session.commit()
+
+    statements: list[str] = []
+
+    def _record(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    engines = [_owner_engine.sync_engine, _runtime_engine.sync_engine]
+    for eng in engines:
+        event.listen(eng, "before_cursor_execute", _record)
+    try:
+        retry = await client.post(
+            f"/workspaces/{ws}/operations/actions/retry-failed-jobs",
+            headers=headers,
+        )
+    finally:
+        for eng in engines:
+            event.remove(eng, "before_cursor_execute", _record)
+
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["affected"] == dlq_entries, (
+        "every pending dead-letter entry in the batch must still be retried"
+    )
+
+    assert statements, "no statements captured; this test would pass vacuously"
+    run_lookups = [s for s in statements if "FROM pipeline_runs" in s and "SELECT" in s.upper()]
+    assert len(run_lookups) <= 3, (
+        f"{dlq_entries} dead-letter entries produced {len(run_lookups)} pipeline_run "
+        "selects; related rows must be resolved in batches, not one per entry"
+    )

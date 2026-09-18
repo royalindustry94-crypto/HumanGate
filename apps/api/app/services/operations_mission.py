@@ -946,32 +946,78 @@ async def emergency_stop(
     )
 
 
+# Upper bound on the dead-letter entries one retry sweep drains, oldest first.
+# The sweep is operator-triggered, so a workspace with a large backlog drains
+# across presses instead of loading every pending entry in one transaction.
+RETRY_FAILED_JOBS_MAX_DLQ_ENTRIES = 500
+
+
 async def retry_failed_jobs(
     session: AsyncSession, workspace_id: uuid.UUID, *, actor_id: uuid.UUID
 ) -> QuickActionResult:
     now = datetime.now(UTC)
+    # Bounded, oldest first. This used to select every PENDING entry for the
+    # workspace: a queue that had been accumulating failures loaded all of them
+    # into memory, and the loop below then issued up to three round trips per
+    # entry. The action is an operator-triggered "retry failed jobs" button, so
+    # draining the oldest batch per press is the right shape -- the remainder
+    # is picked up by the next press rather than by one unbounded sweep.
     dlq = (
         (
             await session.execute(
-                select(DeadLetterJob).where(
+                select(DeadLetterJob)
+                .where(
                     DeadLetterJob.workspace_id == workspace_id,
                     DeadLetterJob.status == DeadLetterStatus.PENDING,
                 )
+                .order_by(DeadLetterJob.last_failed_at.asc())
+                .limit(RETRY_FAILED_JOBS_MAX_DLQ_ENTRIES)
             )
         )
         .scalars()
         .all()
     )
+
+    # Resolve every related row up front, in a fixed number of queries. Each
+    # entry's related_id is normally a pipeline run, but may be an assignment,
+    # which previously cost a second and third `session.get`.
+    related_ids = {entry.related_id for entry in dlq}
+    runs: dict[uuid.UUID, PipelineRun] = {}
+    assignments_by_id: dict[uuid.UUID, StageAssignment] = {}
+    if related_ids:
+        runs = {
+            run.id: run
+            for run in (
+                await session.execute(select(PipelineRun).where(PipelineRun.id.in_(related_ids)))
+            ).scalars()
+        }
+        unresolved = related_ids - runs.keys()
+        if unresolved:
+            assignments_by_id = {
+                assignment.id: assignment
+                for assignment in (
+                    await session.execute(
+                        select(StageAssignment).where(StageAssignment.id.in_(unresolved))
+                    )
+                ).scalars()
+            }
+            indirect = {a.pipeline_run_id for a in assignments_by_id.values()} - runs.keys()
+            if indirect:
+                for loaded in (
+                    await session.execute(select(PipelineRun).where(PipelineRun.id.in_(indirect)))
+                ).scalars():
+                    runs[loaded.id] = loaded
+
     enqueued = 0
     for entry in dlq:
-        run = await session.get(PipelineRun, entry.related_id)
+        run = runs.get(entry.related_id)
         stage_key = entry.job_type
         if run is None:
             # related_id may be an assignment; resolve via assignment → run
-            assignment = await session.get(StageAssignment, entry.related_id)
+            assignment = assignments_by_id.get(entry.related_id)
             if assignment is None:
                 continue
-            run = await session.get(PipelineRun, assignment.pipeline_run_id)
+            run = runs.get(assignment.pipeline_run_id)
             stage_key = enum_value(assignment.stage)
         if run is None or run.workspace_id != workspace_id:
             continue
@@ -1013,19 +1059,37 @@ async def retry_failed_jobs(
         .scalars()
         .all()
     )
-    for assignment in failed_assignments:
-        existing = await count_rows(
-            session,
-            select(func.count(JobSchedule.id)).where(
-                JobSchedule.workspace_id == workspace_id,
-                JobSchedule.ref_id == assignment.pipeline_run_id,
-                JobSchedule.job_type == JobType.RETRY,
-                JobSchedule.status == JobScheduleStatus.PENDING,
-            ),
+    # One query for the "already has a pending retry" check and one for the
+    # runs, rather than a COUNT plus a `session.get` per assignment.
+    candidate_run_ids = {assignment.pipeline_run_id for assignment in failed_assignments}
+    already_queued: set[uuid.UUID] = set()
+    if candidate_run_ids:
+        already_queued = set(
+            (
+                await session.execute(
+                    select(JobSchedule.ref_id).where(
+                        JobSchedule.workspace_id == workspace_id,
+                        JobSchedule.ref_id.in_(candidate_run_ids),
+                        JobSchedule.job_type == JobType.RETRY,
+                        JobSchedule.status == JobScheduleStatus.PENDING,
+                    )
+                )
+            )
+            .scalars()
+            .all()
         )
-        if existing:
+        for loaded in (
+            await session.execute(select(PipelineRun).where(PipelineRun.id.in_(candidate_run_ids)))
+        ).scalars():
+            runs[loaded.id] = loaded
+
+    for assignment in failed_assignments:
+        # Tracked in the set as we go: two failed assignments can share a run,
+        # and the per-assignment COUNT this replaced would have seen the retry
+        # queued by the first one (autoflush) and skipped the second.
+        if assignment.pipeline_run_id in already_queued:
             continue
-        run = await session.get(PipelineRun, assignment.pipeline_run_id)
+        run = runs.get(assignment.pipeline_run_id)
         if run is None or run.workspace_id != workspace_id:
             continue
         if run.status in {
@@ -1049,6 +1113,7 @@ async def retry_failed_jobs(
                 trace_id=run.trace_id,
             )
         )
+        already_queued.add(assignment.pipeline_run_id)
         enqueued += 1
 
     await _record_quick_action(

@@ -36,9 +36,30 @@ from httpx import ASGITransport
 from jwt import encode as jwt_encode
 from sqlalchemy import text
 
-from app.core.config import get_settings
-from app.db.session import AsyncSessionLocal
-from app.main import app
+from app.core.config import Settings, get_settings
+
+# Make the suite hermetic with respect to a developer's dotenv.
+#
+# Settings declares `env_file=".env"`, resolved against the working directory,
+# so running pytest from apps/api silently folds any local .env into the
+# settings under test. The forced values above only cover the keys named there;
+# every other key still leaked in. A leftover .env holding a generated
+# METRICS_SCRAPER_TOKEN (the preview launcher writes exactly that, alongside
+# PG_OWNER_PASSWORD and PG_RUNTIME_PASSWORD) made the two tokenless-/metrics
+# tests fail with "missing metrics bearer token" on an otherwise clean tree --
+# a green checkout that looked broken, and the mirror image of the failure mode
+# this suite exists to catch.
+#
+# Tests must depend only on what they set, so the dotenv source is dropped for
+# the whole run. Production behaviour is untouched: this rebinds the class
+# attribute in the test process only.
+Settings.model_config["env_file"] = None
+get_settings.cache_clear()
+
+# E402: these must be imported AFTER the dotenv source is dropped above --
+# importing app.main builds the application, which reads the settings.
+from app.db.session import AsyncSessionLocal  # noqa: E402
+from app.main import app  # noqa: E402
 
 settings = get_settings()
 
