@@ -2,7 +2,8 @@
 
 **Repository:** HumanGate (renamed from Content Orchestrator, PR #127, 2026-09-13)
 **Updated:** 2026-09-19 (docs-reconciliation pass — independently re-probed against protected `main`; supersedes the 2026-09-14 prose below wherever they conflict)
-**Audited baseline:** `main` @ `79ee9592b07eb8d7f60af4315e0a02e31477caa9` (merged 2026-09-17 via PR #157; current exact-main CI run [35257054967](https://github.com/royalindustry94-crypto/HumanGate/actions/runs/35257054967) green on all 6 required jobs)
+**Current protected `main` reference:** `79ee9592b07eb8d7f60af4315e0a02e31477caa9` (merged 2026-09-17 via PR #157; current exact-main CI run [35257054967](https://github.com/royalindustry94-crypto/HumanGate/actions/runs/35257054967) green on all 6 required jobs)
+**Last independently Codex-passed baseline:** `dfacbbd1f941c98e9c437d828575acd35bf7d96c` (`CODEX_BASELINE: PASS` on coordination issue #90, 2026-09-14)
 
 > **2026-09-19 reconciliation update:** the prior version of this file was current through
 > `main` @ `dfacbbd1f941c98e9c437d828575acd35bf7d96c` / Alembic `0057` and did not reflect the
