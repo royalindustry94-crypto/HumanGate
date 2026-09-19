@@ -1,22 +1,26 @@
 # Launch Blockers
 
 **Repository:** HumanGate (renamed from Content Orchestrator, PR #127, 2026-09-13)
-**Updated:** 2026-09-14 (docs-reconciliation pass — independently re-probed against protected `main`; supersedes the 2026-09-09 prose below wherever they conflict)
-**Audited baseline:** `main` @ `dfacbbd1f941c98e9c437d828575acd35bf7d96c`, after PR #129 (P0-1), PR #130 (P0-2), PR #137 (P0-3), and PR #140 (P0-4) merged 2026-09-14, closing issue #126's full Critical remediation scope
+**Updated:** 2026-09-19 (docs-reconciliation pass — independently re-probed against protected `main`; supersedes the 2026-09-14 prose below wherever they conflict)
+**Audited baseline:** `main` @ `79ee9592b07eb8d7f60af4315e0a02e31477caa9` (merged 2026-09-17 via PR #157; current exact-main CI run [35257054967](https://github.com/royalindustry94-crypto/HumanGate/actions/runs/35257054967) green on all 6 required jobs)
 
-> **2026-09-14 reconciliation update:** the prior version of this file was current through
-> `main` @ `2ca92f8` / Alembic `0054` (2026-09-09 recovery audit) and did not reflect the four
-> Critical production blockers subsequently found and closed under issue #126, nor the repo
-> rename to HumanGate, nor the true current Alembic head. This pass independently re-probed
-> (not carried forward from prior chat/doc claims): Alembic head by walking every
-> `revision`/`down_revision` pair in `apps/api/alembic/versions/` (**`0057`**, one true head —
-> the three parallel `0031_*` leaves merge via `0032_merge_p1`), the CI coverage floor
-> (**79%**, not 75% — `.github/workflows/ci.yml:55`), exact-head CI run
-> [34858778445](https://github.com/royalindustry94-crypto/HumanGate/actions/runs/34858778445)
+> **2026-09-19 reconciliation update:** the prior version of this file was current through
+> `main` @ `dfacbbd1f941c98e9c437d828575acd35bf7d96c` / Alembic `0057` and did not reflect the
+> post-baseline merges that followed: PR #142/#143 (comprehensive code-audit remediation),
+> PR #145 (TD-093), PR #147 (TD-089), PR #149 (TD-090), PR #151 (TD-094), PR #153 (TD-091),
+> PR #155 (TD-092), PR #157 (TD-096), and PR #159 (main CI format-gate repair). This pass
+> independently re-probed exact protected `main` at `79ee9592b07eb8d7f60af4315e0a02e31477caa9`:
+> Alembic head by walking every `revision`/`down_revision` pair in
+> `apps/api/alembic/versions/` (**`0058`**, one true head — the three parallel `0031_*`
+> leaves still merge via `0032_merge_p1`), the CI coverage floor (**79%**, not 75% —
+> `.github/workflows/ci.yml:57-58`), exact-head CI run
+> [35257054967](https://github.com/royalindustry94-crypto/HumanGate/actions/runs/35257054967)
 > (green on all 6 required jobs: `api`, `worker`, `web`, `docker-build`, `browser-smoke`,
-> `security`), and open pull requests (**0** — a prior doc's "~30 open PRs" claim is stale).
-> `CODEX_BASELINE: PASS` for this exact head is posted on coordination issue #90
-> (2026-09-14T15:02:54Z / 15:03:39Z).
+> `security`; `api` logs show migration replay passed, `browser-smoke` logs show the exact
+> desktop + 390px smoke passed), and current pull-request ownership (**1** open draft PR:
+> #161, this docs-only lane, owned by Copilot as the sole active Builder task). Protected
+> `main` itself remains the last independently Codex-passed baseline at `dfacbbd…`; this
+> docs-only pass does **not** claim a new `CODEX_BASELINE: PASS`.
 
 **Source of truth:** exact-head CI, retained browser evidence, repository/runtime probes — not prior chat claims
 
@@ -66,27 +70,30 @@ functional gaps (edit-before-approve on review gates; a visible Ready-to-Publish
 see issue #68).
 
 **PR #129, #130, #137, #140 (merged 2026-09-14)** closed the four Critical findings from
-issue #126's independent external audit — see "P0-1..P0-4" under Open blockers/conditions
-below for the closure record; this is the most recent and most safety-relevant addition to
-the audited baseline and was not reflected in this document before now.
+issue #126's independent external audit. **Post-baseline merges after that exact head**
+closed seven of issue #126's eight follow-up warnings and one CI regression: PR #145
+(TD-093), PR #147 (TD-089), PR #149 (TD-090), PR #151 (TD-094), PR #153 (TD-091),
+PR #155 (TD-092), PR #157 (TD-096), and PR #159 (restore `main`'s API format gate). The
+only still-open issue-#126 follow-up item is TD-095 (oversized modules / duplicated
+business logic).
 
 ### Verified engineering evidence
 
-Independently re-probed against `main` @ `dfacbbd1f941c98e9c437d828575acd35bf7d96c` during
-this 2026-09-14 reconciliation pass:
+Independently re-probed against protected `main` @ `79ee9592b07eb8d7f60af4315e0a02e31477caa9`
+during this 2026-09-19 reconciliation pass:
 
-- Exact-head CI run [34858778445](https://github.com/royalindustry94-crypto/HumanGate/actions/runs/34858778445): **green** on all 6 required jobs (`api`, `worker`, `web`, `docker-build`, `browser-smoke`, `security`)
-- Alembic: current head is **`0057`** (independently derived from the revision graph, not read from prior docs)
+- Exact-head CI run [35257054967](https://github.com/royalindustry94-crypto/HumanGate/actions/runs/35257054967): **green** on all 6 required jobs (`api`, `worker`, `web`, `docker-build`, `browser-smoke`, `security`)
+- Alembic: current head is **`0058`** (independently derived from the revision graph, not read from prior docs)
 - API coverage gate: **79%** (`ci.yml`), not the previously-documented 75%
 - `main` branch protection: carried forward from the 2026-09-09 verification (`protected: true`) — not independently re-read this pass
-- Open pull requests: **0** (independently listed this pass; corrects a prior "~30 open PRs" claim)
+- Open pull requests: **1** — draft PR #161 (`copilot/reconcile-launch-technical-debt-docs`), owned by Copilot, and explicitly bounded to this docs-only reconciliation task
 
 This pass did **not** re-run a fresh local `pytest`/coverage measurement (docs-only task,
 30-minute budget) — the exact-head CI run above is the evidence of record for test/coverage
 passing state going forward. The specific pass counts and coverage percentages previously
 printed here (e.g. "339 passed, 80.82%") are **removed** rather than carried forward
 unverified, since the codebase has materially changed since they were measured (Alembic
-`0054`→`0057`, coverage floor 75%→79%, four new P0 fixes) and restating stale numbers next
+`0054`→`0058`, coverage floor 75%→79%, post-`dfacbbd` hardening merges) and restating stale numbers next
 to a corrected head would be misleading. Re-measure locally before quoting a specific
 count again.
 
@@ -107,7 +114,7 @@ All four are now closed and independently re-verified:
 | P0-3 | Scheduler/outbox/maintenance loops lived in FastAPI lifespan, incompatible with Vercel's stateless function model | PR #137 (migration `0057`) |
 | P0-4 | Worker executor returned generic success for unimplemented stages | PR #140 |
 
-`CODEX_BASELINE: PASS` posted on issue #90 for exact head `dfacbbd1f941c98e9c437d828575acd35bf7d96c`; issue #126 closed. Its text carries a **follow-up warnings** list (health-detail exposure, distributed rate limiting, worker concurrency/lease renewal, dashboard N+1/polling/export pagination, concurrent last-admin mutation, browser security headers/session design, oversized modules/duplicated business logic, stronger CI security supply-chain gates) — none yet independently triaged; recorded as TD-089 through TD-096 in `docs/TECHNICAL_DEBT_REGISTER.md`.
+`CODEX_BASELINE: PASS` posted on issue #90 for exact head `dfacbbd1f941c98e9c437d828575acd35bf7d96c`; issue #126 closed. Since that exact head, merged PRs #145/#147/#149/#151/#153/#155/#157 independently closed TD-089, TD-090, TD-091, TD-092, TD-093, TD-094, and TD-096 on protected `main`. Only TD-095 (oversized modules / duplicated business logic) remains open from issue #126's follow-up warnings; see `docs/TECHNICAL_DEBT_REGISTER.md`.
 
 ### GOV-001 — Protect `main` — **CLOSED (2026-09-09, carried forward)**
 
@@ -125,13 +132,14 @@ if that finer-grained evidence is ever needed for an external audit.
 
 Previously marked CLOSED. The last independently confirmed managed-database Alembic head
 (`docs/TECHNICAL_DEBT_REGISTER.md` TD-071, 2026-09-10 update) was **`0055`**. `main` has
-since advanced through migrations `0056` and `0057` (issue #108's review-gate RLS widening,
-and P0-3's automation-ownership migration) — **neither has been applied to or verified
-against the managed `content-orchestrator-test` project**, per this pass's independent
-re-derivation of the current Alembic head. This is a real, growing gap (2 unapplied
-migrations, up from the 1-migration gap the last update tracked), not a new finding — but it
-was stale in this document and needs the same apply-and-verify treatment TD-071 previously
-received. Reopen scope: apply `0056`/`0057` to the managed project via Supabase MCP,
+since advanced through migrations `0056`, `0057`, and `0058` (issue #108's review-gate RLS
+widening, P0-3's automation-ownership migration, and TD-090's shared request-rate-limit
+table) — **none has been applied to or verified against the managed
+`content-orchestrator-test` project**, per this pass's independent re-derivation of the
+current Alembic head. This is a real, growing gap (3 unapplied migrations, up from the
+2-migration gap the last update tracked), not a new finding — but it was stale in this
+document and needs the same apply-and-verify treatment TD-071 previously received. Reopen
+scope: apply `0056`/`0057`/`0058` to the managed project via Supabase MCP,
 cross-check pre/post RLS+grant state as TD-071's prior passes did, re-run the Security
 Advisor. **Not performed in this pass** — this reconciliation task is docs-only and this
 action touches the managed database, which is out of scope here.
@@ -148,13 +156,24 @@ Billing code exists but production billing remains a separate live-secret/reconc
 
 No autonomous/external publishing milestone is authorized. Any future enablement requires current platform policy/rights evidence, exact-artifact compliance, immutable Human Review approval, rollback/kill-switch evidence and Founder authorization. Unchanged this pass.
 
+### SAFE-ENG-001 — Safe engineering follow-up (non-launch, non-runtime) — **OPEN**
+
+Protected `main` is currently clean on the required six-part CI run, but the exact-main
+`api` and `browser-smoke` job logs for run `35257054967` both emit GitHub Actions'
+forced-Node-24 warnings because the pinned official actions still target Node 20. This is
+not a release blocker today — the jobs passed — but it is real near-term maintenance work
+that should be kept separate from the human/mobile test, managed-database operator work,
+provider activation, billing, and publishing gates above. TD-095 (oversized modules /
+duplicated business logic) is the other remaining safe-engineering follow-up still open
+from issue #126's post-P0 warning set.
+
 ---
 
 ## Historical P0/P1 baseline
 
 Previously closed P0/P1 engineering controls remain closed unless new evidence demonstrates
 regression. Their historical records remain in release/audit documents; this file now
-reflects the current `0057` codebase rather than the obsolete `0032_merge_p1` snapshot.
+reflects the current `0058` codebase rather than the obsolete `0032_merge_p1` snapshot.
 Issue #126's P0-1..P0-4 batch (above) is a **second, later, and distinct** P0 wave — an
 independent external audit found genuine new Critical findings after the original P0/P1
 baseline had already closed; do not conflate the two waves when reading historical audit
