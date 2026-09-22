@@ -196,21 +196,67 @@ public final class PhotoLayerArtProvider implements LeonArtProvider {
         RectF design = designRects.get(artKey);
         if (design == null) return null;
 
-        int left = Math.round(alignment.sourceX(design.left));
-        int top = Math.round(alignment.sourceY(design.top));
-        int right = Math.round(alignment.sourceX(design.right));
-        int bottom = Math.round(alignment.sourceY(design.bottom));
-        int w = Math.max(1, right - left);
-        int h = Math.max(1, bottom - top);
+        // Map the layer's design-space bounds ONCE into source pixels. The resulting bitmap is
+        // deliberately rasterised back at DESIGN size, not source-image size. Keeping the cached
+        // layer in design pixels prevents the source scale (often ~2.28x on the supplied Leon
+        // render) from being applied a second time by LeonRenderer's bitmap-to-part transform.
+        float sourceLeftF = alignment.sourceX(design.left);
+        float sourceTopF = alignment.sourceY(design.top);
+        float sourceRightF = alignment.sourceX(design.right);
+        float sourceBottomF = alignment.sourceY(design.bottom);
 
-        Bitmap layer = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        int outW = Math.max(1, Math.round(design.width()));
+        int outH = Math.max(1, Math.round(design.height()));
+        Bitmap layer = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(layer);
-        // Copy the region out of the source. Areas outside the image stay transparent, which is
-        // correct for a layer that runs off the edge of the render.
-        canvas.drawBitmap(source, new Rect(left, top, left + w, top + h),
-                new Rect(0, 0, w, h), null);
+
+        int srcLeft = Math.max(0, (int) Math.floor(sourceLeftF));
+        int srcTop = Math.max(0, (int) Math.floor(sourceTopF));
+        int srcRight = Math.min(source.getWidth(), (int) Math.ceil(sourceRightF));
+        int srcBottom = Math.min(source.getHeight(), (int) Math.ceil(sourceBottomF));
+
+        if (srcRight > srcLeft && srcBottom > srcTop) {
+            float sourceSpanX = Math.max(1f, sourceRightF - sourceLeftF);
+            float sourceSpanY = Math.max(1f, sourceBottomF - sourceTopF);
+            int dstLeft = Math.round((srcLeft - sourceLeftF) / sourceSpanX * outW);
+            int dstTop = Math.round((srcTop - sourceTopF) / sourceSpanY * outH);
+            int dstRight = Math.round((srcRight - sourceLeftF) / sourceSpanX * outW);
+            int dstBottom = Math.round((srcBottom - sourceTopF) / sourceSpanY * outH);
+            canvas.drawBitmap(source,
+                    new Rect(srcLeft, srcTop, srcRight, srcBottom),
+                    new Rect(dstLeft, dstTop, dstRight, dstBottom), null);
+        }
+
+        // The asset request deliberately uses a flat #00FF00 chroma field because the black hoodie
+        // and white shoes make black/white keying unsafe. Remove only strongly chroma-green pixels;
+        // this runs once when a layer is first requested, never per animation frame.
+        keyChromaGreen(layer);
+
         cache.put(artKey, layer);
         return layer;
+    }
+
+    private static void keyChromaGreen(Bitmap bitmap) {
+        int w = bitmap.getWidth();
+        int h = bitmap.getHeight();
+        int[] pixels = new int[w * h];
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h);
+        boolean changed = false;
+        for (int i = 0; i < pixels.length; i++) {
+            int c = pixels[i];
+            int a = android.graphics.Color.alpha(c);
+            int r = android.graphics.Color.red(c);
+            int g = android.graphics.Color.green(c);
+            int b = android.graphics.Color.blue(c);
+            if (a == 0) continue;
+
+            // Hard key the intended #00FF00 background and near-identical compression variants.
+            if (g >= 220 && r <= 45 && b <= 45 && g - Math.max(r, b) >= 170) {
+                pixels[i] = android.graphics.Color.TRANSPARENT;
+                changed = true;
+            }
+        }
+        if (changed) bitmap.setPixels(pixels, 0, w, 0, 0, w, h);
     }
 
     @Override
