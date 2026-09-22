@@ -54,6 +54,38 @@ public final class PhotoLayerArtProvider implements LeonArtProvider {
                     LeonRig.Art.MOUTH_U, LeonRig.Art.MOUTH_MBP, LeonRig.Art.MOUTH_FV,
                     LeonRig.Art.MOUTH_SMILE, LeonRig.Art.MOUTH_FROWN));
 
+    /**
+     * Rectangular slices from one front render overlap heavily. These details already exist inside
+     * the larger head/torso photo slices; drawing them again produces double eyes, duplicated
+     * jewellery and ghosted tattoos as the bones move. In photo mode these logical layers resolve
+     * to transparent bitmaps instead of falling back to the cartoon artwork.
+     */
+    private static final java.util.Set<String> EMBEDDED_IN_BASE = new java.util.HashSet<>(
+            java.util.Arrays.asList(
+                    LeonRig.Art.HOODIE_POCKET,
+                    LeonRig.Art.NECK_SKIN, LeonRig.Art.NECK_TATTOO,
+                    LeonRig.Art.CHEST_TATTOO, LeonRig.Art.NECKLACE,
+                    LeonRig.Art.HEAD_TATTOO_WRAP,
+                    LeonRig.Art.NOSE, LeonRig.Art.SUNGLASSES));
+
+    /**
+     * Only these photo rectangles are cut out of the continuity backfill. Every other visible
+     * source pixel stays in the backfill, which closes the gaps between rectangles without making
+     * the whole character a single animated bitmap.
+     */
+    private static final java.util.Set<String> ANIMATED_PHOTO_KEYS = new java.util.HashSet<>(
+            java.util.Arrays.asList(
+                    LeonRig.Art.HOOD_DOWN,
+                    LeonRig.Art.PANT_LEG_L, LeonRig.Art.PANT_LEG_R,
+                    LeonRig.Art.PANT_SHIN_L, LeonRig.Art.PANT_SHIN_R,
+                    LeonRig.Art.SNEAKER_L, LeonRig.Art.SNEAKER_R,
+                    LeonRig.Art.SLEEVE_UPPER_L, LeonRig.Art.SLEEVE_UPPER_R,
+                    LeonRig.Art.FOREARM_TATTOO_L, LeonRig.Art.FOREARM_TATTOO_R,
+                    LeonRig.Art.HAND_L, LeonRig.Art.HAND_R,
+                    LeonRig.Art.HOODIE_BODY,
+                    LeonRig.Art.HEAD_BALD,
+                    LeonRig.Art.EAR_L, LeonRig.Art.EAR_R, LeonRig.Art.EARRING));
+
     private final Bitmap source;
     private final PhotoAlignment alignment;
     private final Map<String, RectF> designRects = new HashMap<>();
@@ -197,6 +229,15 @@ public final class PhotoLayerArtProvider implements LeonArtProvider {
         RectF design = designRects.get(artKey);
         if (design == null) return null;
 
+        if (EMBEDDED_IN_BASE.contains(artKey)) {
+            Bitmap transparent = Bitmap.createBitmap(
+                    Math.max(1, Math.round(design.width())),
+                    Math.max(1, Math.round(design.height())),
+                    Bitmap.Config.ARGB_8888);
+            cache.put(artKey, transparent);
+            return transparent;
+        }
+
         // Map the layer's design-space bounds ONCE into source pixels. The resulting bitmap is
         // deliberately rasterised back at DESIGN size, not source-image size. Keeping the cached
         // layer in design pixels prevents the source scale (often ~2.28x on the supplied Leon
@@ -249,7 +290,7 @@ public final class PhotoLayerArtProvider implements LeonArtProvider {
 
         for (Map.Entry<String, RectF> entry : designRects.entrySet()) {
             String key = entry.getKey();
-            if (LeonRig.Art.PHOTO_BACKFILL.equals(key) || !coversKey(key)) continue;
+            if (!ANIMATED_PHOTO_KEYS.contains(key)) continue;
             RectF r = entry.getValue();
             int left = Math.max(0, (int) Math.floor(r.left));
             int top = Math.max(0, (int) Math.floor(r.top));
