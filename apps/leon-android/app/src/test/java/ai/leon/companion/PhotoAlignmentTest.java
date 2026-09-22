@@ -35,6 +35,18 @@ public class PhotoAlignmentTest {
     }
 
     @Test
+    public void sourceScaleIsAppliedExactlyOnceForTheKnownScatterRegression() {
+        // Claude's interrupted device-art pass exposed a ~2.28x source scale. The broken cutter
+        // effectively multiplied this twice, producing ~5.20x-wide samples and scattered limbs.
+        PhotoAlignment a = PhotoAlignment.fromLandmarks(0f, 1568.64f, 437.76f);
+        assertEquals(2.28f, a.scale, 0.001f);
+        assertEquals("100 design units must sample 228 source pixels, not scale-squared pixels",
+                228f, a.sourceLength(100f), 0.01f);
+        assertTrue("regression guard: scale must not be applied twice",
+                Math.abs(a.sourceLength(100f) - 519.84f) > 200f);
+    }
+
+    @Test
     public void aTallerRenderScalesEveryLayerConsistently() {
         PhotoAlignment small = PhotoAlignment.fromLandmarks(0f, 688f, 192f);
         PhotoAlignment big = PhotoAlignment.fromLandmarks(0f, 1376f, 384f);
