@@ -60,12 +60,12 @@ android {
 }
 
 tasks.register("generateLeonProduction", Exec) {
-    inputs.file("src/main/assets/leon/leon-front.webp")
+    inputs.file("../../../docs/leon-reference/leon-character-sheet.png")
     inputs.file("src/main/assets/leon/leon-front.txt")
     inputs.file("../tools/build_leon_production.py")
     outputs.dir(generatedLeonAssets)
     commandLine "python3", "../tools/build_leon_production.py",
-            "--source", "src/main/assets/leon/leon-front.webp",
+            "--source", "../../../docs/leon-reference/leon-character-sheet.png",
             "--landmarks", "src/main/assets/leon/leon-front.txt",
             "--out", generatedLeonAssets.get().asFile.absolutePath + "/leon/production"
 }
