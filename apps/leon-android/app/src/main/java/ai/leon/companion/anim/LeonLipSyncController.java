@@ -19,7 +19,7 @@ import java.util.Random;
  * stream so the SPEAKING state has something real to animate. That driver is a test signal source,
  * not a substitute for the animation system: it feeds the same channels through the same path.
  */
-public final class LeonLipSyncController {
+public final class LeonLipSyncController implements LeonVisemeSink {
     /** Minimum cross-fade between two visemes; below this the mouth snaps and looks synthetic. */
     private static final float MIN_BLEND_SECONDS = 0.035f;
     /** How long after the last event the mouth returns to rest. */
@@ -48,7 +48,11 @@ public final class LeonLipSyncController {
 
     /** 0 when the mouth is fully handed back to the state's base pose, 1 when lip sync owns it. */
     private float authority;
-    private float silenceTimer;
+    /**
+     * Time since the last viseme event. Starts already past {@link #TRAIL_OFF_SECONDS} so a
+     * controller that has never spoken claims no authority over the mouth.
+     */
+    private float silenceTimer = TRAIL_OFF_SECONDS;
 
     private boolean syntheticDriver;
     private float syntheticTimeToNext;
@@ -67,6 +71,7 @@ public final class LeonLipSyncController {
      * @param intensity 0..1 loudness, so a quiet syllable moves the mouth less
      * @param durationMs how long this shape is held before the next event
      */
+    @Override
     public void onViseme(Viseme viseme, float intensity, long durationMs) {
         if (viseme == null) return;
         if (queue.size() >= MAX_QUEUED) {
@@ -81,6 +86,7 @@ public final class LeonLipSyncController {
     }
 
     /** Clears any pending speech and lets the mouth fall back to the state's expression. */
+    @Override
     public void stop() {
         while (!queue.isEmpty()) recycle(queue.pollFirst());
         syntheticDriver = false;
@@ -222,6 +228,7 @@ public final class LeonLipSyncController {
     public void reset() {
         stop();
         authority = 0f;
+        silenceTimer = TRAIL_OFF_SECONDS;
         activeViseme = Viseme.CLOSED;
         activeIntensity = 0f;
         activeDuration = 0f;

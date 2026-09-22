@@ -36,9 +36,28 @@ public final class MouthShapeResolver {
     public static final int SMILE = 8;
     public static final int FROWN = 9;
 
+    /** Jaw value at which the lips begin to part. Below this the mouth reads as shut. */
+    private static final float LIPS_PART_AT = 0.06f;
+    /** Jaw value at which the mouth reads as fully open, well before the jaw is at its limit. */
+    private static final float FULLY_OPEN_AT = 0.30f;
+    /** Jaw values bracketing the O (open) to U (closed) rounded-vowel crossover. */
+    private static final float ROUND_OPEN_AT = 0.55f;
+    private static final float ROUND_CLOSED_AT = 0.15f;
+    /** Jaw values bracketing the neutral-open to A crossover for unrounded, unstretched vowels. */
+    private static final float PLAIN_MIN_AT = 0.35f;
+    private static final float PLAIN_MAX_AT = 0.85f;
+
     private final float[] weights = new float[SHAPE_PARTS.length];
 
-    /** Resolves {@code pose}'s mouth channels into normalised per-shape weights. */
+    /**
+     * Resolves {@code pose}'s mouth channels into normalised per-shape weights.
+     *
+     * <p>Order of precedence: the consonant shapes claim their weight first, since they are the
+     * visually distinctive ones; whatever is left is split between the open vowels and a shut mouth
+     * according to how far the jaw is down. The lips part at a small aperture and the mouth reads as
+     * open well before the jaw is fully dropped, so {@link #LIPS_PART_AT} / {@link #FULLY_OPEN_AT}
+     * shape that crossover rather than scaling the closed weight linearly against the jaw.
+     */
     public float[] resolve(LeonPose pose) {
         float jaw = Mathx.clamp01(pose.get(LeonChannel.JAW_DROP));
         float wide = Mathx.clamp01(pose.get(LeonChannel.MOUTH_WIDE));
@@ -50,45 +69,55 @@ public final class MouthShapeResolver {
 
         java.util.Arrays.fill(weights, 0f);
 
-        // Consonant shapes win outright; they are the visually distinctive ones.
         weights[FV] = teeth;
         weights[MBP] = press * (1f - teeth);
-
         float consonant = Mathx.clamp01(weights[FV] + weights[MBP]);
-        float vowelRoom = 1f - consonant;
+        float remaining = 1f - consonant;
+        if (remaining <= 0f) {
+            normalise();
+            return weights;
+        }
 
-        if (vowelRoom > 0f) {
-            // Split the open-mouth budget between the rounded, wide and plain vowels.
-            float openness = jaw;
-            float roundedWeight = round * openness;
-            float wideWeight = wide * openness;
-            float plainWeight = Math.max(0f, openness - Math.max(roundedWeight, wideWeight));
+        float openness = Mathx.clamp01(Mathx.inverseLerp(LIPS_PART_AT, FULLY_OPEN_AT, jaw));
+        float openBudget = remaining * openness;
+        float shutBudget = remaining * (1f - openness);
+
+        if (openBudget > 0f) {
+            // Shape shares describe which open vowel this is; they do not encode the aperture again.
+            float roundShare = round;
+            float wideShare = wide;
+            float plainShare = Math.max(0f, 1f - Math.max(roundShare, wideShare));
 
             // O is the open rounded vowel, U the closed one.
-            float uShare = Mathx.clamp01(Mathx.inverseLerp(0.55f, 0.15f, jaw));
-            weights[U] = roundedWeight * uShare;
-            weights[O] = roundedWeight * (1f - uShare);
-            weights[E] = wideWeight;
-            weights[A] = plainWeight * Mathx.clamp01(Mathx.inverseLerp(0.35f, 0.8f, jaw));
-            weights[NEUTRAL_OPEN] = plainWeight - weights[A];
+            float uShare = Mathx.clamp01(Mathx.inverseLerp(ROUND_OPEN_AT, ROUND_CLOSED_AT, jaw));
+            float u = roundShare * uShare;
+            float o = roundShare * (1f - uShare);
+            // A is the widest plain vowel; a shallower jaw reads as a generic open mouth.
+            float aShare = Mathx.clamp01(Mathx.inverseLerp(PLAIN_MIN_AT, PLAIN_MAX_AT, jaw));
+            float a = plainShare * aShare;
+            float neutral = plainShare * (1f - aShare);
 
-            float vowelTotal = weights[U] + weights[O] + weights[E] + weights[A] + weights[NEUTRAL_OPEN];
-            if (vowelTotal > vowelRoom && vowelTotal > 0f) {
-                float k = vowelRoom / vowelTotal;
-                weights[U] *= k; weights[O] *= k; weights[E] *= k;
-                weights[A] *= k; weights[NEUTRAL_OPEN] *= k;
-                vowelTotal = vowelRoom;
+            float total = u + o + wideShare + a + neutral;
+            if (total > 0f) {
+                float k = openBudget / total;
+                weights[U] = u * k;
+                weights[O] = o * k;
+                weights[E] = wideShare * k;
+                weights[A] = a * k;
+                weights[NEUTRAL_OPEN] = neutral * k;
+            } else {
+                weights[NEUTRAL_OPEN] = openBudget;
             }
+        }
 
-            // Whatever aperture is left over is a shut mouth, expressed as smile/frown/neutral.
-            float shut = Mathx.clamp01(vowelRoom - vowelTotal);
+        if (shutBudget > 0f) {
             float expressive = Math.min(1f, smile + frown);
             if (expressive > 0f) {
                 float smileShare = smile / (smile + frown);
-                weights[SMILE] = shut * expressive * smileShare;
-                weights[FROWN] = shut * expressive * (1f - smileShare);
+                weights[SMILE] = shutBudget * expressive * smileShare;
+                weights[FROWN] = shutBudget * expressive * (1f - smileShare);
             }
-            weights[CLOSED] = shut * (1f - expressive);
+            weights[CLOSED] = shutBudget * (1f - expressive);
         }
 
         normalise();

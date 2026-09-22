@@ -1,6 +1,6 @@
 package ai.leon.companion.state;
 
-import ai.leon.companion.anim.LeonLipSyncController;
+import ai.leon.companion.anim.LeonVisemeSink;
 
 /**
  * The seam between Leon's animation and a future AI brain. It owns the conversational state arc
@@ -25,7 +25,7 @@ public final class LeonConversationController {
         /**
          * Starts a turn. The implementation is expected to call the supplied {@link TurnCallback}
          * as the reply becomes available, and to feed visemes to
-         * {@link LeonLipSyncController#onViseme} as speech audio plays.
+         * {@link LeonVisemeSink#onViseme} as speech audio plays.
          */
         void submitTurn(String userText, TurnCallback callback);
 
@@ -52,16 +52,16 @@ public final class LeonConversationController {
     }
 
     private final LeonStateController states;
-    private final LeonLipSyncController lipSync;
+    private final LeonVisemeSink lipSync;
 
     private Backend backend;
     private Listener listener;
     private Status status = Status.NO_BACKEND;
     private String lastReply;
 
-    public LeonConversationController(LeonStateController states, LeonLipSyncController lipSync) {
+    public LeonConversationController(LeonStateController states, LeonVisemeSink lipSync) {
         if (states == null) throw new IllegalArgumentException("state controller required");
-        if (lipSync == null) throw new IllegalArgumentException("lip sync controller required");
+        if (lipSync == null) throw new IllegalArgumentException("viseme sink required");
         this.states = states;
         this.lipSync = lipSync;
     }

@@ -77,8 +77,8 @@ public final class BlinkBehaviour implements LeonBehaviour {
         pose.raise(LeonChannel.BLINK_R, curve(blinkElapsed - RIGHT_LAG_SECONDS) * weight);
     }
 
-    /** Lid closure over time: fast down, brief hold, slightly slower up. */
-    static float curve(float t) {
+    /** Lid closure over time: fast down, brief hold, slightly slower up. 0 open, 1 shut. */
+    public static float curve(float t) {
         if (t <= 0f || t >= TOTAL_SECONDS) return 0f;
         if (t < CLOSE_SECONDS) {
             return Mathx.smoothstep(t / CLOSE_SECONDS);

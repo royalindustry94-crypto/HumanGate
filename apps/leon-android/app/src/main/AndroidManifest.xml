@@ -8,13 +8,16 @@
 
     <application
         android:allowBackup="true"
-        android:label="Leon Companion"
+        android:hardwareAccelerated="true"
+        android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:theme="@android:style/Theme.Material.NoActionBar">
 
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density"
+            android:exported="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -22,12 +25,12 @@
         </activity>
 
         <service
-            android:name=".LeonOverlayService"
+            android:name=".overlay.LeonOverlayService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Persistent user-visible floating AI companion overlay" />
+                android:value="Persistent user-visible animated AI companion overlay" />
         </service>
 
         <receiver

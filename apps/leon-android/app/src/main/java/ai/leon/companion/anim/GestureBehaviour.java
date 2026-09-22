@@ -128,8 +128,8 @@ public final class GestureBehaviour implements LeonBehaviour {
         }
     }
 
-    /** Rise, hold with a secondary beat, then fall. */
-    static float envelope(float t) {
+    /** Gesture extension over its normalised duration: rise, hold with a secondary beat, fall. */
+    public static float envelope(float t) {
         float x = Mathx.clamp01(t);
         if (x < 0.22f) return Mathx.easeOut(x / 0.22f);
         if (x < 0.62f) {
