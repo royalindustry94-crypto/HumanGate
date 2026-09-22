@@ -35,7 +35,7 @@ import java.util.Map;
  * sunglasses — are left to the fallback provider, which draws them colour-matched. Everything the
  * photo does cover is the photo.
  *
- * <p>Source file: {@code leon-front.png} in {@code assets/leon/} or in {@code files/leon-art/},
+ * <p>Source file: {@code leon-front.webp} (or PNG) in {@code assets/leon/} or in {@code files/leon-art/},
  * alongside {@code leon-front.txt} holding the three landmark numbers.
  */
 public final class PhotoLayerArtProvider implements LeonArtProvider {
@@ -49,7 +49,6 @@ public final class PhotoLayerArtProvider implements LeonArtProvider {
      */
     private static final java.util.Set<String> NOT_IN_PHOTO = new java.util.HashSet<>(
             java.util.Arrays.asList(
-                    LeonRig.Art.AURA,
                     LeonRig.Art.EYE_WHITE, LeonRig.Art.IRIS, LeonRig.Art.EYELID,
                     LeonRig.Art.MOUTH_CLOSED, LeonRig.Art.MOUTH_NEUTRAL_OPEN,
                     LeonRig.Art.MOUTH_A, LeonRig.Art.MOUTH_E, LeonRig.Art.MOUTH_O,
@@ -64,6 +63,7 @@ public final class PhotoLayerArtProvider implements LeonArtProvider {
      */
     private static final java.util.Set<String> EMBEDDED_IN_BASE = new java.util.HashSet<>(
             java.util.Arrays.asList(
+                    LeonRig.Art.AURA,
                     LeonRig.Art.HOODIE_POCKET,
                     LeonRig.Art.NECK_SKIN, LeonRig.Art.NECK_TATTOO,
                     LeonRig.Art.CHEST_TATTOO, LeonRig.Art.NECKLACE,
@@ -296,10 +296,12 @@ public final class PhotoLayerArtProvider implements LeonArtProvider {
             String key = entry.getKey();
             if (!ANIMATED_PHOTO_KEYS.contains(key)) continue;
             RectF r = entry.getValue();
-            int left = Math.max(0, (int) Math.floor(r.left));
-            int top = Math.max(0, (int) Math.floor(r.top));
-            int right = Math.min(w, (int) Math.ceil(r.right));
-            int bottom = Math.min(h, (int) Math.ceil(r.bottom));
+            // Keep a one-pixel overlap under the animated slice. It is visually identical at rest
+            // and prevents hairline gaps caused by fractional pivots / filtered bitmap sampling.
+            int left = Math.max(0, (int) Math.floor(r.left) + 1);
+            int top = Math.max(0, (int) Math.floor(r.top) + 1);
+            int right = Math.min(w, (int) Math.ceil(r.right) - 1);
+            int bottom = Math.min(h, (int) Math.ceil(r.bottom) - 1);
             for (int y = top; y < bottom; y++) {
                 int row = y * w;
                 for (int x = left; x < right; x++) {
