@@ -3,6 +3,7 @@ plugins {
 }
 
 def leonVersionCode = (project.findProperty('leonVersionCode') ?: '3') as int
+def generatedLeonAssets = layout.buildDirectory.dir("generated/leonAssets")
 
 android {
     namespace 'ai.leon.companion'
@@ -50,6 +51,27 @@ android {
     testOptions {
         unitTests.returnDefaultValues = false
     }
+
+    sourceSets {
+        main {
+            assets.srcDir(generatedLeonAssets)
+        }
+    }
+}
+
+tasks.register("generateLeonProduction", Exec) {
+    inputs.file("src/main/assets/leon/leon-front.webp")
+    inputs.file("src/main/assets/leon/leon-front.txt")
+    inputs.file("../tools/build_leon_production.py")
+    outputs.dir(generatedLeonAssets)
+    commandLine "python3", "../tools/build_leon_production.py",
+            "--source", "src/main/assets/leon/leon-front.webp",
+            "--landmarks", "src/main/assets/leon/leon-front.txt",
+            "--out", generatedLeonAssets.get().asFile.absolutePath + "/leon/production"
+}
+
+tasks.named("preBuild").configure {
+    dependsOn("generateLeonProduction")
 }
 
 dependencies {
