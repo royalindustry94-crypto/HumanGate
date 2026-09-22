@@ -17,7 +17,7 @@ public class DebugOverlayHostContractTest {
         };
         for (File file : candidates) {
             if (file.isFile()) {
-                return Files.readString(file.toPath(), StandardCharsets.UTF_8);
+                return new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
             }
         }
         throw new AssertionError("Source file not found: " + relative);
@@ -27,8 +27,8 @@ public class DebugOverlayHostContractTest {
     public void debugOverlayHostStartsNonExportedServiceFromInsideApp() throws Exception {
         String hooks = source("ai/leon/companion/DebugTestHooks.java");
         String activity = source("ai/leon/companion/MainActivity.java");
-        String manifest = Files.readString(
-                new File("app/src/main/AndroidManifest.xml").toPath(),
+        String manifest = new String(
+                Files.readAllBytes(new File("app/src/main/AndroidManifest.xml").toPath()),
                 StandardCharsets.UTF_8);
 
         assertTrue(hooks.contains("EXTRA_START_OVERLAY"));
