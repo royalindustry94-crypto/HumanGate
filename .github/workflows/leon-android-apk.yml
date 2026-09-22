@@ -95,29 +95,33 @@ jobs:
 
       - name: Install Android emulator image
         run: |
-          yes | sdkmanager "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64" >/dev/null
-          echo no | avdmanager create avd -n leon-ci -k "system-images;android-35;google_apis;x86_64" --force
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          AVDMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name avdmanager | head -n 1)"
+          test -x "$SDKMANAGER"
+          test -x "$AVDMANAGER"
+          yes | "$SDKMANAGER" "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64" >/dev/null
+          echo no | "$AVDMANAGER" create avd -n leon-ci -k "system-images;android-35;google_apis;x86_64" --force
 
       - name: Boot exact APK in Android emulator
         run: |
           mkdir -p apps/leon-android/app/build/reports/leon-preview
           if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
-          nohup emulator -avd leon-ci -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect > /tmp/leon-emulator.log 2>&1 &
-          adb wait-for-device
-          timeout 180 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 2; done'
-          adb install -r apps/leon-android/app/build/outputs/apk/debug/app-debug.apk
-          adb shell am start -W -n ai.leon.companion/.MainActivity \
+          nohup "$ANDROID_HOME/emulator/emulator" -avd leon-ci -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect > /tmp/leon-emulator.log 2>&1 &
+          "$ANDROID_HOME/platform-tools/adb" wait-for-device
+          timeout 180 bash -c 'until [ "$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 2; done'
+          "$ANDROID_HOME/platform-tools/adb" install -r apps/leon-android/app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/platform-tools/adb" shell am start -W -n ai.leon.companion/.MainActivity \
             --ez ai.leon.companion.VISUAL_HOST true \
             --es ai.leon.companion.TEST_POSE idle \
             --ez ai.leon.companion.DISABLE_RANDOM true
           sleep 3
-          adb exec-out screencap -p > apps/leon-android/app/build/reports/leon-preview/emulator-main.png
-          adb shell appops set ai.leon.companion SYSTEM_ALERT_WINDOW allow
-          adb shell am start -W -n ai.leon.companion/.MainActivity \
+          "$ANDROID_HOME/platform-tools/adb" exec-out screencap -p > apps/leon-android/app/build/reports/leon-preview/emulator-main.png
+          "$ANDROID_HOME/platform-tools/adb" shell appops set ai.leon.companion SYSTEM_ALERT_WINDOW allow
+          "$ANDROID_HOME/platform-tools/adb" shell am start -W -n ai.leon.companion/.MainActivity \
             --ez ai.leon.companion.OVERLAY_HOST true
-          adb shell am start-foreground-service -n ai.leon.companion/.overlay.LeonOverlayService
+          "$ANDROID_HOME/platform-tools/adb" shell am start-foreground-service -n ai.leon.companion/.overlay.LeonOverlayService
           sleep 3
-          adb exec-out screencap -p > apps/leon-android/app/build/reports/leon-preview/emulator-overlay.png
+          "$ANDROID_HOME/platform-tools/adb" exec-out screencap -p > apps/leon-android/app/build/reports/leon-preview/emulator-overlay.png
 
       - name: Validate emulator screenshots
         working-directory: apps/leon-android/tools
