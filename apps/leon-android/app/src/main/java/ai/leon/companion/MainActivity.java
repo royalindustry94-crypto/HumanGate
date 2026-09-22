@@ -83,6 +83,12 @@ public final class MainActivity extends Activity
         }
         runtime.states().addListener(this);
         runtime.conversation().setListener(this);
+        if (DebugTestHooks.shouldStartOverlay(getIntent())) {
+            // CI cannot shell-start this service because it is intentionally non-exported.
+            // Start it from Leon's own UID instead, only behind a DEBUG-gated test extra.
+            prefs.setEnabled(true);
+            LeonOverlayService.start(this);
+        }
         if (!visualTestHost) maybeAskNotificationPermission();
         if (!visualTestHost && getIntent() != null
                 && getIntent().hasExtra(EXTRA_OPEN_SETTINGS)) revealSettings();
