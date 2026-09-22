@@ -24,10 +24,10 @@ import android.widget.Toast;
 
 import ai.leon.companion.anim.GestureBehaviour;
 import ai.leon.companion.anim.LeonAnimationController;
-import ai.leon.companion.asset.LeonAssetRepository;
 import ai.leon.companion.overlay.LeonOverlayService;
 import ai.leon.companion.overlay.LeonPrefs;
 import ai.leon.companion.render.LeonCharacterView;
+import ai.leon.companion.render.ProductionLeonTexture;
 import ai.leon.companion.rig.LeonRig;
 import ai.leon.companion.rig.Rig;
 import ai.leon.companion.state.LeonConversationController;
@@ -53,7 +53,7 @@ public final class MainActivity extends Activity
     private LeonPrefs prefs;
 
     private Rig rig;
-    private LeonAssetRepository art;
+    private ProductionLeonTexture texture;
     private LeonAnimationController animation;
     private LeonCharacterView preview;
 
@@ -107,7 +107,7 @@ public final class MainActivity extends Activity
         runtime.conversation().setListener(null);
         if (animation != null) runtime.detachSurface(animation);
         if (preview != null) preview.release();
-        if (art != null) art.release();
+        if (texture != null) texture.close();
         super.onDestroy();
     }
 
@@ -200,13 +200,11 @@ public final class MainActivity extends Activity
         card.setClipToOutline(true);
 
         rig = LeonRig.build();
-        float previewWidthPx = dp(150);
-        art = new LeonAssetRepository(this, rig,
-                Math.max(0.5f, Math.min(previewWidthPx / LeonRig.DESIGN_W, 2f)));
+        texture = ProductionLeonTexture.load(this);
         animation = new LeonAnimationController(rig, runtime.states(), System.nanoTime() ^ 0x5EEDL);
         runtime.attachSurface(animation);
 
-        preview = new LeonCharacterView(this, rig, animation, art);
+        preview = new LeonCharacterView(this, rig, animation, texture);
         preview.renderer().setShowRigDebug(prefs.isRigDebugEnabled());
         preview.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -410,16 +408,13 @@ public final class MainActivity extends Activity
         minimiseButton.setText(runtime.states().isMinimised() ? "Restore Leon" : "Minimise Leon");
         rigDebugButton.setText(prefs.isRigDebugEnabled() ? "Hide rig skeleton" : "Show rig skeleton");
 
-        if (artStatus != null && art != null) {
-            String detail = art.report();
+        if (artStatus != null && texture != null) {
+            String detail = texture.report();
             if (preview != null) {
-                detail += "\nLayers drawn last frame: " + preview.renderer().layersDrawnLastFrame()
-                        + " of " + art.requiredLayerCount();
-                int missing = preview.renderer().layersMissingArt();
-                if (missing > 0) detail += " (" + missing + " with no art)";
+                detail += "\nContinuous weighted mesh vertices: "
+                        + (preview.renderer().mesh().canonicalVertices().length / 2);
             }
-            detail += "\nArtwork bitmaps: "
-                    + (art.developmentArtBytes() / 1024L) + " KB";
+            detail += "\nProduction mode: one real Leon texture; no procedural body/facial art.";
             artStatus.setText(detail);
         }
         if (conversationStatus != null
