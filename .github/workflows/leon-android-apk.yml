@@ -41,6 +41,18 @@ jobs:
         working-directory: apps/leon-android/tools
         run: python3 -m unittest -v test_build_leon_production.py test_render_contract.py test_validate_emulator_screenshot.py
 
+      - name: Generate deterministic Leon previews
+        working-directory: apps/leon-android/tools
+        run: python3 render_contract.py --sheet ../../../docs/leon-reference/leon-character-sheet.png --out ../app/build/reports/leon-preview
+
+      - name: Upload Leon visual contract
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Leon-visual-contract
+          path: apps/leon-android/app/build/reports/leon-preview/
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload Leon reference diagnostics
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -80,6 +92,52 @@ jobs:
       - name: Build debug APK
         working-directory: apps/leon-android
         run: gradle :app:assembleDebug -PleonVersionCode=${{ github.run_number }} --stacktrace
+
+      - name: Install Android emulator image
+        run: |
+          yes | sdkmanager "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64" >/dev/null
+          echo no | avdmanager create avd -n leon-ci -k "system-images;android-35;google_apis;x86_64" --force
+
+      - name: Boot exact APK in Android emulator
+        run: |
+          mkdir -p apps/leon-android/app/build/reports/leon-preview
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+          nohup emulator -avd leon-ci -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect > /tmp/leon-emulator.log 2>&1 &
+          adb wait-for-device
+          timeout 180 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 2; done'
+          adb install -r apps/leon-android/app/build/outputs/apk/debug/app-debug.apk
+          adb shell am start -W -n ai.leon.companion/.MainActivity \
+            --ez ai.leon.companion.VISUAL_HOST true \
+            --es ai.leon.companion.TEST_POSE idle \
+            --ez ai.leon.companion.DISABLE_RANDOM true
+          sleep 3
+          adb exec-out screencap -p > apps/leon-android/app/build/reports/leon-preview/emulator-main.png
+          adb shell appops set ai.leon.companion SYSTEM_ALERT_WINDOW allow
+          adb shell am start -W -n ai.leon.companion/.MainActivity \
+            --ez ai.leon.companion.OVERLAY_HOST true
+          adb shell am start-foreground-service -n ai.leon.companion/.overlay.LeonOverlayService
+          sleep 3
+          adb exec-out screencap -p > apps/leon-android/app/build/reports/leon-preview/emulator-overlay.png
+
+      - name: Validate emulator screenshots
+        working-directory: apps/leon-android/tools
+        run: |
+          python3 validate_emulator_screenshot.py \
+            ../app/build/reports/leon-preview/emulator-main.png \
+            ../app/build/reports/leon-preview/emulator-overlay.png \
+            --min-height-fraction 0.55
+
+      - name: Upload emulator screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Leon-emulator-screenshots
+          path: |
+            apps/leon-android/app/build/reports/leon-preview/emulator-main.png
+            apps/leon-android/app/build/reports/leon-preview/emulator-overlay.png
+            /tmp/leon-emulator.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
