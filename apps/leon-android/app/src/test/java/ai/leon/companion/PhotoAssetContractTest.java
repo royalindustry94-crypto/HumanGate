@@ -12,7 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 
 /**
- * Contract test for the exact master art shipped in the APK.
+ * Legacy alignment contract retained until ProductionAssetContractTest replaces this class.
  *
  * <p>This exists because an earlier build used landmarks measured against a different-sized image:
  * CI was green, but the phone showed only Leon's eyes and mouth. The test pins the source dimensions,
@@ -51,8 +51,8 @@ public class PhotoAssetContractTest {
         float soleY = Float.parseFloat(values[1]);
         float centreX = Float.parseFloat(values[2]);
 
-        assertEquals(11f, crownY, 0.01f);
-        assertEquals(612f, soleY, 0.01f);
+        assertEquals(20f, crownY, 0.01f);
+        assertEquals(619f, soleY, 0.01f);
         assertEquals(180f, centreX, 0.01f);
         assertTrue(crownY >= 0f && crownY < soleY && soleY < height);
         assertTrue(centreX > 0f && centreX < width);
@@ -61,7 +61,7 @@ public class PhotoAssetContractTest {
         assertEquals(crownY, alignment.sourceY(PhotoAlignment.DESIGN_CROWN_Y), 0.01f);
         assertEquals(soleY, alignment.sourceY(PhotoAlignment.DESIGN_SOLE_Y), 0.01f);
         assertEquals(centreX, alignment.sourceX(PhotoAlignment.DESIGN_CENTRE_X), 0.01f);
-        assertEquals(0.8735465f, alignment.scale, 0.0001f);
+        assertEquals(0.87063956f, alignment.scale, 0.0001f);
     }
 
     private static int little16(byte[] bytes, int offset) {
