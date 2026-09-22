@@ -365,25 +365,37 @@ public final class PhotoLayerArtProvider implements LeonArtProvider {
             if (background[i]) pixels[i] = android.graphics.Color.TRANSPARENT;
         }
 
-        // De-spill only pixels immediately touching the keyed background.
-        for (int i = 0; i < count; i++) {
-            if (background[i]) continue;
-            int x = i % w;
-            int y = i / w;
-            boolean edge = (x > 0 && background[i - 1])
-                    || (x + 1 < w && background[i + 1])
-                    || (y > 0 && background[i - w])
-                    || (y + 1 < h && background[i + w]);
-            if (!edge) continue;
+        // De-spill a narrow two-pixel band around the keyed screen. WebP/downscale filtering can
+        // spread green across more than one pixel, so a one-pixel cleanup still left a neon outline
+        // around Leon's sleeves and legs on a dark overlay.
+        boolean[] nearBackground = background.clone();
+        for (int pass = 0; pass < 2; pass++) {
+            boolean[] expanded = nearBackground.clone();
+            for (int i = 0; i < count; i++) {
+                if (!nearBackground[i]) continue;
+                int x = i % w;
+                int y = i / w;
+                if (x > 0) expanded[i - 1] = true;
+                if (x + 1 < w) expanded[i + 1] = true;
+                if (y > 0) expanded[i - w] = true;
+                if (y + 1 < h) expanded[i + w] = true;
+            }
+            nearBackground = expanded;
+        }
 
+        for (int i = 0; i < count; i++) {
+            if (background[i] || !nearBackground[i]) continue;
             int c = pixels[i];
             int a = android.graphics.Color.alpha(c);
             int r = android.graphics.Color.red(c);
             int g = android.graphics.Color.green(c);
             int b = android.graphics.Color.blue(c);
             int maxRB = Math.max(r, b);
-            if (g > maxRB + 8) {
-                pixels[i] = android.graphics.Color.argb(a, r, Math.min(255, maxRB + 10), b);
+            int dominance = g - maxRB;
+            if (g >= 120 && dominance >= 80) {
+                pixels[i] = android.graphics.Color.TRANSPARENT;
+            } else if (dominance > 8) {
+                pixels[i] = android.graphics.Color.argb(a, r, Math.min(255, maxRB + 8), b);
             }
         }
         bitmap.setPixels(pixels, 0, w, 0, 0, w, h);
