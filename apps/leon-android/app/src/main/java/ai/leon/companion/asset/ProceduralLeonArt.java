@@ -102,9 +102,14 @@ public final class ProceduralLeonArt implements LeonArtProvider {
     private void draw(String key, Canvas c, float w, float h) {
         switch (key) {
             case LeonRig.Art.AURA: aura(c, w, h); break;
+            case LeonRig.Art.PHOTO_BACKFILL: break; // photo-only continuity layer
             case LeonRig.Art.HOOD_DOWN: hoodDown(c, w, h); break;
-            case LeonRig.Art.PANT_LEG: pantLeg(c, w, h, true); break;
-            case LeonRig.Art.PANT_SHIN: pantLeg(c, w, h, false); break;
+            case LeonRig.Art.PANT_LEG_L:
+            case LeonRig.Art.PANT_LEG_R:
+                pantLeg(c, w, h, true); break;
+            case LeonRig.Art.PANT_SHIN_L:
+            case LeonRig.Art.PANT_SHIN_R:
+                pantLeg(c, w, h, false); break;
             case LeonRig.Art.SNEAKER_L: sneaker(c, w, h, false); break;
             case LeonRig.Art.SNEAKER_R: sneaker(c, w, h, true); break;
             case LeonRig.Art.SLEEVE_UPPER_L: sleeve(c, w, h, false); break;
