@@ -5,14 +5,20 @@ from pathlib import Path
 
 from PIL import Image
 
-from build_leon_production import (\n    read_landmarks, key_green, alpha_bounds, build_manifest, extract_reference_master\n)
+from build_leon_production import (
+    alpha_bounds,
+    build_manifest,
+    extract_reference_master,
+    key_green,
+    read_landmarks,
+)
 
 
 class BuildLeonProductionTest(unittest.TestCase):
     def test_landmarks_are_current_master_values(self):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "leon-front.txt"
-            p.write_text("11 612 180\n", encoding="utf-8")
+            p.write_text("20 619 180\n", encoding="utf-8")
             self.assertEqual((20.0, 619.0, 180.0), read_landmarks(p))
 
     def test_edge_connected_green_is_transparent_but_internal_green_is_preserved(self):
@@ -31,12 +37,12 @@ class BuildLeonProductionTest(unittest.TestCase):
         self.assertEqual(0, out[0, 0][3])
         self.assertEqual(255, out[2, 2][3])
 
-
     def test_committed_character_sheet_extracts_complete_master(self):
         repo_root = Path(__file__).resolve().parents[3]
         sheet_path = repo_root / "docs" / "leon-reference" / "leon-character-sheet.png"
         with Image.open(sheet_path) as sheet:
             master = extract_reference_master(sheet)
+
         self.assertEqual((360, 640), master.size)
         box = master.getchannel("A").getbbox()
         self.assertIsNotNone(box)
@@ -45,20 +51,24 @@ class BuildLeonProductionTest(unittest.TestCase):
         self.assertGreater(box[2] - box[0], 150)
 
     def test_manifest_pins_source_and_full_body_bounds(self):
-        source = Image.new("RGBA", (360, 640), (0, 255, 0, 255))
-        keyed = Image.new("RGBA", (360, 640), (0, 0, 0, 0))
-        px = keyed.load()
-        for y in range(11, 613):
-            for x in range(130, 231):
+        source = Image.new("RGBA", (360, 640), (0, 0, 0, 0))
+        px = source.load()
+        for y in range(20, 620):
+            for x in range(100, 261):
                 px[x, y] = (40, 30, 20, 255)
         source_bytes = b"source-bytes"
-        manifest = build_manifest(source, keyed, source_bytes, (11.0, 612.0, 180.0))
+        manifest = build_manifest(
+            source,
+            source,
+            source_bytes,
+            (20.0, 619.0, 180.0),
+        )
         self.assertEqual(360, manifest["source_width"])
         self.assertEqual(640, manifest["source_height"])
         self.assertEqual(16, manifest["mesh_cols"])
         self.assertEqual(28, manifest["mesh_rows"])
         self.assertEqual(hashlib.sha256(source_bytes).hexdigest(), manifest["source_sha256"])
-        self.assertGreater(manifest["alpha_bounds"]["bottom"], 600)
+        self.assertGreaterEqual(manifest["alpha_bounds"]["bottom"], 619)
         self.assertEqual([384, 768], manifest["design_size"])
 
 
