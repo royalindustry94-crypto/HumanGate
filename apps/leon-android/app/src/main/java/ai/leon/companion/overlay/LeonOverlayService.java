@@ -35,8 +35,8 @@ import ai.leon.companion.LeonRuntime;
 import ai.leon.companion.MainActivity;
 import ai.leon.companion.R;
 import ai.leon.companion.anim.LeonAnimationController;
-import ai.leon.companion.asset.LeonAssetRepository;
 import ai.leon.companion.render.LeonCharacterView;
+import ai.leon.companion.render.ProductionLeonTexture;
 import ai.leon.companion.rig.LeonRig;
 import ai.leon.companion.rig.Rig;
 import ai.leon.companion.state.LeonState;
@@ -91,7 +91,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
     private WindowManager.LayoutParams params;
     private LeonCharacterView characterView;
     private LeonAnimationController animation;
-    private LeonAssetRepository art;
+    private ProductionLeonTexture texture;
     private Rig rig;
 
     private View quickControls;
@@ -209,11 +209,11 @@ public final class LeonOverlayService extends Service implements LeonStateContro
         if (windowManager == null || host != null) return;
 
         rig = LeonRig.build();
-        art = new LeonAssetRepository(this, rig, artScaleFor(EXPANDED_WIDTH_DP));
+        texture = ProductionLeonTexture.load(this);
         animation = new LeonAnimationController(rig, runtime.states(), System.nanoTime());
         runtime.attachSurface(animation);
 
-        characterView = new LeonCharacterView(this, rig, animation, art);
+        characterView = new LeonCharacterView(this, rig, animation, texture);
         characterView.renderer().setShowRigDebug(prefs.isRigDebugEnabled());
 
         host = new FrameLayout(this);
@@ -254,12 +254,6 @@ public final class LeonOverlayService extends Service implements LeonStateContro
             teardownOverlay();
         }
         updateNotification();
-    }
-
-    /** Rasterise the art at roughly the pixel size it will be drawn at, no larger. */
-    private float artScaleFor(int widthDp) {
-        float targetPx = dp(widthDp);
-        return Math.max(0.5f, Math.min(targetPx / LeonRig.DESIGN_W, 2.0f));
     }
 
     private void applySavedPosition(int width, int height) {
@@ -329,9 +323,9 @@ public final class LeonOverlayService extends Service implements LeonStateContro
             runtime.detachSurface(animation);
             animation = null;
         }
-        if (art != null) {
-            art.release();
-            art = null;
+        if (texture != null) {
+            texture.close();
+            texture = null;
         }
         host = null;
         params = null;
