@@ -1,7 +1,7 @@
 package ai.leon.companion.rig;
 
 /**
- * The canonical Leon skeleton and layer stack: 27 bones and 45 independently transformable layers.
+ * The canonical Leon skeleton and layer stack: 27 bones and 46 independently transformable layers.
  *
  * <p>This class defines <em>structure only</em> — no artwork. Bitmaps are resolved later from
  * {@link RigPart#artKey}, which is how the built-in artwork and any custom art files
@@ -84,13 +84,22 @@ public final class LeonRig {
         // Presentation-only state ring. Never carries character animation.
         b.part(Parts.AURA, Art.AURA, Bones.CHEST, 0f, 110f, 320f, 320f, 0.5f, 0.5f, 0f, 0, null);
 
+        // Photo-mode continuity layer. PhotoLayerArtProvider fills ONLY source pixels that fall
+        // outside the independently animated major-part rectangles, so the rest pose reconstructs
+        // the whole photographed character without turning Leon back into one flat moving image.
+        // It is bound to ROOT so it follows minimised scaling but not breathing/head/limb motion.
+        b.part(Parts.PHOTO_BACKFILL, Art.PHOTO_BACKFILL, Bones.ROOT,
+                -CENTRE_X, -GROUND_Y, DESIGN_W, DESIGN_H, 0f, 0f, 0f, 4, null);
+
         b.part(Parts.HOOD_DOWN, Art.HOOD_DOWN, Bones.HOOD, 0f, 20f, 164f, 104f, 0.5f, 0.1f, 0f, 5, null);
 
         // Legs and white sneakers.
-        b.part(Parts.THIGH_L, Art.PANT_LEG, Bones.THIGH_L, 0f, 70f, 58f, 148f, 0.5f, 0.5f, 0f, 10, null);
-        b.part(Parts.THIGH_R, Art.PANT_LEG, Bones.THIGH_R, 0f, 70f, 58f, 148f, 0.5f, 0.5f, 0f, 10, null);
-        b.part(Parts.SHIN_L, Art.PANT_SHIN, Bones.SHIN_L, 0f, 70f, 50f, 146f, 0.5f, 0.5f, 0f, 11, null);
-        b.part(Parts.SHIN_R, Art.PANT_SHIN, Bones.SHIN_R, 0f, 70f, 50f, 146f, 0.5f, 0.5f, 0f, 11, null);
+        // Left/right legs intentionally have distinct art keys. A single source photo cannot reuse
+        // one leg crop on both sides without cloning the left-leg pixels onto the right leg.
+        b.part(Parts.THIGH_L, Art.PANT_LEG_L, Bones.THIGH_L, 0f, 70f, 58f, 148f, 0.5f, 0.5f, 0f, 10, null);
+        b.part(Parts.THIGH_R, Art.PANT_LEG_R, Bones.THIGH_R, 0f, 70f, 58f, 148f, 0.5f, 0.5f, 0f, 10, null);
+        b.part(Parts.SHIN_L, Art.PANT_SHIN_L, Bones.SHIN_L, 0f, 70f, 50f, 146f, 0.5f, 0.5f, 0f, 11, null);
+        b.part(Parts.SHIN_R, Art.PANT_SHIN_R, Bones.SHIN_R, 0f, 70f, 50f, 146f, 0.5f, 0.5f, 0f, 11, null);
         b.part(Parts.SHOE_L, Art.SNEAKER_L, Bones.FOOT_L, -6f, 14f, 84f, 48f, 0.5f, 0.45f, 0f, 12, null);
         b.part(Parts.SHOE_R, Art.SNEAKER_R, Bones.FOOT_R, 6f, 14f, 84f, 48f, 0.5f, 0.45f, 0f, 12, null);
 
@@ -196,6 +205,7 @@ public final class LeonRig {
     /** Layer names. */
     public static final class Parts {
         public static final String AURA = "aura";
+        public static final String PHOTO_BACKFILL = "photo_backfill";
         public static final String HOOD_DOWN = "hood_down";
         public static final String THIGH_L = "thigh_l";
         public static final String THIGH_R = "thigh_r";
@@ -254,9 +264,12 @@ public final class LeonRig {
     /** Logical art keys. The render layer maps these to bitmaps. */
     public static final class Art {
         public static final String AURA = "aura";
+        public static final String PHOTO_BACKFILL = "photo_backfill";
         public static final String HOOD_DOWN = "hood_down";
-        public static final String PANT_LEG = "pant_leg";
-        public static final String PANT_SHIN = "pant_shin";
+        public static final String PANT_LEG_L = "pant_leg_l";
+        public static final String PANT_LEG_R = "pant_leg_r";
+        public static final String PANT_SHIN_L = "pant_shin_l";
+        public static final String PANT_SHIN_R = "pant_shin_r";
         public static final String SNEAKER_L = "sneaker_l";
         public static final String SNEAKER_R = "sneaker_r";
         public static final String SLEEVE_UPPER_L = "sleeve_upper_l";
