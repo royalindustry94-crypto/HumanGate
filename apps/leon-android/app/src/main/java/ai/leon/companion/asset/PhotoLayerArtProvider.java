@@ -15,6 +15,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -227,36 +228,125 @@ public final class PhotoLayerArtProvider implements LeonArtProvider {
                     new Rect(dstLeft, dstTop, dstRight, dstBottom), null);
         }
 
-        // The asset request deliberately uses a flat #00FF00 chroma field because the black hoodie
-        // and white shoes make black/white keying unsafe. Remove only strongly chroma-green pixels;
-        // this runs once when a layer is first requested, never per animation frame.
+        // Remove only edge-connected green-screen pixels. This preserves Leon's intentional green
+        // jewellery/details because an isolated green gem is not connected to the crop boundary.
+        // It also de-spills the one-pixel edge so the overlay does not glow neon green.
         keyChromaGreen(layer);
+
+        if (LeonRig.Art.PHOTO_BACKFILL.equals(artKey)) {
+            clearAnimatedPartHoles(layer);
+        }
 
         cache.put(artKey, layer);
         return layer;
     }
 
-    private static void keyChromaGreen(Bitmap bitmap) {
+    private void clearAnimatedPartHoles(Bitmap bitmap) {
         int w = bitmap.getWidth();
         int h = bitmap.getHeight();
         int[] pixels = new int[w * h];
         bitmap.getPixels(pixels, 0, w, 0, 0, w, h);
-        boolean changed = false;
-        for (int i = 0; i < pixels.length; i++) {
+
+        for (Map.Entry<String, RectF> entry : designRects.entrySet()) {
+            String key = entry.getKey();
+            if (LeonRig.Art.PHOTO_BACKFILL.equals(key) || !coversKey(key)) continue;
+            RectF r = entry.getValue();
+            int left = Math.max(0, (int) Math.floor(r.left));
+            int top = Math.max(0, (int) Math.floor(r.top));
+            int right = Math.min(w, (int) Math.ceil(r.right));
+            int bottom = Math.min(h, (int) Math.ceil(r.bottom));
+            for (int y = top; y < bottom; y++) {
+                int row = y * w;
+                for (int x = left; x < right; x++) {
+                    pixels[row + x] = android.graphics.Color.TRANSPARENT;
+                }
+            }
+        }
+        bitmap.setPixels(pixels, 0, w, 0, 0, w, h);
+    }
+
+    /**
+     * Chroma-keys only green pixels connected to the bitmap boundary. A colour-only key deletes
+     * green gemstones and tattoo highlights; boundary flood-fill removes the actual screen while
+     * preserving intentional green detail inside Leon.
+     */
+    private static void keyChromaGreen(Bitmap bitmap) {
+        int w = bitmap.getWidth();
+        int h = bitmap.getHeight();
+        int count = w * h;
+        int[] pixels = new int[count];
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h);
+
+        boolean[] candidate = new boolean[count];
+        boolean[] background = new boolean[count];
+        ArrayDeque<Integer> queue = new ArrayDeque<>();
+
+        for (int i = 0; i < count; i++) {
             int c = pixels[i];
             int a = android.graphics.Color.alpha(c);
             int r = android.graphics.Color.red(c);
             int g = android.graphics.Color.green(c);
             int b = android.graphics.Color.blue(c);
-            if (a == 0) continue;
+            int maxRB = Math.max(r, b);
+            candidate[i] = a != 0
+                    && g >= 95
+                    && g - r >= 22
+                    && g - b >= 22
+                    && g * 100 >= maxRB * 112;
+        }
 
-            // Hard key the intended #00FF00 background and near-identical compression variants.
-            if (g >= 220 && r <= 45 && b <= 45 && g - Math.max(r, b) >= 170) {
-                pixels[i] = android.graphics.Color.TRANSPARENT;
-                changed = true;
+        for (int x = 0; x < w; x++) {
+            seed(candidate, background, queue, x);
+            seed(candidate, background, queue, (h - 1) * w + x);
+        }
+        for (int y = 0; y < h; y++) {
+            seed(candidate, background, queue, y * w);
+            seed(candidate, background, queue, y * w + (w - 1));
+        }
+
+        while (!queue.isEmpty()) {
+            int i = queue.removeFirst();
+            int x = i % w;
+            int y = i / w;
+            if (x > 0) seed(candidate, background, queue, i - 1);
+            if (x + 1 < w) seed(candidate, background, queue, i + 1);
+            if (y > 0) seed(candidate, background, queue, i - w);
+            if (y + 1 < h) seed(candidate, background, queue, i + w);
+        }
+
+        for (int i = 0; i < count; i++) {
+            if (background[i]) pixels[i] = android.graphics.Color.TRANSPARENT;
+        }
+
+        // De-spill only pixels immediately touching the keyed background.
+        for (int i = 0; i < count; i++) {
+            if (background[i]) continue;
+            int x = i % w;
+            int y = i / w;
+            boolean edge = (x > 0 && background[i - 1])
+                    || (x + 1 < w && background[i + 1])
+                    || (y > 0 && background[i - w])
+                    || (y + 1 < h && background[i + w]);
+            if (!edge) continue;
+
+            int c = pixels[i];
+            int a = android.graphics.Color.alpha(c);
+            int r = android.graphics.Color.red(c);
+            int g = android.graphics.Color.green(c);
+            int b = android.graphics.Color.blue(c);
+            int maxRB = Math.max(r, b);
+            if (g > maxRB + 8) {
+                pixels[i] = android.graphics.Color.argb(a, r, Math.min(255, maxRB + 10), b);
             }
         }
-        if (changed) bitmap.setPixels(pixels, 0, w, 0, 0, w, h);
+        bitmap.setPixels(pixels, 0, w, 0, 0, w, h);
+    }
+
+    private static void seed(boolean[] candidate, boolean[] background,
+                             ArrayDeque<Integer> queue, int index) {
+        if (index < 0 || index >= candidate.length || !candidate[index] || background[index]) return;
+        background[index] = true;
+        queue.addLast(index);
     }
 
     @Override
