@@ -114,9 +114,9 @@ jobs:
             adb shell am start -W -n ai.leon.companion/.MainActivity --ez ai.leon.companion.VISUAL_HOST true --es ai.leon.companion.TEST_POSE idle --ez ai.leon.companion.DISABLE_RANDOM true
             sleep 3
             adb exec-out screencap -p > apps/leon-android/app/build/reports/leon-preview/emulator-main.png
+            adb shell am force-stop ai.leon.companion
             adb shell appops set ai.leon.companion SYSTEM_ALERT_WINDOW allow
-            adb shell am start -W -n ai.leon.companion/.MainActivity --ez ai.leon.companion.OVERLAY_HOST true
-            adb shell am start-foreground-service -n ai.leon.companion/.overlay.LeonOverlayService
+            adb shell am start -W -n ai.leon.companion/.MainActivity --ez ai.leon.companion.OVERLAY_HOST true --ez ai.leon.companion.START_TEST_OVERLAY true
             sleep 3
             adb exec-out screencap -p > apps/leon-android/app/build/reports/leon-preview/emulator-overlay.png
 
