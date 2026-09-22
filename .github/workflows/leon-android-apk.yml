@@ -39,7 +39,7 @@ jobs:
 
       - name: Production asset contract tests
         working-directory: apps/leon-android/tools
-        run: python3 -m unittest -v test_build_leon_production.py
+        run: python3 -m unittest -v test_build_leon_production.py test_render_contract.py
 
       - name: Upload Leon reference diagnostics
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
