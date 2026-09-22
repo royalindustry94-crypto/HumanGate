@@ -81,6 +81,12 @@ def key_green(image: Image.Image) -> Image.Image:
         if background[i]:
             out.append((r, g, b, 0))
             continue
+        # A green pixel that is itself a key candidate but was NOT reached from the
+        # boundary is intentional interior detail (for Leon, e.g. a gemstone).
+        # De-spill only non-candidate edge pixels contaminated by the keyed screen.
+        if candidate[i]:
+            out.append((r, g, b, a))
+            continue
         if near[i] and a:
             max_rb = max(r, b)
             dominance = g - max_rb
