@@ -11,6 +11,7 @@ public final class DebugTestHooks {
     public static final String EXTRA_DISABLE_RANDOM = "ai.leon.companion.DISABLE_RANDOM";
     public static final String EXTRA_VISUAL_HOST = "ai.leon.companion.VISUAL_HOST";
     public static final String EXTRA_OVERLAY_HOST = "ai.leon.companion.OVERLAY_HOST";
+    public static final String EXTRA_START_OVERLAY = "ai.leon.companion.START_TEST_OVERLAY";
 
     private DebugTestHooks() {}
 
@@ -45,5 +46,10 @@ public final class DebugTestHooks {
     public static boolean isOverlayHost(Intent intent) {
         return BuildConfig.DEBUG && intent != null
                 && intent.getBooleanExtra(EXTRA_OVERLAY_HOST, false);
+    }
+
+    public static boolean shouldStartOverlay(Intent intent) {
+        return BuildConfig.DEBUG && intent != null
+                && intent.getBooleanExtra(EXTRA_START_OVERLAY, false);
     }
 }
