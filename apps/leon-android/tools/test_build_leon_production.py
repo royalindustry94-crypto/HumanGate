@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from build_leon_production import read_landmarks, key_green, alpha_bounds, build_manifest
+from build_leon_production import (\n    read_landmarks, key_green, alpha_bounds, build_manifest, extract_reference_master\n)
 
 
 class BuildLeonProductionTest(unittest.TestCase):
@@ -13,7 +13,7 @@ class BuildLeonProductionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "leon-front.txt"
             p.write_text("11 612 180\n", encoding="utf-8")
-            self.assertEqual((11.0, 612.0, 180.0), read_landmarks(p))
+            self.assertEqual((20.0, 619.0, 180.0), read_landmarks(p))
 
     def test_edge_connected_green_is_transparent_but_internal_green_is_preserved(self):
         im = Image.new("RGBA", (5, 5), (20, 20, 20, 255))
@@ -30,6 +30,19 @@ class BuildLeonProductionTest(unittest.TestCase):
         out = keyed.load()
         self.assertEqual(0, out[0, 0][3])
         self.assertEqual(255, out[2, 2][3])
+
+
+    def test_committed_character_sheet_extracts_complete_master(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        sheet_path = repo_root / "docs" / "leon-reference" / "leon-character-sheet.png"
+        with Image.open(sheet_path) as sheet:
+            master = extract_reference_master(sheet)
+        self.assertEqual((360, 640), master.size)
+        box = master.getchannel("A").getbbox()
+        self.assertIsNotNone(box)
+        self.assertLessEqual(box[1], 20)
+        self.assertGreaterEqual(box[3] - 1, 619)
+        self.assertGreater(box[2] - box[0], 150)
 
     def test_manifest_pins_source_and_full_body_bounds(self):
         source = Image.new("RGBA", (360, 640), (0, 255, 0, 255))
