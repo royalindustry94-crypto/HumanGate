@@ -15,7 +15,8 @@ import java.util.Set;
 /**
  * Decides which artwork the renderer draws, and says so plainly.
  *
- * <p>Custom art files win over the built-in artwork, per layer. What the repository will
+ * <p>Order of preference per layer: an individual art file, then a slice of the single photo or
+ * render source, then the built-in drawing. What the repository will
  * not do is quietly present a mixed or incomplete set as finished: {@link #report()} names the
  * source of every layer and lists any the production set is missing, and the control centre shows
  * that report. A partially delivered Leon therefore looks partially delivered.
@@ -23,6 +24,7 @@ import java.util.Set;
 public final class LeonAssetRepository implements LeonArtProvider {
     private static final String TAG = "LeonArt";
 
+    private final PhotoLayerArtProvider photo;
     private final AssetDirArtProvider custom;
     private final ProceduralLeonArt builtIn;
     private final List<String> missingFromProduction = new ArrayList<>();
@@ -33,23 +35,23 @@ public final class LeonAssetRepository implements LeonArtProvider {
         if (rig == null) throw new IllegalArgumentException("rig required");
         for (RigPart part : rig.parts()) requiredKeys.add(part.artKey);
 
+        this.photo = PhotoLayerArtProvider.createIfPresent(context, rig);
         this.custom = AssetDirArtProvider.createIfPresent(context);
         this.builtIn = new ProceduralLeonArt(rig, artScale);
 
-        if (custom == null) {
-            missingFromProduction.addAll(requiredKeys);
-        } else {
-            Set<String> available = custom.availableKeys();
-            for (String key : requiredKeys) {
-                if (!available.contains(key)) missingFromProduction.add(key);
-            }
+        Set<String> available = custom == null
+                ? java.util.Collections.<String>emptySet() : custom.availableKeys();
+        for (String key : requiredKeys) {
+            boolean covered = available.contains(key)
+                    || (photo != null && PhotoLayerArtProvider.coversKey(key));
+            if (!covered) missingFromProduction.add(key);
         }
         Log.i(TAG, report());
     }
 
     /** True once every rig layer is covered by custom art files rather than the built-in art. */
     public boolean hasCompleteProductionArt() {
-        return custom != null && missingFromProduction.isEmpty();
+        return (custom != null || photo != null) && missingFromProduction.isEmpty();
     }
 
     /** Layers no custom art file supplies, which the built-in artwork draws instead. */
@@ -69,15 +71,17 @@ public final class LeonAssetRepository implements LeonArtProvider {
     /** One-line summary for logs and the control centre. */
     public String report() {
         int supplied = requiredKeys.size() - missingFromProduction.size();
-        if (custom == null) {
+        if (custom == null && photo == null) {
             return "Leon art: all " + requiredKeys.size() + " layers from the built-in artwork.";
         }
         if (missingFromProduction.isEmpty()) {
-            return "Leon art: all " + requiredKeys.size() + " layers from custom art files.";
+            return "Leon art: all " + requiredKeys.size() + " layers from "
+                    + (photo != null ? "the photo source" : "custom art files") + ".";
         }
-        return "Leon art: " + supplied + "/" + requiredKeys.size()
-                + " layers from custom art files; " + missingFromProduction.size()
-                + " from the built-in artwork (" + summariseMissing() + ").";
+        String from = photo != null ? "the photo source" : "custom art files";
+        return "Leon art: " + supplied + "/" + requiredKeys.size() + " layers from " + from + "; "
+                + missingFromProduction.size() + " from the built-in artwork ("
+                + summariseMissing() + ").";
     }
 
     private String summariseMissing() {
@@ -101,8 +105,13 @@ public final class LeonAssetRepository implements LeonArtProvider {
     @Override
     public Bitmap bitmapFor(String artKey) {
         if (released) return null;
+        // Per-layer art files win, then the photo source, then the built-in drawing.
         if (custom != null) {
             Bitmap b = custom.bitmapFor(artKey);
+            if (b != null) return b;
+        }
+        if (photo != null) {
+            Bitmap b = photo.bitmapFor(artKey);
             if (b != null) return b;
         }
         return builtIn.bitmapFor(artKey);
@@ -112,6 +121,7 @@ public final class LeonAssetRepository implements LeonArtProvider {
     public void release() {
         released = true;
         if (custom != null) custom.release();
+        if (photo != null) photo.release();
         builtIn.release();
     }
 }
