@@ -6,6 +6,13 @@ on:
     paths:
       - "apps/leon-android/**"
       - ".github/workflows/leon-android-apk.yml"
+  push:
+    branches:
+      - "claude/**"
+      - "feature/leon-**"
+    paths:
+      - "apps/leon-android/**"
+      - ".github/workflows/leon-android-apk.yml"
   workflow_dispatch:
 
 jobs:
@@ -25,6 +32,34 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
+
+      # The animation core is plain Java with no Android dependencies, so it is fully
+      # unit-testable. These must pass before an APK is produced.
+      - name: Unit tests
+        working-directory: apps/leon-android
+        run: gradle :app:testDebugUnitTest --stacktrace
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Leon-unit-test-report
+          path: apps/leon-android/app/build/reports/tests/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Lint
+        working-directory: apps/leon-android
+        run: gradle :app:lintDebug --stacktrace
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Leon-lint-report
+          path: apps/leon-android/app/build/reports/lint-results-debug.html
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Build debug APK
         working-directory: apps/leon-android
