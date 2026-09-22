@@ -10,3 +10,5 @@ Pre-flight interfaces:
 - Tasks 3/5 share MainActivity, LeonOverlayService, LeonCharacterView; Task 5 intentionally removes old production references after Task 3 migration.
 
 Task 1 Ruling: the plan's sample test uses pytest's tmp_path while the required command is unittest. Use tempfile.TemporaryDirectory with unittest so the prescribed runner is valid. Cost if wrong: test helper only; no production behavior changes.
+
+Task 1 Ruling: bundled leon-front.webp is corrupt/truncated (RIFF declares 15,360 bytes, repository blob is 7,501 bytes; Pillow fails with "could not create decoder object"). Use the valid 1,223x1,286 character-sheet front turnaround as the authoritative full-body source and deterministically extract it to a 360x640 transparent production master. Cost if wrong: source fidelity is limited to the turnaround artwork resolution; device acceptance remains the final gate.
