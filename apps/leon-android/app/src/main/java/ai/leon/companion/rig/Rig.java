@@ -93,10 +93,6 @@ public final class Rig {
         return list == null ? Collections.<RigPart>emptyList() : list;
     }
 
-    public java.util.Set<String> groupNames() {
-        return groups.keySet();
-    }
-
     /** Clears every animated field back to the rest pose. */
     public void resetAnimation() {
         for (int i = 0; i < bones.size(); i++) bones.get(i).resetAnimation();

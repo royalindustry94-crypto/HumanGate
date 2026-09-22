@@ -29,17 +29,9 @@ public final class Spring1D {
         return value;
     }
 
-    public float velocity() {
-        return velocity;
-    }
-
     public void snapTo(float v) {
         value = v;
         velocity = 0f;
-    }
-
-    public void nudge(float impulse) {
-        velocity += impulse;
     }
 
     /**

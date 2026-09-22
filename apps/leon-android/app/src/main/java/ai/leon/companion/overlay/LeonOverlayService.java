@@ -1,5 +1,8 @@
 package ai.leon.companion.overlay;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -25,6 +28,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.WindowManager;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
 
 import ai.leon.companion.LeonRuntime;
@@ -95,6 +99,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
 
     private BroadcastReceiver screenReceiver;
     private GestureDetector gestureDetector;
+    private ValueAnimator settleAnimator;
     private boolean dragging;
     private int dragStartX;
     private int dragStartY;
@@ -179,7 +184,9 @@ public final class LeonOverlayService extends Service implements LeonStateContro
             return START_STICKY;
         }
 
-        prefs.setEnabled(true);
+        // A sticky restart delivers a null intent. Only an explicit start means the user wants Leon
+        // running; a restart must not re-enable him after he was stopped.
+        if (intent != null) prefs.setEnabled(true);
         if (ACTION_SHOW.equals(action)) {
             prefs.setHiddenUntilMillis(0L);
             handler.removeCallbacks(unhide);
@@ -301,6 +308,10 @@ public final class LeonOverlayService extends Service implements LeonStateContro
     }
 
     private void teardownOverlay() {
+        if (settleAnimator != null) {
+            settleAnimator.cancel();
+            settleAnimator = null;
+        }
         dismissQuickControls();
         overlayLive = false;
         if (host != null && windowManager != null) {
@@ -347,6 +358,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
                     float dy = event.getRawY() - dragDownY;
                     if (!dragging && Math.hypot(dx, dy) > touchSlop) {
                         dragging = true;
+                        if (settleAnimator != null) settleAnimator.cancel();
                         dismissQuickControls();
                     }
                     if (dragging) moveTo(dragStartX + Math.round(dx), dragStartY + Math.round(dy));
@@ -356,13 +368,48 @@ public final class LeonOverlayService extends Service implements LeonStateContro
                 case MotionEvent.ACTION_CANCEL:
                     if (dragging) {
                         dragging = false;
-                        savePosition();
+                        settleToEdge();
                     }
                     return true;
                 default:
                     return false;
             }
         }
+    }
+
+    /** Slides Leon to the nearer side edge after a drag, then saves where he ended up. */
+    private void settleToEdge() {
+        if (params == null || windowManager == null) {
+            savePosition();
+            return;
+        }
+        ScreenMetrics metrics = ScreenMetrics.of(this, windowManager);
+        final int targetX = OverlayPlacement.snapToNearestEdge(params.x, params.width,
+                metrics.width, metrics.insetLeft, metrics.insetRight);
+        final int startX = params.x;
+        final int y = params.y;
+        if (startX == targetX) {
+            savePosition();
+            return;
+        }
+        if (settleAnimator != null) settleAnimator.cancel();
+        settleAnimator = ValueAnimator.ofFloat(0f, 1f);
+        settleAnimator.setDuration(180L);
+        settleAnimator.setInterpolator(new DecelerateInterpolator());
+        settleAnimator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator animation) {
+                float t = animation.getAnimatedFraction();
+                moveTo(Math.round(startX + (targetX - startX) * t), y);
+            }
+        });
+        settleAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                savePosition();
+            }
+        });
+        settleAnimator.start();
     }
 
     private void moveTo(int x, int y) {
@@ -451,11 +498,6 @@ public final class LeonOverlayService extends Service implements LeonStateContro
                     public void onSettings() {
                         dismissQuickControls();
                         openMainActivity(MainActivity.EXTRA_OPEN_SETTINGS);
-                    }
-
-                    @Override
-                    public void onDismiss() {
-                        dismissQuickControls();
                     }
                 });
 
@@ -574,8 +616,13 @@ public final class LeonOverlayService extends Service implements LeonStateContro
                         host.setVisibility(View.VISIBLE);
                         if (characterView != null) {
                             characterView.setPaused(false);
-                            // A blink on unlock reads as Leon waking up with the screen.
-                            if (animation != null) animation.triggerBlink();
+                            if (animation != null) {
+                                // Restart the behaviour timers so intervals that elapsed with the
+                                // screen off do not all fire at once on the first visible frame.
+                                animation.resetBehaviours();
+                                // A blink on unlock reads as Leon waking up with the screen.
+                                animation.triggerBlink();
+                            }
                         }
                     }
                 }

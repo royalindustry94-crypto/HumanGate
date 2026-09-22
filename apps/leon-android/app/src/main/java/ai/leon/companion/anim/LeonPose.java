@@ -70,14 +70,6 @@ public final class LeonPose {
         }
     }
 
-    /** Adds {@code other} scaled by {@code weight} onto this pose. */
-    public LeonPose addScaled(LeonPose other, float weight) {
-        for (int i = 0; i < values.length; i++) {
-            values[i] += other.values[i] * weight;
-        }
-        return this;
-    }
-
     /** Clamps every channel into the range the binder can safely consume. */
     public LeonPose clampAll() {
         for (int i = 0; i < values.length; i++) {
@@ -100,10 +92,5 @@ public final class LeonPose {
     private void clamp01(LeonChannel channel) {
         int i = channel.ordinal();
         values[i] = Mathx.clamp01(values[i]);
-    }
-
-    /** Defensive copy, for tests and for snapshotting a transition's start pose. */
-    public float[] toArray() {
-        return values.clone();
     }
 }

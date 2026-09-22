@@ -22,7 +22,7 @@ public final class LeonStateController {
     /** State to return to when a transient state expires or Leon is restored from minimised. */
     private LeonState restoreState = LeonState.IDLE;
     private float transientRemaining;
-    private long enteredAtMillis;
+    private long lastTickNanos;
 
     public LeonState state() {
         return state;
@@ -34,10 +34,6 @@ public final class LeonStateController {
 
     public boolean isMinimised() {
         return state == LeonState.MINIMISED;
-    }
-
-    public long enteredAtMillis() {
-        return enteredAtMillis;
     }
 
     public void addListener(Listener listener) {
@@ -64,7 +60,6 @@ public final class LeonStateController {
         transientRemaining = next.isTransient() ? ATTENTION_HOLD_SECONDS : 0f;
         LeonState previous = state;
         state = next;
-        enteredAtMillis = System.currentTimeMillis();
         for (int i = 0; i < listeners.size(); i++) {
             listeners.get(i).onLeonStateChanged(previous, state);
         }
@@ -98,7 +93,29 @@ public final class LeonStateController {
         return isMinimised() && transientRemaining > 0f;
     }
 
-    /** Advances transient-state timers. Safe to call every frame. */
+    /**
+     * Advances the transient timers by real elapsed time, measured from a monotonic clock.
+     *
+     * <p>Every render surface calls this once per frame, and there can be more than one on screen at
+     * a time (the overlay plus the control centre's preview). Taking the elapsed time from a shared
+     * clock rather than from each caller's frame delta means the first caller in a frame consumes
+     * the elapsed time and the others see almost none, so ATTENTION still holds for
+     * {@link #ATTENTION_HOLD_SECONDS} of wall-clock time however many surfaces are rendering and
+     * whatever frame rates they are running at.
+     */
+    public void tick() {
+        long now = System.nanoTime();
+        if (lastTickNanos == 0L) {
+            lastTickNanos = now;
+            return;
+        }
+        float dt = (now - lastTickNanos) / 1_000_000_000f;
+        lastTickNanos = now;
+        // A long gap (the screen was off) must not skip a transient state outright.
+        update(Math.min(dt, 0.5f));
+    }
+
+    /** Advances transient-state timers by an explicit delta. Used by tests for determinism. */
     public void update(float dtSeconds) {
         if (transientRemaining <= 0f) return;
         transientRemaining -= dtSeconds;
@@ -121,7 +138,6 @@ public final class LeonStateController {
         LeonState previous = state;
         state = persisted;
         transientRemaining = 0f;
-        enteredAtMillis = System.currentTimeMillis();
         if (previous != state) {
             for (int i = 0; i < listeners.size(); i++) {
                 listeners.get(i).onLeonStateChanged(previous, state);

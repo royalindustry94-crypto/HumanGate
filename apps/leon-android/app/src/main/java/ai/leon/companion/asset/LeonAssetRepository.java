@@ -61,6 +61,11 @@ public final class LeonAssetRepository implements LeonArtProvider {
         return requiredKeys.size();
     }
 
+    /** Bitmap memory held by the development rig. Shown in the control centre's diagnostics. */
+    public long developmentArtBytes() {
+        return development.allocatedBytes();
+    }
+
     /** One-line summary for logs and the control centre. */
     public String report() {
         int supplied = requiredKeys.size() - missingFromProduction.size();

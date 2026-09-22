@@ -62,16 +62,6 @@ public final class Mat2D {
         return b * x + d * y + ty;
     }
 
-    /** Rotation of the matrix in degrees, derived from the mapped x axis. */
-    public float rotationDeg() {
-        return (float) Math.toDegrees(Math.atan2(b, a));
-    }
-
-    /** Uniform-ish scale magnitude, used for level-of-detail decisions. */
-    public float scaleMagnitude() {
-        return (float) Math.sqrt(Math.abs(a * d - b * c));
-    }
-
     /** Copies into the 9-element row-major array that android.graphics.Matrix.setValues() wants. */
     public void toMatrixValues(float[] out) {
         if (out == null || out.length < 9) throw new IllegalArgumentException("need float[9]");

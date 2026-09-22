@@ -415,7 +415,11 @@ public final class MainActivity extends Activity
             if (preview != null) {
                 detail += "\nLayers drawn last frame: " + preview.renderer().layersDrawnLastFrame()
                         + " of " + art.requiredLayerCount();
+                int missing = preview.renderer().layersMissingArt();
+                if (missing > 0) detail += " (" + missing + " with no art)";
             }
+            detail += "\nDevelopment rig bitmaps: "
+                    + (art.developmentArtBytes() / 1024L) + " KB";
             artStatus.setText(detail);
         }
         if (conversationStatus != null

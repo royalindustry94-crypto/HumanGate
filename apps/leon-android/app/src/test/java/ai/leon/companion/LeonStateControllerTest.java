@@ -123,6 +123,34 @@ public class LeonStateControllerTest {
     }
 
     @Test
+    public void twoRenderSurfacesDoNotMakeTransientStatesExpireTwiceAsFast() throws Exception {
+        // The overlay and the control centre's preview each tick the shared controller once per
+        // frame. Elapsed time comes from a monotonic clock, so the hold must not be halved.
+        states.poke();
+        assertEquals(LeonState.ATTENTION, states.state());
+        states.tick();
+
+        long deadline = System.nanoTime()
+                + (long) (LeonStateController.ATTENTION_HOLD_SECONDS * 0.4f * 1_000_000_000L);
+        while (System.nanoTime() < deadline) {
+            states.tick();
+            states.tick();
+            Thread.sleep(2L);
+        }
+        assertEquals("two surfaces ticking must not halve the hold",
+                LeonState.ATTENTION, states.state());
+    }
+
+    @Test
+    public void aLongGapWithTheScreenOffDoesNotSkipATransientState() {
+        states.poke();
+        // A single enormous delta, as if the clock had jumped. The state must still be entered and
+        // then expire on the next ticks rather than being skipped in one step.
+        states.update(60f);
+        assertEquals(LeonState.IDLE, states.state());
+    }
+
+    @Test
     public void stateNamesRoundTripForPersistence() {
         for (LeonState state : LeonState.values()) {
             assertEquals(state, LeonState.fromName(state.name(), LeonState.IDLE));

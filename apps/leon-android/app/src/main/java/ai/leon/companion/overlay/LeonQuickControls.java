@@ -22,8 +22,6 @@ public final class LeonQuickControls extends LinearLayout {
         void onHideTemporarily();
 
         void onSettings();
-
-        void onDismiss();
     }
 
     private final Callback callback;
@@ -86,11 +84,6 @@ public final class LeonQuickControls extends LinearLayout {
         });
         LayoutParams lp = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
         addView(item, lp);
-    }
-
-    /** Called by the service when a touch lands outside the card. */
-    public void dismiss() {
-        if (callback != null) callback.onDismiss();
     }
 
     private int dp(float value) {

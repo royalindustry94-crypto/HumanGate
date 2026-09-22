@@ -4,7 +4,6 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
-import android.graphics.RectF;
 
 import ai.leon.companion.asset.LeonArtProvider;
 import ai.leon.companion.rig.Bone;
@@ -29,7 +28,6 @@ public final class LeonRenderer {
     private final Paint layerPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint debugBonePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint debugJointPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final RectF designBounds = new RectF();
 
     private boolean showRigDebug;
     private int layersDrawnLastFrame;
@@ -40,7 +38,6 @@ public final class LeonRenderer {
         if (art == null) throw new IllegalArgumentException("art provider required");
         this.rig = rig;
         this.art = art;
-        designBounds.set(0f, 0f, rig.designWidth, rig.designHeight);
 
         debugBonePaint.setStyle(Paint.Style.STROKE);
         debugBonePaint.setStrokeWidth(2f);
@@ -65,10 +62,6 @@ public final class LeonRenderer {
      */
     public void setShowRigDebug(boolean show) {
         this.showRigDebug = show;
-    }
-
-    public boolean isShowingRigDebug() {
-        return showRigDebug;
     }
 
     public int layersDrawnLastFrame() {
@@ -136,10 +129,5 @@ public final class LeonRenderer {
             }
             canvas.drawCircle(x, y, 3.5f, debugJointPaint);
         }
-    }
-
-    /** Design-space bounds, for callers that need the rig's authored size. */
-    public RectF designBounds() {
-        return designBounds;
     }
 }

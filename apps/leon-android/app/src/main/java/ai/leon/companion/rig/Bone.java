@@ -61,16 +61,6 @@ public final class Bone {
         return world;
     }
 
-    public int depth() {
-        int d = 0;
-        Bone b = parent;
-        while (b != null) {
-            d++;
-            b = b.parent;
-        }
-        return d;
-    }
-
     @Override
     public String toString() {
         return "Bone{" + name + "}";

@@ -109,7 +109,7 @@ public final class LeonAnimationController implements LeonStateController.Listen
     public void update(float dtSeconds) {
         float dt = Mathx.clamp(dtSeconds, 0f, MAX_FRAME_SECONDS);
 
-        states.update(dt);
+        states.tick();
 
         if (inTransition) {
             transitionElapsed += dt;
@@ -226,7 +226,10 @@ public final class LeonAnimationController implements LeonStateController.Listen
         nod.setAutoNod(p.nodAuto > 0.5f, p.nodMin, p.nodMax);
     }
 
-    /** Returns every behaviour to a clean start without changing state. */
+    /**
+     * Returns every behaviour to a clean start without changing state. Called when the screen comes
+     * back on, so timers that expired while it was off do not all fire at once on the first frame.
+     */
     public void resetBehaviours() {
         breath.reset();
         blink.reset();
