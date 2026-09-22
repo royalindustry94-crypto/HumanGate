@@ -111,15 +111,11 @@ jobs:
           script: |
             mkdir -p apps/leon-android/app/build/reports/leon-preview
             adb install -r apps/leon-android/app/build/outputs/apk/debug/app-debug.apk
-            adb shell am start -W -n ai.leon.companion/.MainActivity \
-              --ez ai.leon.companion.VISUAL_HOST true \
-              --es ai.leon.companion.TEST_POSE idle \
-              --ez ai.leon.companion.DISABLE_RANDOM true
+            adb shell am start -W -n ai.leon.companion/.MainActivity --ez ai.leon.companion.VISUAL_HOST true --es ai.leon.companion.TEST_POSE idle --ez ai.leon.companion.DISABLE_RANDOM true
             sleep 3
             adb exec-out screencap -p > apps/leon-android/app/build/reports/leon-preview/emulator-main.png
             adb shell appops set ai.leon.companion SYSTEM_ALERT_WINDOW allow
-            adb shell am start -W -n ai.leon.companion/.MainActivity \
-              --ez ai.leon.companion.OVERLAY_HOST true
+            adb shell am start -W -n ai.leon.companion/.MainActivity --ez ai.leon.companion.OVERLAY_HOST true
             adb shell am start-foreground-service -n ai.leon.companion/.overlay.LeonOverlayService
             sleep 3
             adb exec-out screencap -p > apps/leon-android/app/build/reports/leon-preview/emulator-overlay.png
