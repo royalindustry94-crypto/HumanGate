@@ -8,6 +8,8 @@ import org.junit.Test;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class ProductionAssetContractTest {
     private static File generated(String name) {
@@ -26,8 +28,7 @@ public class ProductionAssetContractTest {
     }
 
     private static double number(String json, String key) {
-        java.util.regex.Matcher m = java.util.regex.Pattern
-                .compile("\\"" + key + "\\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?)")
+        Matcher m = Pattern.compile("\"" + key + "\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?)")
                 .matcher(json);
         if (!m.find()) throw new AssertionError("Missing manifest key " + key);
         return Double.parseDouble(m.group(1));
