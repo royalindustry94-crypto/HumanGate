@@ -3,6 +3,8 @@ package ai.leon.companion.asset;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Matrix;
+import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.util.Log;
@@ -87,6 +89,7 @@ public final class PhotoLayerArtProvider implements LeonArtProvider {
                     LeonRig.Art.EAR_L, LeonRig.Art.EAR_R, LeonRig.Art.EARRING));
 
     private final Bitmap source;
+    private final Bitmap alignedSource;
     private final PhotoAlignment alignment;
     private final Map<String, RectF> designRects = new HashMap<>();
     private final Map<String, Bitmap> cache = new HashMap<>();
@@ -95,6 +98,7 @@ public final class PhotoLayerArtProvider implements LeonArtProvider {
     private PhotoLayerArtProvider(Bitmap source, PhotoAlignment alignment, Rig rig) {
         this.source = source;
         this.alignment = alignment;
+        this.alignedSource = alignAndKeySource(source, alignment, rig);
         for (RigPart part : rig.parts()) {
             if (designRects.containsKey(part.artKey)) continue;
             // The layer's own rectangle in design space, taken from its pivot and size.
@@ -238,41 +242,16 @@ public final class PhotoLayerArtProvider implements LeonArtProvider {
             return transparent;
         }
 
-        // Map the layer's design-space bounds ONCE into source pixels. The resulting bitmap is
-        // deliberately rasterised back at DESIGN size, not source-image size. Keeping the cached
-        // layer in design pixels prevents the source scale (often ~2.28x on the supplied Leon
-        // render) from being applied a second time by LeonRenderer's bitmap-to-part transform.
-        float sourceLeftF = alignment.sourceX(design.left);
-        float sourceTopF = alignment.sourceY(design.top);
-        float sourceRightF = alignment.sourceX(design.right);
-        float sourceBottomF = alignment.sourceY(design.bottom);
-
+        // Every layer samples from ONE already-aligned design-space master. The old implementation
+        // independently rescaled each rectangle from the source image, which produced visible seams
+        // between Leon's torso/arms/legs even when the coordinates were otherwise correct.
         int outW = Math.max(1, Math.round(design.width()));
         int outH = Math.max(1, Math.round(design.height()));
         Bitmap layer = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(layer);
-
-        int srcLeft = Math.max(0, (int) Math.floor(sourceLeftF));
-        int srcTop = Math.max(0, (int) Math.floor(sourceTopF));
-        int srcRight = Math.min(source.getWidth(), (int) Math.ceil(sourceRightF));
-        int srcBottom = Math.min(source.getHeight(), (int) Math.ceil(sourceBottomF));
-
-        if (srcRight > srcLeft && srcBottom > srcTop) {
-            float sourceSpanX = Math.max(1f, sourceRightF - sourceLeftF);
-            float sourceSpanY = Math.max(1f, sourceBottomF - sourceTopF);
-            int dstLeft = Math.round((srcLeft - sourceLeftF) / sourceSpanX * outW);
-            int dstTop = Math.round((srcTop - sourceTopF) / sourceSpanY * outH);
-            int dstRight = Math.round((srcRight - sourceLeftF) / sourceSpanX * outW);
-            int dstBottom = Math.round((srcBottom - sourceTopF) / sourceSpanY * outH);
-            canvas.drawBitmap(source,
-                    new Rect(srcLeft, srcTop, srcRight, srcBottom),
-                    new Rect(dstLeft, dstTop, dstRight, dstBottom), null);
-        }
-
-        // Remove only edge-connected green-screen pixels. This preserves Leon's intentional green
-        // jewellery/details because an isolated green gem is not connected to the crop boundary.
-        // It also de-spills the one-pixel edge so the overlay does not glow neon green.
-        keyChromaGreen(layer);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        canvas.translate(-design.left, -design.top);
+        canvas.drawBitmap(alignedSource, 0f, 0f, paint);
 
         if (LeonRig.Art.PHOTO_BACKFILL.equals(artKey)) {
             clearAnimatedPartHoles(layer);
@@ -280,6 +259,31 @@ public final class PhotoLayerArtProvider implements LeonArtProvider {
 
         cache.put(artKey, layer);
         return layer;
+    }
+
+    private static Bitmap alignAndKeySource(Bitmap source, PhotoAlignment alignment, Rig rig) {
+        Bitmap keyed = source.copy(Bitmap.Config.ARGB_8888, true);
+        if (keyed == null) {
+            throw new IllegalStateException("Could not make Leon source mutable for chroma keying");
+        }
+        keyChromaGreen(keyed);
+
+        Bitmap aligned = Bitmap.createBitmap(
+                Math.max(1, Math.round(rig.designWidth)),
+                Math.max(1, Math.round(rig.designHeight)),
+                Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(aligned);
+        Matrix matrix = new Matrix();
+        float inv = 1f / alignment.scale;
+        matrix.setValues(new float[]{
+                inv, 0f, -alignment.originX * inv,
+                0f, inv, -alignment.originY * inv,
+                0f, 0f, 1f
+        });
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        canvas.drawBitmap(keyed, matrix, paint);
+        keyed.recycle();
+        return aligned;
     }
 
     private void clearAnimatedPartHoles(Bitmap bitmap) {
@@ -397,6 +401,7 @@ public final class PhotoLayerArtProvider implements LeonArtProvider {
             if (b != null && !b.isRecycled()) b.recycle();
         }
         cache.clear();
+        if (!alignedSource.isRecycled()) alignedSource.recycle();
         if (!source.isRecycled()) source.recycle();
     }
 }
