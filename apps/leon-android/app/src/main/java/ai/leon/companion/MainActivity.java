@@ -418,7 +418,7 @@ public final class MainActivity extends Activity
                 int missing = preview.renderer().layersMissingArt();
                 if (missing > 0) detail += " (" + missing + " with no art)";
             }
-            detail += "\nDevelopment rig bitmaps: "
+            detail += "\nArtwork bitmaps: "
                     + (art.developmentArtBytes() / 1024L) + " KB";
             artStatus.setText(detail);
         }

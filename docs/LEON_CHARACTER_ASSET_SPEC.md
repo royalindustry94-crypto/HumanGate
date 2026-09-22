@@ -1,11 +1,16 @@
 # Leon character asset specification
 
-What an artist or a rigging tool must deliver to replace the bundled
-development rig with finished Leon artwork, and how to drop it in.
+How to replace Leon's built-in artwork with custom art, and what a file set has
+to contain.
 
-The Android overlay, the skeleton, the animation state machine and the
-lip-sync contract are already complete and do not change when the art is
-replaced. Only the 40 image files below are outstanding.
+**This is optional.** Leon ships complete: `ProceduralLeonArt` draws all 40
+layers in code, and `docs/leon-preview/` shows what that looks like. This
+document is for replacing him with artist-drawn work — a different style, a
+licensed likeness, a higher-fidelity render.
+
+The overlay, skeleton, state machine and lip-sync contract do not change when
+the art is replaced. Custom files win per layer, so a partial set is fine: any
+layer you do not supply keeps the built-in drawing.
 
 ## 1. Character identity — do not change
 
@@ -32,7 +37,7 @@ Leon is one specific person. The art must match him, not reinterpret him.
 
 ### Branding note
 
-The development rig draws a generic three-stripe sleeve detail and **no brand
+The built-in artwork draws a generic three-stripe sleeve detail and **no brand
 logo or wordmark**. Reproducing a trademark in shipped artwork is a product and
 legal decision, not an engineering default. If licensed Adidas branding is to
 appear, that call and the licence belong to the product owner; the rig itself is
@@ -121,7 +126,7 @@ the art must be composed so that point lands in the anatomically correct place.
   **bottom** edge. This is the single most important layer to get right; a lid
   drawn centred will not blink correctly.
 - **`sunglasses.png`** — the lenses must be **translucent**, around 80%
-  opacity (the development rig uses `argb(206, 12, 14, 20)`). Fully opaque
+  opacity (the built-in artwork uses `argb(206, 12, 14, 20)`). Fully opaque
   lenses hide the blink and the gaze, which the acceptance test requires to be
   visible on a phone.
 - **`hoodie_body.png`** — must carry a **transparent V-neck cut-out** at the
@@ -151,7 +156,7 @@ the art must be composed so that point lands in the anatomically correct place.
 
 ## 4. Colour reference
 
-`ai.leon.companion.asset.LeonPalette` holds the development rig's exact values.
+`ai.leon.companion.asset.LeonPalette` holds the built-in artwork's exact values.
 Treat them as a starting point to match, not as a constraint — but keep the
 hoodie, pants and lenses genuinely dark, and the sneakers genuinely white, so
 Leon's silhouette stays readable at the minimised size (62 x 124 dp).
@@ -190,11 +195,10 @@ Two locations, checked in this order:
 
 `.webp` is accepted as well as `.png`.
 
-## 7. Partial delivery is visible, not hidden
+## 7. Mixed sets are reported, not hidden
 
-`LeonAssetRepository` resolves each layer independently: a real art file wins,
-otherwise the development rig draws that layer. It does **not** present a
-partial set as finished — `report()` names how many layers came from real art
-and lists what is still missing, and the control centre shows that line on
-screen. So a half-delivered Leon looks half-delivered, and the milestone cannot
-be quietly declared complete on placeholder art.
+`LeonAssetRepository` resolves each layer independently: a custom art file wins,
+otherwise the built-in artwork draws that layer. `report()` names how many layers
+came from each source and lists any the custom set does not cover, and the
+control centre shows that line on screen — so a half-replaced Leon is visibly
+half-replaced rather than silently mixed.

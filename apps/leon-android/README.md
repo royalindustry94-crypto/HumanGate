@@ -55,16 +55,22 @@ Two indirections keep the character replaceable:
 
 ## Character artwork
 
-The character currently on screen is drawn by `DevRigArt`, which renders all 40
-art keys procedurally from Leon's specification. Every layer is a genuinely
-separate bitmap on its own bone, so all the independent motion is real — but it
-is a development rig, and the control centre says so.
+Leon is drawn in code by `ProceduralLeonArt`, which renders all 40 layers from
+his character specification — bald head with a wrap-around skull tattoo,
+translucent dark sunglasses, neck / chest / arm tattoos, earring and ring, a
+multicolour gemstone necklace, a black hoodie worn hood-down, black pants and
+white sneakers. No PNGs ship with the app, so he is resolution-independent, adds
+nothing to the APK, and his appearance is under version control.
 
-**`docs/LEON_CHARACTER_ASSET_SPEC.md`** is the brief for the finished artwork:
-every file, its size, its pivot, and the layers with special requirements (the
-eyelid's top pivot, the hoodie's transparent V-neck, translucent lenses).
-Dropping those PNGs into `app/src/main/assets/leon/` replaces the character with
-no code change.
+See **`docs/leon-preview/`** for frames rendered straight from the shipped rig,
+including a blink strip and the viseme set, so he can be reviewed without a
+device.
+
+Custom artwork can replace him layer by layer — drop PNGs into
+`app/src/main/assets/leon/` and they win per layer, no code change.
+**`docs/LEON_CHARACTER_ASSET_SPEC.md`** gives every file, size and pivot, plus
+the layers with non-obvious requirements (the eyelid's top pivot, the hoodie's
+transparent V-neck, translucent lenses).
 
 ## Build and test
 

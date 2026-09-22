@@ -135,10 +135,12 @@ renderer are replaced.
 
 ## 7. Known gaps at the end of this milestone
 
-- **The production Leon artwork does not exist yet.** The character is drawn by
-  `DevRigArt`, which renders all 41 art keys procedurally from the character
-  spec. This is a development rig, and the control centre says so on screen.
-  See `LEON_CHARACTER_ASSET_SPEC.md` for exactly what is needed to replace it.
+- **Leon's artwork is procedural and complete.** `ProceduralLeonArt` draws all
+  40 layers in code from the character spec; no PNGs ship with the app. This
+  started as a placeholder and was finished into the shipped character after an
+  offline render harness made it possible to actually look at the output — see
+  `leon-preview/` for frames taken from the shipped rig. Custom art can still
+  replace him per layer; `LEON_CHARACTER_ASSET_SPEC.md` says how.
 - **No voice and no AI backend**, by instruction.
   `LeonConversationController` reports `NO_BACKEND` rather than fabricating a
   reply, and `LeonLipSyncController.onViseme(viseme, intensity, durationMs)` is

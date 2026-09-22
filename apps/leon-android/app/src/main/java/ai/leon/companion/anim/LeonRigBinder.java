@@ -46,7 +46,8 @@ public final class LeonRigBinder {
     private static final float WEIGHT_SHIFT_X = 8f;
     private static final float WEIGHT_SHIFT_DEG = 2.2f;
     private static final float ARM_SWING_DEG = 26f;
-    private static final float ELBOW_DEG = 46f;
+    /** A real elbow flexes past 140 degrees; 46 was far too little for a hand-to-chin pose. */
+    private static final float ELBOW_DEG = 105f;
     private static final float HAND_RAISE_DEG = 30f;
     private static final float HOOD_SWAY_DEG = 6f;
     private static final float NECKLACE_SWAY_DEG = 9f;

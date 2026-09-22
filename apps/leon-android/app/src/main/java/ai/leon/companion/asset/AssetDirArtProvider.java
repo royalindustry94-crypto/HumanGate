@@ -25,7 +25,7 @@ import java.util.Set;
  *   <li>{@code assets/leon/} inside the APK — the shipped production art.</li>
  * </ol>
  *
- * <p>This is the production art path. It is intentionally separate from {@link DevRigArt}: the
+ * <p>This is the production art path. It is intentionally separate from {@link ProceduralLeonArt}: the
  * repository reports which provider each layer came from rather than silently mixing them, so a
  * half-delivered art set is visible instead of looking like finished work.
  */

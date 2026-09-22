@@ -8,6 +8,7 @@ on:
       - ".github/workflows/leon-android-apk.yml"
   push:
     branches:
+      - main
       - "claude/**"
       - "feature/leon-**"
     paths:

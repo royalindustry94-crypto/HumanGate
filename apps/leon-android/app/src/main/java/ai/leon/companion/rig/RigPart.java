@@ -6,7 +6,7 @@ package ai.leon.companion.rig;
  * right shoulder and the hood are separate parts on separate bones, not regions of one bitmap.
  *
  * <p>{@link #artKey} is a logical name. The render layer resolves it to a bitmap, either from the
- * bundled development rig or from swapped-in production art, so upgrading Leon's visuals never
+ * Leon's built-in artwork or from custom art files, so upgrading Leon's visuals never
  * touches the rig or the overlay.
  */
 public final class RigPart {
