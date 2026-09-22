@@ -2,6 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
+def leonVersionCode = (project.findProperty('leonVersionCode') ?: '3') as int
+
 android {
     namespace 'ai.leon.companion'
     compileSdk 35
@@ -10,11 +12,26 @@ android {
         applicationId 'ai.leon.companion'
         minSdk 26
         targetSdk 35
-        versionCode 2
-        versionName '0.2.0'
+        versionCode leonVersionCode
+        versionName '0.3.0'
+    }
+
+    // Test builds use a dedicated, public debug-only key committed with the project.
+    // It is intentionally NOT a production signing key. Keeping it stable means each
+    // sideloaded Leon APK can update the previous test build instead of forcing an uninstall.
+    signingConfigs {
+        debug {
+            storeFile file('leon-ci-debug.keystore')
+            storePassword 'leon-debug-only'
+            keyAlias 'leon-debug'
+            keyPassword 'leon-debug-only'
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
             minifyEnabled false
         }
@@ -26,7 +43,6 @@ android {
     }
 
     lint {
-        // A lint regression should fail the build rather than be filtered out of the report.
         warningsAsErrors false
         abortOnError true
     }
