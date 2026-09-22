@@ -43,6 +43,13 @@ public final class ScreenMetrics {
         }
 
         // API 26-29: real display size plus the system bar heights from platform resources.
+        // getDefaultDisplay()/getRealMetrics() are deprecated in favour of WindowMetrics, which the
+        // branch above uses; on these versions they are the only source available.
+        return legacyMetrics(context, windowManager);
+    }
+
+    @SuppressWarnings("deprecation")
+    private static ScreenMetrics legacyMetrics(Context context, WindowManager windowManager) {
         DisplayMetrics dm = new DisplayMetrics();
         windowManager.getDefaultDisplay().getRealMetrics(dm);
         int top = systemDimen(context, "status_bar_height", Math.round(24f * dm.density));

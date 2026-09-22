@@ -66,6 +66,7 @@ public final class MainActivity extends Activity
     private Button minimiseButton;
     private Button rigDebugButton;
     private View settingsSection;
+    private ScrollView scroll;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -113,7 +114,7 @@ public final class MainActivity extends Activity
     // ------------------------------------------------------------------ ui
 
     private View buildUi() {
-        ScrollView scroll = new ScrollView(this);
+        scroll = new ScrollView(this);
         scroll.setBackgroundColor(Color.rgb(9, 9, 12));
 
         LinearLayout root = new LinearLayout(this);
@@ -311,7 +312,14 @@ public final class MainActivity extends Activity
     }
 
     private void revealSettings() {
-        if (settingsSection != null) settingsSection.requestFocus();
+        if (settingsSection == null || scroll == null) return;
+        // Posted so the scroll view has been laid out and the section has a real top.
+        scroll.post(new Runnable() {
+            @Override
+            public void run() {
+                scroll.smoothScrollTo(0, settingsSection.getTop());
+            }
+        });
     }
 
     // ------------------------------------------------------------------ actions

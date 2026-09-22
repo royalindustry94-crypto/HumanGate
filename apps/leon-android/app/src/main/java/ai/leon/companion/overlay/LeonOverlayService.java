@@ -111,11 +111,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
     public static void start(Context context) {
         Intent intent = new Intent(context, LeonOverlayService.class);
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent);
-            } else {
-                context.startService(intent);
-            }
+            context.startForegroundService(intent);
         } catch (Exception e) {
             // Some OEMs block background foreground-service starts until auto-start is allowed.
             Log.w(TAG, "Could not start Leon's overlay service", e);
@@ -126,11 +122,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
         Intent intent = new Intent(context, LeonOverlayService.class);
         intent.setAction(action);
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent);
-            } else {
-                context.startService(intent);
-            }
+            context.startForegroundService(intent);
         } catch (Exception e) {
             Log.w(TAG, "Could not deliver " + action, e);
         }
@@ -512,6 +504,21 @@ public final class LeonOverlayService extends Service implements LeonStateContro
         }
     }
 
+    /**
+     * Brings the control centre forward. {@code extraKey}, when given, is set as a boolean extra so
+     * the activity can open on a particular section.
+     */
+    private void openMainActivity(String extraKey) {
+        Intent intent = new Intent(this, MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (extraKey != null) intent.putExtra(extraKey, true);
+        try {
+            startActivity(intent);
+        } catch (Exception e) {
+            Log.w(TAG, "Could not open Leon's control centre", e);
+        }
+    }
+
     private void dismissQuickControls() {
         if (quickControls == null) return;
         try {
@@ -612,7 +619,6 @@ public final class LeonOverlayService extends Service implements LeonStateContro
     // ------------------------------------------------------------------ notification
 
     private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationChannel channel = new NotificationChannel(CHANNEL_ID,
                 getString(R.string.channel_name), NotificationManager.IMPORTANCE_LOW);
         channel.setDescription(getString(R.string.channel_description));
@@ -626,9 +632,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
                 new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
-        Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                ? new Notification.Builder(this, CHANNEL_ID)
-                : new Notification.Builder(this);
+        Notification.Builder builder = new Notification.Builder(this, CHANNEL_ID);
 
         String text;
         if (blockedReason != null) {
