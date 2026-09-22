@@ -1,0 +1,39 @@
+name: Leon Android APK
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/leon-android/**"
+      - ".github/workflows/leon-android-apk.yml"
+  workflow_dispatch:
+
+jobs:
+  build-leon-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        working-directory: apps/leon-android
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Leon-Companion-debug-apk
+          path: apps/leon-android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
