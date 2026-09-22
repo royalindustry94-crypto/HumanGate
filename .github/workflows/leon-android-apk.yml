@@ -34,6 +34,13 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: Python image tooling
+        run: python3 -m pip install --disable-pip-version-check pillow==11.3.0
+
+      - name: Production asset contract tests
+        working-directory: apps/leon-android/tools
+        run: python3 -m unittest -v test_build_leon_production.py
+
       - name: Unit tests
         working-directory: apps/leon-android
         run: gradle :app:testDebugUnitTest --stacktrace
