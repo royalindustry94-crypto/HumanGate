@@ -67,17 +67,25 @@ public final class MainActivity extends Activity
     private Button rigDebugButton;
     private View settingsSection;
     private ScrollView scroll;
+    private boolean visualTestHost;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         runtime = LeonRuntime.get(this);
         prefs = runtime.prefs();
-        setContentView(buildUi());
+        visualTestHost = DebugTestHooks.isVisualHost(getIntent())
+                || DebugTestHooks.isOverlayHost(getIntent());
+        if (visualTestHost) {
+            setContentView(buildVisualTestHost(DebugTestHooks.isOverlayHost(getIntent())));
+        } else {
+            setContentView(buildUi());
+        }
         runtime.states().addListener(this);
         runtime.conversation().setListener(this);
-        maybeAskNotificationPermission();
-        if (getIntent() != null && getIntent().hasExtra(EXTRA_OPEN_SETTINGS)) revealSettings();
+        if (!visualTestHost) maybeAskNotificationPermission();
+        if (!visualTestHost && getIntent() != null
+                && getIntent().hasExtra(EXTRA_OPEN_SETTINGS)) revealSettings();
     }
 
     @Override
@@ -91,7 +99,7 @@ public final class MainActivity extends Activity
     protected void onResume() {
         super.onResume();
         if (preview != null) preview.setPaused(false);
-        refresh();
+        if (!visualTestHost) refresh();
     }
 
     @Override
@@ -220,6 +228,27 @@ public final class MainActivity extends Activity
         card.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(316)));
         return card;
+    }
+
+    private View buildVisualTestHost(boolean overlayOnly) {
+        FrameLayout host = new FrameLayout(this);
+        host.setBackgroundColor(Color.rgb(1, 2, 3));
+        if (overlayOnly) return host;
+
+        LeonState requested = DebugTestHooks.requestedState(getIntent());
+        if (requested != null) runtime.states().request(requested);
+
+        rig = LeonRig.build();
+        texture = ProductionLeonTexture.load(this);
+        animation = new LeonAnimationController(rig, runtime.states(), 20260923L);
+        DebugTestHooks.apply(getIntent(), animation);
+        runtime.attachSurface(animation);
+
+        preview = new LeonCharacterView(this, rig, animation, texture);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(280), dp(560));
+        lp.gravity = Gravity.CENTER;
+        host.addView(preview, lp);
+        return host;
     }
 
     private View stateButtons(LeonState... states) {
@@ -429,7 +458,7 @@ public final class MainActivity extends Activity
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                refresh();
+                if (!visualTestHost) refresh();
             }
         });
     }
@@ -440,7 +469,7 @@ public final class MainActivity extends Activity
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (conversationStatus == null) return;
+                if (visualTestHost || conversationStatus == null) return;
                 conversationStatus.setText(detail != null ? detail : ("Conversation: " + status));
             }
         });
