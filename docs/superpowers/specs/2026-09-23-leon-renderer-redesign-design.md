@@ -30,42 +30,33 @@ Spine has mature skeletal runtimes, but its authoring/runtime licensing and edit
 
 ## Selected architecture
 
-Use a **self-contained preprocessed sprite + mesh puppet renderer** inside the existing Android app, borrowing the proven concepts from Rive: clean transparent raster layers, bones, weighted/deformable regions, state-driven animation and deterministic asset contracts.
+Use a **self-contained full-body weighted bitmap-mesh puppet renderer** inside the existing Android app, borrowing the proven concepts from Rive raster meshes: one exact transparent Leon texture, a low-density deformation mesh, bone-driven vertex weights, state-driven animation and deterministic visual contracts.
 
-No third-party animation runtime is required for this repair.
+This is deliberately better than sprite slicing for Leon: the full character remains one continuous texture, so the rest pose is pixel-identical to the keyed master and there are no neck/shoulder/hip/knee seams to hide. No third-party animation runtime is required for this repair.
 
-### Principle 1 — Never slice Leon at runtime
+### Principle 1 — Never slice Leon into body sprites
 
-The green-screen master is converted before runtime into a set of transparent production assets. Runtime code only loads already-clean assets.
+The green-screen master is converted at build time into **one transparent production texture**. Runtime code never crops rectangular body parts and never mixes overlapping sprite slices.
 
-Required production assets:
+The production visual payload is:
 
-- head
-- torso/hood
-- left upper arm
-- left forearm/hand
-- right upper arm
-- right forearm/hand
-- left thigh
-- left shin
-- left shoe
-- right thigh
-- right shin
-- right shoe
-- seam/backfill layer containing only pixels that must remain fixed to preserve the exact rest-pose silhouette
+- one keyed full-body Leon texture;
+- one mesh definition (grid topology + canonical vertex positions);
+- one vertex-weight definition mapping mesh vertices to the existing Leon bones;
+- one manifest containing source dimensions/hash, canonical bounds and validation values.
 
-The part masks must be a partition of the keyed source. No two production layers may independently contain the same face/jewellery/tattoo region.
+At rest, the mesh vertices are exactly their canonical positions, so the rendered character is the same continuous image as the production texture.
 
 ### Principle 2 — Exact rest-pose reconstruction is a release gate
 
-The build pipeline must reconstruct Leon from all production layers at the canonical rest pose and compare it against the keyed master.
+The build pipeline renders the production mesh at its canonical rest pose and compares it against the keyed master.
 
 The test fails when:
 
 - the full-body alpha bounding box does not reach the expected crown and soles;
-- there are uncovered opaque pixels;
-- there is excessive overlap;
 - reconstruction differs materially from the keyed master;
+- any mesh cell folds/inverts at rest;
+- the texture/manifest dimensions or hash do not match;
 - green spill exceeds the allowed threshold.
 
 This prevents another APK where CI is green but Leon is missing half his body.
@@ -100,11 +91,11 @@ Minimum independent motion for this milestone:
 
 A single whole-body scale/translate loop does not count as character animation.
 
-### Principle 5 — Mesh deformation only where it improves seams
+### Principle 5 — Weighted full-body mesh deformation
 
-Use Android bitmap meshes for soft deformation around torso/shoulders/neck where rigid rotations would expose gaps. Limbs remain rigid or lightly deformed unless a visible artifact requires more.
+Use Android `Canvas.drawBitmapMesh` for the entire keyed Leon texture. The mesh is low-density and each vertex blends the transforms of nearby Leon bones. Head vertices follow the head, torso vertices blend chest/spine/hips, side upper-body vertices blend the appropriate arm chain, and lower-body vertices blend hips/thigh/shin/foot.
 
-Keep mesh density low for battery and overlay performance.
+Motion amplitudes remain intentionally subtle. The goal is a living companion, not rubber-body deformation. Mesh density and frame cadence stay low enough for an always-on overlay.
 
 ### Principle 6 — Animation state contract remains stable
 
@@ -140,43 +131,44 @@ The renderer consumes state outputs. Voice remains out of scope until the visual
 1. Decode the bundled Leon master.
 2. Chroma-key only background-connected green.
 3. De-spill edge contamination.
-4. Generate deterministic alpha masks for all body regions.
-5. Feather only internal seam boundaries, never exterior silhouette boundaries.
-6. Export transparent WebP/PNG layer assets into `assets/leon/production/`.
-7. Generate an asset manifest containing source dimensions, source hash, layer bounds, pivots and expected rest-pose coordinates.
-8. Reconstruct the rest pose from exported layers.
-9. Produce preview PNGs as CI artifacts.
+4. Export one transparent production texture into the generated Android assets directory.
+5. Generate a deterministic mesh/weight manifest containing source hash, dimensions, canonical alpha bounds, grid dimensions, canonical vertex positions and bone weights.
+6. Render the canonical mesh at rest and compare it with the keyed production texture.
+7. Render deterministic state previews from the same production renderer path.
+8. Publish previews as CI artifacts.
 
-The Android app must not perform steps 2–8 on every launch.
+The Android app must not perform chroma keying or asset authoring on launch.
 
 ## Renderer changes
 
-Create a new production provider and renderer path:
+Create a new production texture + mesh renderer path:
 
-- `ProductionLeonArtProvider` — loads preprocessed assets and manifest.
-- `LeonPuppetRenderer` — draws the layer stack, applies bone transforms and limited mesh deformation.
-- `LeonVisualContract` — validates required production assets and rejects mixed/fallback mode.
+- `ProductionLeonTexture` — loads the generated transparent full-body texture and manifest.
+- `LeonMeshRig` — owns canonical mesh vertices and per-vertex bone weights.
+- `LeonPuppetRenderer` — deforms the mesh from solved bone transforms and draws it with `Canvas.drawBitmapMesh`.
+- `LeonVisualContract` — validates that production mode has the real texture/manifest and cannot fall through to procedural character art.
 - Existing `LeonStateController` / `LeonAnimationController` remain the animation source.
 
-`PhotoLayerArtProvider` is removed from the production path after parity tests pass.
+`PhotoLayerArtProvider` and layered `LeonRenderer` are removed from the production path after parity tests pass.
 
 ## Required automated verification
 
 ### Asset contract tests
 
 - bundled source dimensions/hash match manifest;
-- every required layer exists;
-- no production layer is empty;
-- left/right limbs use distinct assets;
+- production texture exists and is non-empty;
+- manifest source hash/dimensions match the bundled master;
+- mesh grid dimensions and vertex count are exact;
+- every vertex's bone weights sum to 1 within tolerance;
 - full reconstructed alpha bounds include head and shoes;
 - green-spill threshold passes;
-- no production art request resolves to `ProceduralLeonArt`.
+- production mode never resolves to `ProceduralLeonArt`.
 
 ### Rest-pose image test
 
-Build a full-frame transparent Leon PNG from the actual production layers and compare it with the keyed master.
+Render a full-frame transparent Leon PNG through the production mesh at canonical rest pose and compare it with the keyed master.
 
-The allowed difference is restricted to deliberately feathered internal seams.
+At rest the allowed difference is effectively zero apart from bitmap filtering/encoding tolerance.
 
 ### Animation snapshot tests
 
