@@ -22,28 +22,28 @@ import java.util.List;
  */
 public final class LeonRigBinder {
     // Motion limits in design-space units / degrees. Tuned to stay inside the rig's silhouette.
-    private static final float HEAD_YAW_SHIFT = 15f;
+    private static final float HEAD_YAW_SHIFT = 11f;
     private static final float HEAD_YAW_SQUASH = 0.07f;
-    private static final float HEAD_PITCH_SHIFT = 11f;
+    private static final float HEAD_PITCH_SHIFT = 9f;
     private static final float HEAD_ROLL_DEG = 11f;
-    private static final float FACE_PARALLAX_X = 9f;
-    private static final float FACE_PARALLAX_Y = 6f;
+    private static final float FACE_PARALLAX_X = 7f;
+    private static final float FACE_PARALLAX_Y = 5f;
     private static final float NECK_YAW_DEG = 4f;
-    private static final float GAZE_X = 6.5f;
-    private static final float GAZE_Y = 4f;
+    private static final float GAZE_X = 5f;
+    private static final float GAZE_Y = 3f;
     private static final float LID_OPEN_SCALE = 0.05f;
-    private static final float BROW_RAISE_Y = 9f;
-    private static final float BROW_LOWER_Y = 5f;
+    private static final float BROW_RAISE_Y = 7f;
+    private static final float BROW_LOWER_Y = 4f;
     private static final float BROW_ANGLE_DEG = 9f;
     private static final float JAW_DEG = 13f;
     private static final float BREATH_CHEST_Y = 0.038f;
     private static final float BREATH_CHEST_X = 0.022f;
-    private static final float BREATH_LIFT = 4.5f;
+    private static final float BREATH_LIFT = 3.5f;
     private static final float SHOULDER_DEG = 8f;
-    private static final float SHOULDER_LIFT = 6f;
+    private static final float SHOULDER_LIFT = 5f;
     private static final float SPINE_LEAN_DEG = 4.5f;
     private static final float TORSO_TWIST_SQUASH = 0.05f;
-    private static final float WEIGHT_SHIFT_X = 10f;
+    private static final float WEIGHT_SHIFT_X = 8f;
     private static final float WEIGHT_SHIFT_DEG = 2.2f;
     private static final float ARM_SWING_DEG = 26f;
     private static final float ELBOW_DEG = 46f;
@@ -174,7 +174,7 @@ public final class LeonRigBinder {
 
         float twist = clampSigned(pose.get(LeonChannel.TORSO_TWIST));
         chest.scaleX *= 1f - TORSO_TWIST_SQUASH * Math.abs(twist);
-        chest.offsetX = twist * 5f;
+        chest.offsetX = twist * 4f;
 
         float leanX = clampSigned(pose.get(LeonChannel.TORSO_LEAN_X));
         float leanY = clampSigned(pose.get(LeonChannel.TORSO_LEAN_Y));
