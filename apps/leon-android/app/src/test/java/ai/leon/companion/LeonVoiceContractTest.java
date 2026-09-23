@@ -64,6 +64,26 @@ public class LeonVoiceContractTest {
         assertTrue(activity.contains("Stop voice"));
     }
 
+
+    @Test
+    public void controlCentreSurfacesSpeechStatusAndErrors() throws Exception {
+        String activity = source("ai/leon/companion/MainActivity.java");
+        assertTrue(activity.contains("implements LeonSpeechController.Listener"));
+        assertTrue(activity.contains("runtime.speech().setListener(this)"));
+        assertTrue(activity.contains("onSpeechStatusChanged"));
+    }
+
+    @Test
+    public void perUtteranceRejectionDoesNotDisableFutureSpeech() throws Exception {
+        String speech = source("ai/leon/companion/voice/LeonSpeechController.java");
+        int rejection = speech.indexOf("if (result == TextToSpeech.ERROR)");
+        assertTrue(rejection >= 0);
+        String block = speech.substring(rejection, Math.min(speech.length(), rejection + 700));
+        assertTrue(block.contains("setStatus(Status.ERROR"));
+        assertFalse(block.contains("fail("));
+        assertFalse(block.contains("ready = false"));
+    }
+
     @Test
     public void manifestExposesTtsEngineDiscoveryWithoutNetworkPermission() throws Exception {
         String manifest = manifest();
