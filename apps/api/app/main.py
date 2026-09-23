@@ -18,6 +18,7 @@ from app.api.routes.content_jobs import router as content_jobs_router
 from app.api.routes.content_profile import router as content_profile_router
 from app.api.routes.data_governance import router as data_governance_router
 from app.api.routes.health import router as health_router
+from app.api.routes.leon_voice import router as leon_voice_router
 from app.api.routes.memberships import router as memberships_router
 from app.api.routes.metrics import router as metrics_router
 from app.api.routes.operations_dashboard import router as operations_dashboard_router
@@ -163,3 +164,4 @@ app.include_router(concurrency_router)
 app.include_router(workers_machine_router)
 app.include_router(workers_admin_router)
 app.include_router(data_governance_router)
+app.include_router(leon_voice_router)
