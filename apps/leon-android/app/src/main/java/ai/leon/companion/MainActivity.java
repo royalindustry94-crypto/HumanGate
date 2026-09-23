@@ -33,6 +33,7 @@ import ai.leon.companion.rig.Rig;
 import ai.leon.companion.state.LeonConversationController;
 import ai.leon.companion.state.LeonState;
 import ai.leon.companion.state.LeonStateController;
+import ai.leon.companion.voice.LeonSpeechController;
 
 /**
  * Leon's control centre: a live preview of the character, the overlay's status, the state-machine
@@ -43,7 +44,8 @@ import ai.leon.companion.state.LeonStateController;
  * the same state machine the overlay is animating — not a local copy of it.
  */
 public final class MainActivity extends Activity
-        implements LeonStateController.Listener, LeonConversationController.Listener {
+        implements LeonStateController.Listener, LeonConversationController.Listener,
+        LeonSpeechController.Listener {
     public static final String EXTRA_OPEN_SETTINGS = "ai.leon.companion.extra.OPEN_SETTINGS";
 
     private static final int OVERLAY_REQUEST = 1201;
@@ -83,6 +85,7 @@ public final class MainActivity extends Activity
         }
         runtime.states().addListener(this);
         runtime.conversation().setListener(this);
+        if (!visualTestHost) runtime.speech().setListener(this);
         if (DebugTestHooks.shouldStartOverlay(getIntent())) {
             // CI cannot shell-start this service because it is intentionally non-exported.
             // Start it from Leon's own UID instead, only behind a DEBUG-gated test extra.
@@ -119,6 +122,7 @@ public final class MainActivity extends Activity
     protected void onDestroy() {
         runtime.states().removeListener(this);
         runtime.conversation().setListener(null);
+        if (!visualTestHost) runtime.speech().setListener(null);
         if (animation != null) runtime.detachSurface(animation);
         if (preview != null) preview.release();
         if (texture != null) texture.close();
@@ -480,9 +484,10 @@ public final class MainActivity extends Activity
             artStatus.setText(detail);
         }
         if (conversationStatus != null
-                && runtime.conversation().status() == LeonConversationController.Status.NO_BACKEND) {
+                && runtime.conversation().status() == LeonConversationController.Status.NO_BACKEND
+                && runtime.speech().status() == LeonSpeechController.Status.READY) {
             conversationStatus.setText("No AI backend is attached to this build yet. "
-                    + "Leon will still listen, think and speak on demand.");
+                    + "Leon will still speak any text you type.");
         }
     }
 
@@ -504,6 +509,18 @@ public final class MainActivity extends Activity
             public void run() {
                 if (visualTestHost || conversationStatus == null) return;
                 conversationStatus.setText(detail != null ? detail : ("Conversation: " + status));
+            }
+        });
+    }
+
+    @Override
+    public void onSpeechStatusChanged(final LeonSpeechController.Status status,
+                                      final String detail) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (visualTestHost || conversationStatus == null) return;
+                conversationStatus.setText(detail != null ? detail : ("Voice: " + status));
             }
         });
     }
