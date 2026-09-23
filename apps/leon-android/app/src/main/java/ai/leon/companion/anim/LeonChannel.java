@@ -68,6 +68,16 @@ public enum LeonChannel {
     HAND_L_RAISE,
     HAND_R_RAISE,
 
+    // ---- legs (walking) ----
+    /** Forward/back thigh swing, signed: positive is stepping forward. */
+    THIGH_L_SWING,
+    THIGH_R_SWING,
+    /** Knee bend, 0..1: only bends forward, so this is never signed. */
+    SHIN_L_SWING,
+    SHIN_R_SWING,
+    /** Small vertical hip bob synced to the gait, 0..1. */
+    WALK_BOB,
+
     // ---- secondary motion ----
     HOOD_SWAY,
     NECKLACE_SWAY,

@@ -28,6 +28,7 @@ public final class LeonAnimationController implements LeonStateController.Listen
     private final PostureBehaviour posture;
     private final GestureBehaviour gesture;
     private final NodBehaviour nod;
+    private final WalkBehaviour walk;
 
     private final LeonStateProfile fromProfile = new LeonStateProfile();
     private final LeonStateProfile toProfile = new LeonStateProfile();
@@ -57,6 +58,7 @@ public final class LeonAnimationController implements LeonStateController.Listen
         posture = new PostureBehaviour(seed + 401);
         gesture = new GestureBehaviour(seed + 503);
         nod = new NodBehaviour(seed + 601);
+        walk = new WalkBehaviour(seed + 701);
 
         LeonStateProfile initial = LeonStateProfile.forState(states.state());
         fromProfile.copyFrom(initial);
@@ -75,6 +77,20 @@ public final class LeonAnimationController implements LeonStateController.Listen
 
     public LeonRigBinder binder() {
         return binder;
+    }
+
+    /**
+     * Signed walking intensity, -1..1: +1 is full stride to the right, -1 full stride to the left,
+     * 0 when not walking. The overlay is the only thing that turns this into an actual on-screen
+     * window move (it owns the pixels-per-second speed) -- the rig itself has no notion of screen
+     * position.
+     */
+    public float walkTravelFraction() {
+        return walk.travelFraction();
+    }
+
+    public boolean isWalking() {
+        return walk.isWalking();
     }
 
     /** The pose produced by the most recent {@link #update}. */
@@ -101,6 +117,7 @@ public final class LeonAnimationController implements LeonStateController.Listen
                 || gesture.isGesturing()
                 || nod.isNodding()
                 || blink.isBlinking()
+                || walk.isWalking()
                 || states.state() == LeonState.SPEAKING
                 || states.state() == LeonState.ATTENTION;
     }
@@ -135,6 +152,7 @@ public final class LeonAnimationController implements LeonStateController.Listen
         posture.update(dt, activeProfile.postureWeight, workingPose);
         gesture.update(dt, activeProfile.gestureWeight, workingPose);
         nod.update(dt, activeProfile.nodWeight, workingPose);
+        walk.update(dt, activeProfile.walkWeight, workingPose);
 
         // Speech owns the mouth last, so it wins over the expression underneath it.
         lipSync.update(dt);
@@ -156,6 +174,7 @@ public final class LeonAnimationController implements LeonStateController.Listen
         gaze.lookAt(-relX * 0.8f, relY * 0.6f, 1.2f);
         blink.triggerBlink();
         nod.trigger(0.42f);
+        walk.cancel();
         if (!states.isMinimised()) {
             gesture.trigger(GestureBehaviour.Kind.POINT);
         }
@@ -182,6 +201,12 @@ public final class LeonAnimationController implements LeonStateController.Listen
         if (previous == LeonState.THINKING && holdingChinGesture) {
             gesture.release();
             holdingChinGesture = false;
+        }
+
+        if (current != LeonState.IDLE) {
+            // A walk only belongs to idle time; anything else (a new message, a touch) should pull
+            // Leon's attention back and let the legs settle out rather than keep wandering.
+            walk.cancel();
         }
 
         switch (current) {
@@ -224,6 +249,7 @@ public final class LeonAnimationController implements LeonStateController.Listen
         posture.setShiftInterval(p.postureShiftMin, p.postureShiftMax);
         gesture.setAutoGesture(p.gestureAuto > 0.5f, p.gestureMin, p.gestureMax);
         nod.setAutoNod(p.nodAuto > 0.5f, p.nodMin, p.nodMax);
+        walk.setAutoWalk(p.walkAuto > 0.5f, p.walkMin, p.walkMax);
     }
 
     /**
@@ -238,6 +264,7 @@ public final class LeonAnimationController implements LeonStateController.Listen
         posture.reset();
         gesture.reset();
         nod.reset();
+        walk.reset();
         lipSync.reset();
         holdingChinGesture = false;
     }
