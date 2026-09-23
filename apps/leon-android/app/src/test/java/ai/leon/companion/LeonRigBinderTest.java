@@ -139,20 +139,26 @@ public class LeonRigBinderTest {
     }
 
     @Test
-    public void chinGestureMustNotSwingTheForearmAcrossTheBody() {
+    public void chinGestureStaysWithinTheMeshsRenderSafeJointRange() {
         // The CHIN gesture (hand held near the chin, used by THINKING) drives HAND_R_RAISE and
         // ELBOW_R together, both near their maximum at once. Each channel adds its own rotation to
         // the same forearm bone, so left uncapped the combined rotation swings the forearm and hand
         // past the shoulder and out across the torso instead of stopping near the face -- the
         // "hand held out like a stick" defect reported from a real device screenshot.
+        //
+        // The arm/elbow/hand clamps are deliberately much tighter than real anatomy: rendering the
+        // actual mesh (see LeonMeshRigTest) showed the linear-blend-skinning joints fold into a wedge
+        // of the wrong texture content well before a real elbow's range, because a flat single photo
+        // has no pixels for the inside of a joint at a steep angle. This test only needs to guard the
+        // clamp itself, since LeonMeshRigTest is what actually verifies the render stays clean.
         pose.set(LeonChannel.ELBOW_R, 0.95f);
         pose.set(LeonChannel.HAND_R_RAISE, 0.95f);
         binder.apply(pose);
 
         float forearmRotation = rig.bone(LeonRig.Bones.FOREARM_R).rotationDeg;
-        assertTrue("the forearm must still visibly bend towards the chin", forearmRotation > 60f);
-        assertTrue("a chin gesture must not fold the forearm past a real elbow's range",
-                forearmRotation <= 120f);
+        assertTrue("a chin gesture must still visibly bend the elbow", forearmRotation > 10f);
+        assertTrue("a chin gesture must stay within the mesh's render-safe elbow range",
+                forearmRotation <= 26f);
     }
 
     @Test

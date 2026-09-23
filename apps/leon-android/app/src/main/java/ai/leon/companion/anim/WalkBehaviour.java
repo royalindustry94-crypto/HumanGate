@@ -124,10 +124,13 @@ public final class WalkBehaviour implements LeonBehaviour {
         double twoPi = Math.PI * 2.0;
         float thighL = (float) Math.sin(phase * twoPi);
         float thighR = (float) Math.sin(phase * twoPi + Math.PI);
-        // Knee lift peaks a quarter-cycle ahead of that leg's forward thigh swing, then straightens
-        // as the foot plants -- a real knee only bends while the leg is lifting off the ground.
-        float shinL = Mathx.clamp01((float) Math.sin(phase * twoPi + Math.PI / 2.0));
-        float shinR = Mathx.clamp01((float) Math.sin(phase * twoPi + Math.PI + Math.PI / 2.0));
+        // The knee bends in step with its own leg's forward swing (same phase as the thigh, not
+        // offset) -- a quarter-cycle lead put the knee at full bend exactly when the thigh was
+        // passing through neutral, which left the foot flexed at an odd angle under a vertical
+        // thigh. Tying it to the same phase means the knee lifts as that leg swings forward and
+        // straightens as it swings back, which is what actually reads as a step.
+        float shinL = Mathx.clamp01(thighL);
+        float shinR = Mathx.clamp01(thighR);
         float bob = Math.abs((float) Math.sin(phase * twoPi));
 
         float w = envelope * weight;

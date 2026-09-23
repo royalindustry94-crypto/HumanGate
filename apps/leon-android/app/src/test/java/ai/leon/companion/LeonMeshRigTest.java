@@ -44,8 +44,10 @@ public class LeonMeshRigTest {
         // below it. drawBitmapMesh always draws the quad connecting grid-adjacent rows regardless of
         // which bone(s) they're bound to, so either hard seam stretches into a sliver once the two
         // sides diverge far enough. This measures the worst on-canvas adjacent-row stretch under a
-        // large bend -- the original rigid/unaware binding measures ~13x here; a merely-cosmetic
-        // amount of stretch from real hand motion spread smoothly over several rows measures ~6x.
+        // large bend -- the original rigid/unaware binding measures ~13x here; with the seams blended
+        // and the joint rotations clamped to what the mesh actually renders cleanly (verified by
+        // rendering it, not just this vertex math -- see LeonRigBinder's ARM/ELBOW/HAND_ROTATION_LIMIT
+        // constants), it measures ~2x, i.e. real hand motion rather than a seam artifact.
         LeonMeshRig mesh = LeonMeshRig.createForTest(16, 28);
         LeonRigBinder binder = new LeonRigBinder(mesh.rig());
         LeonPose pose = new LeonPose();
@@ -74,7 +76,46 @@ public class LeonMeshRigTest {
             }
         }
         assertTrue("a bent elbow must not stretch a mesh seam into a sliver, worst on-canvas "
-                + "adjacent-row stretch ratio was " + worstRatio, worstRatio < 10f);
+                + "adjacent-row stretch ratio was " + worstRatio, worstRatio < 4f);
+    }
+
+    @Test
+    public void armSwingAloneDoesNotStretchTheShoulderSeam() {
+        // A third real defect rendering the mesh actually caught: swinging just the arm (no elbow or
+        // hand movement at all -- ARM_R_SWING alone) fanned a fuzzy diagonal smear out of the collar
+        // toward the shoulder. The y<205 block above binds every column to a head/neck/chest blend
+        // without checking side, so an arm-side column just above y=205 was still chest-bound at rest;
+        // swinging the arm without blending that seam stretched the collar/chest toward the arm's new
+        // position. This measures the same worst on-canvas adjacent-row stretch for that isolated
+        // channel -- the unblended shoulder seam measured double digits here before the fix.
+        LeonMeshRig mesh = LeonMeshRig.createForTest(16, 28);
+        LeonRigBinder binder = new LeonRigBinder(mesh.rig());
+        LeonPose pose = new LeonPose();
+        pose.set(LeonChannel.ARM_R_SWING, 0.95f);
+        binder.apply(pose);
+        mesh.updateFromSolvedRig();
+
+        float[] canon = mesh.canonicalVertices();
+        float[] deformed = mesh.deformedVertices();
+        int cols = mesh.meshCols();
+        int rows = mesh.meshRows();
+        float worstRatio = 0f;
+        for (int col = 0; col <= cols; col++) {
+            float colX = canon[col * 2];
+            if (colX < 0f || colX > 384f) continue;
+            for (int row = 0; row < rows; row++) {
+                int i0 = row * (cols + 1) + col;
+                int i1 = (row + 1) * (cols + 1) + col;
+                float restDist = (float) Math.hypot(
+                        canon[i1 * 2] - canon[i0 * 2], canon[i1 * 2 + 1] - canon[i0 * 2 + 1]);
+                if (restDist < 1f) continue;
+                float deformedDist = (float) Math.hypot(
+                        deformed[i1 * 2] - deformed[i0 * 2], deformed[i1 * 2 + 1] - deformed[i0 * 2 + 1]);
+                worstRatio = Math.max(worstRatio, deformedDist / restDist);
+            }
+        }
+        assertTrue("swinging the arm alone must not stretch the shoulder seam, worst on-canvas "
+                + "adjacent-row stretch ratio was " + worstRatio, worstRatio < 3f);
     }
 
     @Test

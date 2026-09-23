@@ -51,16 +51,23 @@ public final class LeonRigBinder {
     // the knee lifting (which does read correctly from the front) and a vertical hip bob, with only a
     // small thigh rotation to keep the knee lift looking connected to the hip instead of floating.
     private static final float THIGH_SWING_DEG = 9f;
-    private static final float SHIN_SWING_DEG = 34f;
+    private static final float SHIN_SWING_DEG = 16f;
     private static final float WALK_BOB_LIFT = 3.2f;
     private static final float ARM_SWING_DEG = 26f;
-    /** A real elbow flexes past 140 degrees; 46 was far too little for a hand-to-chin pose. */
     private static final float ELBOW_DEG = 105f;
     private static final float HAND_RAISE_DEG = 30f;
-    /** Hard caps on the arm/elbow chain so stacked channels (e.g. CHIN's raise + elbow both near
-     *  max) can never rotate the forearm past the shoulder and out across the body. */
-    private static final float ARM_ROTATION_LIMIT_DEG = 70f;
-    private static final float ELBOW_ROTATION_LIMIT_DEG = 115f;
+    // Hard caps on the arm/elbow/hand chain. These are deliberately tight and were tuned by actually
+    // rendering the mesh (LeonMeshRig's linear-blend-skinning joints, not just checking the angle
+    // number) and looking at the pixels, not derived from anatomy: a real shoulder or elbow can move
+    // much further than this. Past roughly these values the mesh at that joint folds on itself --
+    // drawBitmapMesh renders overlapping triangles as a stray wedge of the wrong texture content,
+    // because a flat single-photo mesh has no real "inside of the joint" pixels to draw once the
+    // blended vertices on either side of a seam cross over. The arm's cap is by far the tightest
+    // because it has the longest lever arm to the hand -- the same few degrees of rotation there move
+    // the forearm/hand mesh much further than the same rotation at the elbow or wrist would.
+    private static final float ARM_ROTATION_LIMIT_DEG = 12f;
+    private static final float ELBOW_ROTATION_LIMIT_DEG = 25f;
+    private static final float HAND_ROTATION_LIMIT_DEG = 8f;
     private static final float HOOD_SWAY_DEG = 6f;
     private static final float NECKLACE_SWAY_DEG = 9f;
 
@@ -250,17 +257,16 @@ public final class LeonRigBinder {
         armR.rotationDeg += handRRaise * ARM_SWING_DEG * 1.1f;
         forearmL.rotationDeg = -Mathx.clamp01(pose.get(LeonChannel.ELBOW_L)) * ELBOW_DEG - handLRaise * 30f;
         forearmR.rotationDeg = Mathx.clamp01(pose.get(LeonChannel.ELBOW_R)) * ELBOW_DEG + handRRaise * 30f;
-        // ELBOW_DEG alone already reaches a hand-to-chin flex; HAND_*_RAISE piles more rotation on
-        // top of it for the same CHIN gesture (raise and elbow both peak near 1 together), so
-        // uncapped this swings the forearm+hand past the shoulder and across the body instead of
-        // stopping near the face -- the "hand held out like a stick" defect. Clamp to what a real
-        // shoulder/elbow can actually reach.
+        // Clamp every joint in the chain to what the mesh can actually render cleanly (see the
+        // constants above) -- ELBOW_DEG/ARM_SWING_DEG/HAND_RAISE_DEG describe the anatomy a gesture
+        // is aiming for, not what the single-photo mesh can survive at that joint, so the raw values
+        // computed above routinely overshoot the render-safe range and have to be capped afterwards.
         armL.rotationDeg = Mathx.clamp(armL.rotationDeg, -ARM_ROTATION_LIMIT_DEG, ARM_ROTATION_LIMIT_DEG);
         armR.rotationDeg = Mathx.clamp(armR.rotationDeg, -ARM_ROTATION_LIMIT_DEG, ARM_ROTATION_LIMIT_DEG);
         forearmL.rotationDeg = Mathx.clamp(forearmL.rotationDeg, -ELBOW_ROTATION_LIMIT_DEG, ELBOW_ROTATION_LIMIT_DEG);
         forearmR.rotationDeg = Mathx.clamp(forearmR.rotationDeg, -ELBOW_ROTATION_LIMIT_DEG, ELBOW_ROTATION_LIMIT_DEG);
-        handL.rotationDeg = -handLRaise * HAND_RAISE_DEG;
-        handR.rotationDeg = handRRaise * HAND_RAISE_DEG;
+        handL.rotationDeg = Mathx.clamp(-handLRaise * HAND_RAISE_DEG, -HAND_ROTATION_LIMIT_DEG, HAND_ROTATION_LIMIT_DEG);
+        handR.rotationDeg = Mathx.clamp(handRRaise * HAND_RAISE_DEG, -HAND_ROTATION_LIMIT_DEG, HAND_ROTATION_LIMIT_DEG);
 
         // ---- secondary motion ----
         hood.rotationDeg = clampSigned(pose.get(LeonChannel.HOOD_SWAY)) * HOOD_SWAY_DEG;
