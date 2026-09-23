@@ -36,8 +36,13 @@ public final class LeonRigBinder {
     private static final float BROW_LOWER_Y = 4f;
     private static final float BROW_ANGLE_DEG = 9f;
     private static final float JAW_DEG = 13f;
-    private static final float BREATH_CHEST_Y = 0.038f;
-    private static final float BREATH_CHEST_X = 0.022f;
+    // Breathing reads primarily through the chest lifting (BREATH_LIFT, offsetY) and a small
+    // vertical scale, not through width -- widening the torso on every inhale is what read as
+    // "the waist shrinks and expands" on a real device, most noticeable right where the hands rest
+    // near the torso at idle. BREATH_CHEST_X is kept only barely above zero so the ribcage doesn't
+    // look perfectly rigid, not as a visible width pulse.
+    private static final float BREATH_CHEST_Y = 0.026f;
+    private static final float BREATH_CHEST_X = 0.003f;
     private static final float BREATH_LIFT = 3.5f;
     private static final float SHOULDER_DEG = 8f;
     private static final float SHOULDER_LIFT = 5f;
