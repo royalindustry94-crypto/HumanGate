@@ -8,6 +8,7 @@ import ai.leon.companion.overlay.LeonPrefs;
 import ai.leon.companion.state.LeonConversationController;
 import ai.leon.companion.state.LeonState;
 import ai.leon.companion.state.LeonStateController;
+import ai.leon.companion.voice.LeonSpeechController;
 
 /**
  * Process-wide singleton holding the one thing the overlay and the control centre must agree on:
@@ -27,9 +28,12 @@ public final class LeonRuntime {
     private final LeonVisemeBus visemeBus = new LeonVisemeBus();
     private final LeonConversationController conversation;
     private final LeonPrefs prefs;
+    private final Context appContext;
+    private LeonSpeechController speech;
 
     private LeonRuntime(Context context) {
-        prefs = new LeonPrefs(context);
+        appContext = context.getApplicationContext();
+        prefs = new LeonPrefs(appContext);
         conversation = new LeonConversationController(stateController, visemeBus);
         stateController.adoptPersisted(prefs.state(), prefs.restoreState());
         stateController.addListener(new LeonStateController.Listener() {
@@ -68,6 +72,15 @@ public final class LeonRuntime {
 
     public LeonPrefs prefs() {
         return prefs;
+    }
+
+    /**
+     * Lazily creates the process-wide voice output. Visual-emulator tests never touch this getter,
+     * so they do not need a TTS engine merely to render Leon.
+     */
+    public synchronized LeonSpeechController speech() {
+        if (speech == null) speech = new LeonSpeechController(appContext, stateController);
+        return speech;
     }
 
     /** Registers a surface's animation controller so shared speech reaches it. */
