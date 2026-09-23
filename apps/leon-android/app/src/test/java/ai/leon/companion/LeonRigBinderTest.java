@@ -177,6 +177,22 @@ public class LeonRigBinderTest {
     }
 
     @Test
+    public void handRaiseAloneDoesNotRotateTheShoulder() {
+        // Reported straight off the device: THINKING's chin/pocket gesture (HAND_R_RAISE) showed a
+        // small skin-toned sliver folding out of the wrist. HAND_R_RAISE used to also swing the arm
+        // bone on top of bending the forearm -- each bone stayed inside its own render-safe clamp,
+        // but a child bone's rotation adds to its parent's in world space, so the two compounded past
+        // what LeonMeshRig's forearm/hand seam can render cleanly. A raise must only bend the elbow.
+        pose.set(LeonChannel.HAND_R_RAISE, 0.95f);
+        binder.apply(pose);
+
+        assertEquals("a hand raise must not also rotate the shoulder", 0f,
+                rig.bone(LeonRig.Bones.ARM_R).rotationDeg, 0.0001f);
+        assertTrue("a hand raise must still visibly bend the elbow",
+                rig.bone(LeonRig.Bones.FOREARM_R).rotationDeg > 10f);
+    }
+
+    @Test
     public void aWeightShiftMovesTheHipsAndCountersWithTheLegs() {
         pose.set(LeonChannel.WEIGHT_SHIFT, 1f);
         binder.apply(pose);

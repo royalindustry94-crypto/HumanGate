@@ -258,8 +258,13 @@ public final class LeonRigBinder {
         armR.rotationDeg = -clampSigned(pose.get(LeonChannel.ARM_R_SWING)) * ARM_SWING_DEG;
         float handLRaise = Mathx.clamp01(pose.get(LeonChannel.HAND_L_RAISE));
         float handRRaise = Mathx.clamp01(pose.get(LeonChannel.HAND_R_RAISE));
-        armL.rotationDeg -= handLRaise * ARM_SWING_DEG * 1.1f;
-        armR.rotationDeg += handRRaise * ARM_SWING_DEG * 1.1f;
+        // A hand raise (e.g. THINKING's chin/pocket gesture) only bends the elbow. It used to also
+        // add shoulder rotation on top -- each bone stayed within its own render-safe cap, but the
+        // two compound in world space (a child bone's rotation adds to its parent's), pushing the
+        // net rotation at the wrist past what the mesh can render cleanly and folding the forearm/
+        // hand seam into a visible sliver. Verified by rendering the isolated HAND_R_RAISE channel
+        // (see LeonMeshRig's render-safe clamp notes above) -- the fold disappeared once the shoulder
+        // stopped moving and only the elbow carried the raise.
         forearmL.rotationDeg = -Mathx.clamp01(pose.get(LeonChannel.ELBOW_L)) * ELBOW_DEG - handLRaise * 30f;
         forearmR.rotationDeg = Mathx.clamp01(pose.get(LeonChannel.ELBOW_R)) * ELBOW_DEG + handRRaise * 30f;
         // Clamp every joint in the chain to what the mesh can actually render cleanly (see the

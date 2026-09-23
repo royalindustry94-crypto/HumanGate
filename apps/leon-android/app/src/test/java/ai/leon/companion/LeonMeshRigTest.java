@@ -119,6 +119,45 @@ public class LeonMeshRigTest {
     }
 
     @Test
+    public void handRaiseAloneDoesNotStretchTheWristSeam() {
+        // THINKING's chin/pocket gesture drives HAND_R_RAISE, which used to also swing the arm bone
+        // alongside bending the forearm. Each bone's own rotation stayed within LeonRigBinder's
+        // render-safe clamp, but the two compound in world space (a child bone's rotation adds to its
+        // parent's), pushing the net rotation at the wrist past what this mesh's forearm/hand blend
+        // seam can render cleanly -- a real-device screenshot showed a skin-toned sliver folding out
+        // near the pocket. This measures the same worst on-canvas adjacent-row stretch, isolated to
+        // just this one channel, so a future tuning pass can't reintroduce the compound rotation.
+        LeonMeshRig mesh = LeonMeshRig.createForTest(16, 28);
+        LeonRigBinder binder = new LeonRigBinder(mesh.rig());
+        LeonPose pose = new LeonPose();
+        pose.set(LeonChannel.HAND_R_RAISE, 0.95f);
+        binder.apply(pose);
+        mesh.updateFromSolvedRig();
+
+        float[] canon = mesh.canonicalVertices();
+        float[] deformed = mesh.deformedVertices();
+        int cols = mesh.meshCols();
+        int rows = mesh.meshRows();
+        float worstRatio = 0f;
+        for (int col = 0; col <= cols; col++) {
+            float colX = canon[col * 2];
+            if (colX < 0f || colX > 384f) continue;
+            for (int row = 0; row < rows; row++) {
+                int i0 = row * (cols + 1) + col;
+                int i1 = (row + 1) * (cols + 1) + col;
+                float restDist = (float) Math.hypot(
+                        canon[i1 * 2] - canon[i0 * 2], canon[i1 * 2 + 1] - canon[i0 * 2 + 1]);
+                if (restDist < 1f) continue;
+                float deformedDist = (float) Math.hypot(
+                        deformed[i1 * 2] - deformed[i0 * 2], deformed[i1 * 2 + 1] - deformed[i0 * 2 + 1]);
+                worstRatio = Math.max(worstRatio, deformedDist / restDist);
+            }
+        }
+        assertTrue("a hand raise alone must not stretch the wrist seam, worst on-canvas "
+                + "adjacent-row stretch ratio was " + worstRatio, worstRatio < 4f);
+    }
+
+    @Test
     public void idleElbowBendDoesNotWarpTheHandsShape() {
         // The hand is a child of the forearm, so it correctly swings as a rigid whole when the elbow
         // bends -- that is real anatomy, not a bug. What must not happen is the hand's own shape
