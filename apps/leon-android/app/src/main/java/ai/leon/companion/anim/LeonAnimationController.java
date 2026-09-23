@@ -190,6 +190,14 @@ public final class LeonAnimationController implements LeonStateController.Listen
         gesture.trigger(kind);
     }
 
+    /**
+     * Debug/emulator-only deterministic walk trigger. Production auto-walk still owns normal
+     * scheduling; this exists so CI can prove the real mesh visibly changes during a gait.
+     */
+    public void startWalkForDebug(float direction, float durationSeconds) {
+        walk.startWalk(direction, durationSeconds);
+    }
+
     @Override
     public void onLeonStateChanged(LeonState previous, LeonState current) {
         fromProfile.copyFrom(activeProfile);

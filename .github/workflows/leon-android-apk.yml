@@ -100,7 +100,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Boot exact APK and capture Android screenshots
+      - name: Boot exact APK and capture Android visual matrix
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
           api-level: 35
@@ -110,33 +110,71 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
           script: |
-            mkdir -p apps/leon-android/app/build/reports/leon-preview
+            set -euo pipefail
+            OUT=apps/leon-android/app/build/reports/leon-preview
+            mkdir -p "$OUT"
             adb install -r apps/leon-android/app/build/outputs/apk/debug/app-debug.apk
-            adb shell am start -W -n ai.leon.companion/.MainActivity --ez ai.leon.companion.VISUAL_HOST true --es ai.leon.companion.TEST_POSE idle --ez ai.leon.companion.DISABLE_RANDOM true
-            sleep 3
-            adb exec-out screencap -p > apps/leon-android/app/build/reports/leon-preview/emulator-main.png
+
+            capture_state() {
+              name="$1"
+              pose="$2"
+              action="${3:-}"
+              adb shell am force-stop ai.leon.companion
+              if [ -n "$action" ]; then
+                adb shell am start -W -n ai.leon.companion/.MainActivity \
+                  --ez ai.leon.companion.VISUAL_HOST true \
+                  --es ai.leon.companion.TEST_POSE "$pose" \
+                  --es ai.leon.companion.TEST_ACTION "$action" \
+                  --ez ai.leon.companion.DISABLE_RANDOM true
+              else
+                adb shell am start -W -n ai.leon.companion/.MainActivity \
+                  --ez ai.leon.companion.VISUAL_HOST true \
+                  --es ai.leon.companion.TEST_POSE "$pose" \
+                  --ez ai.leon.companion.DISABLE_RANDOM true
+              fi
+              sleep 3
+              adb exec-out screencap -p > "$OUT/$name.png"
+            }
+
+            capture_state emulator-idle idle
+            capture_state emulator-thinking thinking
+            capture_state emulator-speaking speaking
+            capture_state emulator-chin idle chin
+            capture_state emulator-head-left idle head-left
+            capture_state emulator-walk-right idle walk-right
+
             adb shell am force-stop ai.leon.companion
             adb shell appops set ai.leon.companion SYSTEM_ALERT_WINDOW allow
-            adb shell am start -W -n ai.leon.companion/.MainActivity --ez ai.leon.companion.OVERLAY_HOST true --ez ai.leon.companion.START_TEST_OVERLAY true
+            adb shell am start -W -n ai.leon.companion/.MainActivity \
+              --ez ai.leon.companion.OVERLAY_HOST true \
+              --ez ai.leon.companion.START_TEST_OVERLAY true
             sleep 3
-            adb exec-out screencap -p > apps/leon-android/app/build/reports/leon-preview/emulator-overlay.png
+            adb exec-out screencap -p > "$OUT/emulator-overlay.png"
 
-      - name: Validate emulator screenshots
+      - name: Validate emulator screenshots and visible motion
         working-directory: apps/leon-android/tools
         run: |
           python3 validate_emulator_screenshot.py \
-            ../app/build/reports/leon-preview/emulator-main.png \
+            ../app/build/reports/leon-preview/emulator-idle.png \
+            ../app/build/reports/leon-preview/emulator-thinking.png \
+            ../app/build/reports/leon-preview/emulator-speaking.png \
+            ../app/build/reports/leon-preview/emulator-chin.png \
+            ../app/build/reports/leon-preview/emulator-head-left.png \
+            ../app/build/reports/leon-preview/emulator-walk-right.png \
             ../app/build/reports/leon-preview/emulator-overlay.png \
-            --min-height-fraction 0.55
+            --min-height-fraction 0.55 \
+            --require-change ../app/build/reports/leon-preview/emulator-idle.png ../app/build/reports/leon-preview/emulator-thinking.png 150 \
+            --require-change ../app/build/reports/leon-preview/emulator-idle.png ../app/build/reports/leon-preview/emulator-speaking.png 100 \
+            --require-change ../app/build/reports/leon-preview/emulator-idle.png ../app/build/reports/leon-preview/emulator-chin.png 150 \
+            --require-change ../app/build/reports/leon-preview/emulator-idle.png ../app/build/reports/leon-preview/emulator-head-left.png 100 \
+            --require-change ../app/build/reports/leon-preview/emulator-idle.png ../app/build/reports/leon-preview/emulator-walk-right.png 150
 
       - name: Upload emulator screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Leon-emulator-screenshots
-          path: |
-            apps/leon-android/app/build/reports/leon-preview/emulator-main.png
-            apps/leon-android/app/build/reports/leon-preview/emulator-overlay.png
+          path: apps/leon-android/app/build/reports/leon-preview/emulator-*.png
           if-no-files-found: warn
           retention-days: 14
 

@@ -242,13 +242,17 @@ public final class MainActivity extends Activity
         if (overlayOnly) return host;
 
         LeonState requested = DebugTestHooks.requestedState(getIntent());
-        if (requested != null) runtime.states().request(requested);
 
         rig = LeonRig.build();
         texture = ProductionLeonTexture.load(this);
         animation = new LeonAnimationController(rig, runtime.states(), 20260923L);
+        // Reset deterministic behaviour phases before changing state. Requesting THINKING/SPEAKING
+        // before the controller existed used to skip their transition side effects entirely (chin
+        // gesture / synthetic visemes), so CI could capture a static idle-looking frame and pass it.
         DebugTestHooks.apply(getIntent(), animation);
         runtime.attachSurface(animation);
+        if (requested != null) runtime.states().request(requested);
+        DebugTestHooks.applyAction(getIntent(), animation);
 
         preview = new LeonCharacterView(this, rig, animation, texture);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(280), dp(560));
