@@ -11,6 +11,7 @@ import ai.leon.companion.anim.LeonChannel;
 import ai.leon.companion.anim.LeonPose;
 import ai.leon.companion.anim.NodBehaviour;
 import ai.leon.companion.anim.PostureBehaviour;
+import ai.leon.companion.anim.WalkBehaviour;
 import ai.leon.companion.util.Mathx;
 import ai.leon.companion.util.SmoothNoise;
 import ai.leon.companion.util.Spring1D;
@@ -191,6 +192,53 @@ public class BehaviourTest {
         assertTrue("a nod must swing back and forth, saw " + signChanges + " reversals",
                 signChanges >= 2);
         assertTrue(peak > 0.2f);
+    }
+
+    @Test
+    public void walkingAlternatesTheLegsAndTravelsInTheGivenDirection() {
+        WalkBehaviour walk = new WalkBehaviour(41L);
+        walk.startWalk(1f, 6f);
+        int oppositePhase = 0;
+        int sampled = 0;
+        for (int i = 0; i < 60 * 4; i++) {
+            LeonPose pose = new LeonPose().clear();
+            walk.update(FRAME, 1f, pose);
+            float thighL = pose.get(LeonChannel.THIGH_L_SWING);
+            float thighR = pose.get(LeonChannel.THIGH_R_SWING);
+            if (Math.abs(thighL) > 0.05f && Math.abs(thighR) > 0.05f) {
+                sampled++;
+                if (Math.signum(thighL) != Math.signum(thighR)) oppositePhase++;
+            }
+        }
+        assertTrue("the legs must swing in opposite phase, saw " + oppositePhase + "/" + sampled,
+                sampled > 0 && oppositePhase > sampled * 0.8f);
+        assertTrue("a walk must travel in the requested direction", walk.travelFraction() > 0.5f);
+    }
+
+    @Test
+    public void cancellingAWalkRampsTheLegsBackToStillRatherThanSnapping() {
+        WalkBehaviour walk = new WalkBehaviour(43L);
+        walk.startWalk(-1f, 6f);
+        for (int i = 0; i < 60; i++) walk.update(FRAME, 1f, new LeonPose());
+        assertTrue("the walk must be underway before it is cancelled", walk.isWalking());
+
+        walk.cancel();
+        for (int i = 0; i < 60 * 2; i++) walk.update(FRAME, 1f, new LeonPose());
+        assertFalse("a cancelled walk must come to rest", walk.isWalking());
+        assertEquals("a rested walk must not still be pulling the window", 0f,
+                walk.travelFraction(), 0.001f);
+    }
+
+    @Test
+    public void autoWalkFiresOnItsOwnWithinTheConfiguredWindow() {
+        WalkBehaviour walk = new WalkBehaviour(47L);
+        walk.setAutoWalk(true, 8f, 9f);
+        boolean started = false;
+        for (int i = 0; i < 60 * 10 && !started; i++) {
+            walk.update(FRAME, 1f, new LeonPose());
+            started = walk.isWalking();
+        }
+        assertTrue("an idle Leon must eventually wander on its own", started);
     }
 
     @Test

@@ -82,6 +82,32 @@ public class LeonRigBinderTest {
     }
 
     @Test
+    public void breathingMustNotChangeTheHeadsOrArmsSizeOnScreen() {
+        // Chest is the parent of neck/head and of both shoulders. An uncorrected chest breathing
+        // scale multiplies through the whole chain, so a real device shows the head and arms
+        // visibly swelling and shrinking with every breath -- exactly the "unnatural, getting
+        // bigger and smaller" defect a person on the phone actually saw. World-space scale
+        // (not the bone's own local scale) is what the mesh renderer and a viewer's eye see.
+        binder.apply(pose);
+        float restHeadScale = worldScaleY(rig.bone(LeonRig.Bones.HEAD));
+        float restArmScale = worldScaleY(rig.bone(LeonRig.Bones.SHOULDER_L));
+
+        pose.set(LeonChannel.CHEST_BREATH, 1f);
+        binder.apply(pose);
+
+        assertEquals("a full breath must not change the head's rendered size", restHeadScale,
+                worldScaleY(rig.bone(LeonRig.Bones.HEAD)), 0.001f);
+        assertEquals("a full breath must not change the shoulder/arm rendered size", restArmScale,
+                worldScaleY(rig.bone(LeonRig.Bones.SHOULDER_L)), 0.001f);
+    }
+
+    /** World-space Y scale magnitude of a solved bone, independent of its own local scale field. */
+    private static float worldScaleY(ai.leon.companion.rig.Bone bone) {
+        ai.leon.companion.rig.Mat2D w = bone.world();
+        return (float) Math.hypot(w.c, w.d);
+    }
+
+    @Test
     public void headYawShiftsTheHeadAndCounterShiftsTheFaceLayers() {
         binder.apply(pose);
         float restHeadX = rig.bone(LeonRig.Bones.HEAD).offsetX;
@@ -110,6 +136,23 @@ public class LeonRigBinderTest {
         assertTrue(Math.abs(rig.bone(LeonRig.Bones.FOREARM_R).rotationDeg) > 20f);
         assertEquals("the left forearm must be untouched", 0f,
                 rig.bone(LeonRig.Bones.FOREARM_L).rotationDeg, 0.0001f);
+    }
+
+    @Test
+    public void chinGestureMustNotSwingTheForearmAcrossTheBody() {
+        // The CHIN gesture (hand held near the chin, used by THINKING) drives HAND_R_RAISE and
+        // ELBOW_R together, both near their maximum at once. Each channel adds its own rotation to
+        // the same forearm bone, so left uncapped the combined rotation swings the forearm and hand
+        // past the shoulder and out across the torso instead of stopping near the face -- the
+        // "hand held out like a stick" defect reported from a real device screenshot.
+        pose.set(LeonChannel.ELBOW_R, 0.95f);
+        pose.set(LeonChannel.HAND_R_RAISE, 0.95f);
+        binder.apply(pose);
+
+        float forearmRotation = rig.bone(LeonRig.Bones.FOREARM_R).rotationDeg;
+        assertTrue("the forearm must still visibly bend towards the chin", forearmRotation > 60f);
+        assertTrue("a chin gesture must not fold the forearm past a real elbow's range",
+                forearmRotation <= 120f);
     }
 
     @Test

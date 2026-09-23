@@ -45,10 +45,17 @@ public final class LeonRigBinder {
     private static final float TORSO_TWIST_SQUASH = 0.05f;
     private static final float WEIGHT_SHIFT_X = 8f;
     private static final float WEIGHT_SHIFT_DEG = 2.2f;
+    private static final float THIGH_SWING_DEG = 26f;
+    private static final float SHIN_SWING_DEG = 34f;
+    private static final float WALK_BOB_LIFT = 3.2f;
     private static final float ARM_SWING_DEG = 26f;
     /** A real elbow flexes past 140 degrees; 46 was far too little for a hand-to-chin pose. */
     private static final float ELBOW_DEG = 105f;
     private static final float HAND_RAISE_DEG = 30f;
+    /** Hard caps on the arm/elbow chain so stacked channels (e.g. CHIN's raise + elbow both near
+     *  max) can never rotate the forearm past the shoulder and out across the body. */
+    private static final float ARM_ROTATION_LIMIT_DEG = 70f;
+    private static final float ELBOW_ROTATION_LIMIT_DEG = 115f;
     private static final float HOOD_SWAY_DEG = 6f;
     private static final float NECKLACE_SWAY_DEG = 9f;
 
@@ -75,6 +82,8 @@ public final class LeonRigBinder {
     private final Bone handR;
     private final Bone thighL;
     private final Bone thighR;
+    private final Bone shinL;
+    private final Bone shinR;
 
     private final RigPart torso;
     private final RigPart lidL;
@@ -117,6 +126,8 @@ public final class LeonRigBinder {
         handR = requireBone(LeonRig.Bones.HAND_R);
         thighL = requireBone(LeonRig.Bones.THIGH_L);
         thighR = requireBone(LeonRig.Bones.THIGH_R);
+        shinL = requireBone(LeonRig.Bones.SHIN_L);
+        shinR = requireBone(LeonRig.Bones.SHIN_R);
 
         torso = requirePart(LeonRig.Parts.TORSO);
         lidL = requirePart(LeonRig.Parts.LID_L);
@@ -167,15 +178,24 @@ public final class LeonRigBinder {
         root.scaleY = scale;
 
         // ---- torso ----
+        // Breathing scales the CHEST bone so the ribcage region of the mesh rises and falls. Chest
+        // is the parent of the neck/head chain AND of both shoulders, so left uncorrected that scale
+        // multiplies through and the head and arms visibly swell with every breath -- on a real body
+        // the head does not get larger when you inhale. neckCounterScale below cancels the chest's
+        // scale contribution at the neck (and so at the head, its child) and at both shoulders, so
+        // only the torso mesh region actually changes size; the neck/shoulders still shift position
+        // slightly with the chest lift, which is what a real breath looks like from the outside.
         float breath = Mathx.clamp01(pose.get(LeonChannel.CHEST_BREATH));
         chest.scaleY = 1f + BREATH_CHEST_Y * breath;
         chest.scaleX = 1f + BREATH_CHEST_X * breath;
         chest.offsetY = -BREATH_LIFT * breath;
-        torso.scaleY = 1f + BREATH_CHEST_Y * 0.6f * breath;
 
         float twist = clampSigned(pose.get(LeonChannel.TORSO_TWIST));
         chest.scaleX *= 1f - TORSO_TWIST_SQUASH * Math.abs(twist);
         chest.offsetX = twist * 4f;
+
+        neck.scaleX = 1f / chest.scaleX;
+        neck.scaleY = 1f / chest.scaleY;
 
         float leanX = clampSigned(pose.get(LeonChannel.TORSO_LEAN_X));
         float leanY = clampSigned(pose.get(LeonChannel.TORSO_LEAN_Y));
@@ -185,17 +205,36 @@ public final class LeonRigBinder {
         float weight = clampSigned(pose.get(LeonChannel.WEIGHT_SHIFT));
         hips.offsetX = weight * WEIGHT_SHIFT_X;
         hips.rotationDeg = weight * WEIGHT_SHIFT_DEG;
-        // Legs counter the hip swing so the feet stay planted.
-        thighL.rotationDeg = -weight * WEIGHT_SHIFT_DEG * 1.4f;
-        thighR.rotationDeg = -weight * WEIGHT_SHIFT_DEG * 1.4f;
+        // Legs counter the hip swing so the feet stay planted while idle. Walking adds its own
+        // swing on top additively, rather than overwriting this, so a walk that starts mid-idle
+        // does not visibly snap the legs to a different baseline.
+        float thighSwingL = clampSigned(pose.get(LeonChannel.THIGH_L_SWING));
+        float thighSwingR = clampSigned(pose.get(LeonChannel.THIGH_R_SWING));
+        thighL.rotationDeg = -weight * WEIGHT_SHIFT_DEG * 1.4f + thighSwingL * THIGH_SWING_DEG;
+        thighR.rotationDeg = -weight * WEIGHT_SHIFT_DEG * 1.4f + thighSwingR * THIGH_SWING_DEG;
+
+        // The knee only bends forward, and only on the leg currently lifting (the walk behaviour
+        // shapes this curve; the binder just applies it), so a straight standing leg is 0.
+        shinL.rotationDeg = -Mathx.clamp01(pose.get(LeonChannel.SHIN_L_SWING)) * SHIN_SWING_DEG;
+        shinR.rotationDeg = -Mathx.clamp01(pose.get(LeonChannel.SHIN_R_SWING)) * SHIN_SWING_DEG;
+
+        float bob = Mathx.clamp01(pose.get(LeonChannel.WALK_BOB));
+        hips.offsetY -= bob * WALK_BOB_LIFT;
 
         // ---- shoulders (independent, plus a breath-driven lift) ----
+        // Counter-scaled for the same reason as the neck: shoulders are chest's children too, and
+        // both arm chains hang from them, so an uncorrected chest breath would swell the whole upper
+        // body on every inhale instead of just lifting the shoulders slightly.
         float shL = clampSigned(pose.get(LeonChannel.SHOULDER_L));
         float shR = clampSigned(pose.get(LeonChannel.SHOULDER_R));
         shoulderL.rotationDeg = shL * SHOULDER_DEG;
         shoulderL.offsetY = -shL * SHOULDER_LIFT - breath * 3f;
+        shoulderL.scaleX = 1f / chest.scaleX;
+        shoulderL.scaleY = 1f / chest.scaleY;
         shoulderR.rotationDeg = -shR * SHOULDER_DEG;
         shoulderR.offsetY = -shR * SHOULDER_LIFT - breath * 3f;
+        shoulderR.scaleX = 1f / chest.scaleX;
+        shoulderR.scaleY = 1f / chest.scaleY;
 
         // ---- arms ----
         armL.rotationDeg = clampSigned(pose.get(LeonChannel.ARM_L_SWING)) * ARM_SWING_DEG;
@@ -206,6 +245,15 @@ public final class LeonRigBinder {
         armR.rotationDeg += handRRaise * ARM_SWING_DEG * 1.1f;
         forearmL.rotationDeg = -Mathx.clamp01(pose.get(LeonChannel.ELBOW_L)) * ELBOW_DEG - handLRaise * 30f;
         forearmR.rotationDeg = Mathx.clamp01(pose.get(LeonChannel.ELBOW_R)) * ELBOW_DEG + handRRaise * 30f;
+        // ELBOW_DEG alone already reaches a hand-to-chin flex; HAND_*_RAISE piles more rotation on
+        // top of it for the same CHIN gesture (raise and elbow both peak near 1 together), so
+        // uncapped this swings the forearm+hand past the shoulder and across the body instead of
+        // stopping near the face -- the "hand held out like a stick" defect. Clamp to what a real
+        // shoulder/elbow can actually reach.
+        armL.rotationDeg = Mathx.clamp(armL.rotationDeg, -ARM_ROTATION_LIMIT_DEG, ARM_ROTATION_LIMIT_DEG);
+        armR.rotationDeg = Mathx.clamp(armR.rotationDeg, -ARM_ROTATION_LIMIT_DEG, ARM_ROTATION_LIMIT_DEG);
+        forearmL.rotationDeg = Mathx.clamp(forearmL.rotationDeg, -ELBOW_ROTATION_LIMIT_DEG, ELBOW_ROTATION_LIMIT_DEG);
+        forearmR.rotationDeg = Mathx.clamp(forearmR.rotationDeg, -ELBOW_ROTATION_LIMIT_DEG, ELBOW_ROTATION_LIMIT_DEG);
         handL.rotationDeg = -handLRaise * HAND_RAISE_DEG;
         handR.rotationDeg = handRRaise * HAND_RAISE_DEG;
 

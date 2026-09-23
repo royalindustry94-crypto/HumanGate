@@ -33,6 +33,14 @@ public final class LeonCharacterView extends View {
     private boolean running;
     private boolean paused;
     private boolean attached;
+    private FrameListener frameListener;
+
+    /** Anything that needs to react every animated frame but isn't the rig itself, e.g. the overlay
+     *  service translating the window while Leon walks. Android-free by design so this stays a plain
+     *  callback rather than pulling WindowManager concerns into the view. */
+    public interface FrameListener {
+        void onAnimationFrame(float dtSeconds);
+    }
 
     private final Choreographer.FrameCallback frameCallback = new Choreographer.FrameCallback() {
         @Override
@@ -43,7 +51,9 @@ public final class LeonCharacterView extends View {
             if (delta > MAX_FRAME_NANOS) delta = MAX_FRAME_NANOS;
             lastFrameNanos = frameTimeNanos;
 
-            controller.update(delta / 1_000_000_000f);
+            float dt = delta / 1_000_000_000f;
+            controller.update(dt);
+            if (frameListener != null) frameListener.onAnimationFrame(dt);
             invalidate();
             scheduleNextFrame();
         }
@@ -74,6 +84,11 @@ public final class LeonCharacterView extends View {
 
     public LeonAnimationController controller() {
         return controller;
+    }
+
+    /** Set once by the overlay host; {@code null} is a valid "nobody's listening" state. */
+    public void setFrameListener(FrameListener listener) {
+        this.frameListener = listener;
     }
 
     /** Stops or resumes the render loop. Called when the screen turns off and on. */
