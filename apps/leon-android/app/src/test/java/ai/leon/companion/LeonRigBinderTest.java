@@ -139,6 +139,23 @@ public class LeonRigBinderTest {
     }
 
     @Test
+    public void chinGestureMustNotSwingTheForearmAcrossTheBody() {
+        // The CHIN gesture (hand held near the chin, used by THINKING) drives HAND_R_RAISE and
+        // ELBOW_R together, both near their maximum at once. Each channel adds its own rotation to
+        // the same forearm bone, so left uncapped the combined rotation swings the forearm and hand
+        // past the shoulder and out across the torso instead of stopping near the face -- the
+        // "hand held out like a stick" defect reported from a real device screenshot.
+        pose.set(LeonChannel.ELBOW_R, 0.95f);
+        pose.set(LeonChannel.HAND_R_RAISE, 0.95f);
+        binder.apply(pose);
+
+        float forearmRotation = rig.bone(LeonRig.Bones.FOREARM_R).rotationDeg;
+        assertTrue("the forearm must still visibly bend towards the chin", forearmRotation > 60f);
+        assertTrue("a chin gesture must not fold the forearm past a real elbow's range",
+                forearmRotation <= 120f);
+    }
+
+    @Test
     public void aWeightShiftMovesTheHipsAndCountersWithTheLegs() {
         pose.set(LeonChannel.WEIGHT_SHIFT, 1f);
         binder.apply(pose);

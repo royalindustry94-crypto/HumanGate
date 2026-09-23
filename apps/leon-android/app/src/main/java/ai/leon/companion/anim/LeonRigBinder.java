@@ -49,6 +49,10 @@ public final class LeonRigBinder {
     /** A real elbow flexes past 140 degrees; 46 was far too little for a hand-to-chin pose. */
     private static final float ELBOW_DEG = 105f;
     private static final float HAND_RAISE_DEG = 30f;
+    /** Hard caps on the arm/elbow chain so stacked channels (e.g. CHIN's raise + elbow both near
+     *  max) can never rotate the forearm past the shoulder and out across the body. */
+    private static final float ARM_ROTATION_LIMIT_DEG = 70f;
+    private static final float ELBOW_ROTATION_LIMIT_DEG = 115f;
     private static final float HOOD_SWAY_DEG = 6f;
     private static final float NECKLACE_SWAY_DEG = 9f;
 
@@ -222,6 +226,15 @@ public final class LeonRigBinder {
         armR.rotationDeg += handRRaise * ARM_SWING_DEG * 1.1f;
         forearmL.rotationDeg = -Mathx.clamp01(pose.get(LeonChannel.ELBOW_L)) * ELBOW_DEG - handLRaise * 30f;
         forearmR.rotationDeg = Mathx.clamp01(pose.get(LeonChannel.ELBOW_R)) * ELBOW_DEG + handRRaise * 30f;
+        // ELBOW_DEG alone already reaches a hand-to-chin flex; HAND_*_RAISE piles more rotation on
+        // top of it for the same CHIN gesture (raise and elbow both peak near 1 together), so
+        // uncapped this swings the forearm+hand past the shoulder and across the body instead of
+        // stopping near the face -- the "hand held out like a stick" defect. Clamp to what a real
+        // shoulder/elbow can actually reach.
+        armL.rotationDeg = Mathx.clamp(armL.rotationDeg, -ARM_ROTATION_LIMIT_DEG, ARM_ROTATION_LIMIT_DEG);
+        armR.rotationDeg = Mathx.clamp(armR.rotationDeg, -ARM_ROTATION_LIMIT_DEG, ARM_ROTATION_LIMIT_DEG);
+        forearmL.rotationDeg = Mathx.clamp(forearmL.rotationDeg, -ELBOW_ROTATION_LIMIT_DEG, ELBOW_ROTATION_LIMIT_DEG);
+        forearmR.rotationDeg = Mathx.clamp(forearmR.rotationDeg, -ELBOW_ROTATION_LIMIT_DEG, ELBOW_ROTATION_LIMIT_DEG);
         handL.rotationDeg = -handLRaise * HAND_RAISE_DEG;
         handR.rotationDeg = handRRaise * HAND_RAISE_DEG;
 
