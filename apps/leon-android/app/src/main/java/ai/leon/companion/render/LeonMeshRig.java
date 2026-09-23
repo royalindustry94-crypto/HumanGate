@@ -189,13 +189,24 @@ public final class LeonMeshRig {
             float side = Math.abs(x - DESIGN_CENTRE_X);
             if (side > 72f) {
                 boolean left = x < DESIGN_CENTRE_X;
-                // A short blend right at the elbow and wrist, not across the whole limb: a rigid
+                // A short blend at the shoulder, elbow and wrist, not across the whole limb: a rigid
                 // one-bone-per-row binding leaves a hard seam at each cutoff that a large rotation
                 // stretches into a sliver (drawBitmapMesh still draws the quad connecting the row on
                 // each side of the seam, however far apart a bent joint has pushed them), but blending
-                // too widely bleeds the forearm's rotation into the middle of the hand and visibly
-                // bends the wrist even at a small idle elbow bend. 30px on each side of a joint is
-                // enough to remove the seam without smearing the limb.
+                // too widely bleeds a bone's rotation into the middle of the next segment and visibly
+                // warps it even at a small bend. 30px on each side of a joint is enough to remove the
+                // seam without smearing the limb.
+                //
+                // The shoulder seam (205-235) matters even for channels that only move the arm, not the
+                // shoulder itself: the block above (y<205) binds every column to a head/neck/chest blend
+                // without checking side at all, so an arm-side column just above y=205 was still
+                // chest-bound at rest. Swinging just the arm without blending this seam stretched the
+                // collar/chest toward the arm's new position -- a fuzzy diagonal smear across the chest
+                // and shoulder with only the arm swung, no elbow or hand movement at all.
+                if (y < 235f) {
+                    float t = smooth((y - 205f) / 30f);
+                    return two(chest, 1f - t, left ? armL : armR, t);
+                }
                 if (y < 270f) return one(left ? armL : armR);
                 if (y < 300f) {
                     float t = smooth((y - 270f) / 30f);
