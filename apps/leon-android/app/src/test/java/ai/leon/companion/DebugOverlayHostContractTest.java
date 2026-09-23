@@ -38,6 +38,18 @@ public class DebugOverlayHostContractTest {
     }
 
     @Test
+    public void visualTestStateIsRequestedAfterAnimationControllerExists() throws Exception {
+        String activity = source("ai/leon/companion/MainActivity.java");
+        int controllerIndex = activity.indexOf("animation = new LeonAnimationController");
+        int requestIndex = activity.indexOf("runtime.states().request(requested)");
+        int actionIndex = activity.indexOf("DebugTestHooks.applyAction");
+
+        assertTrue("visual test controller must exist before state request", controllerIndex >= 0);
+        assertTrue("state request must occur after controller construction", requestIndex > controllerIndex);
+        assertTrue("deterministic action must occur after state request", actionIndex > requestIndex);
+    }
+
+    @Test
     public void debugOverlayHostStartsNonExportedServiceFromInsideApp() throws Exception {
         String hooks = source("ai/leon/companion/DebugTestHooks.java");
         String activity = source("ai/leon/companion/MainActivity.java");
