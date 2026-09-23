@@ -201,7 +201,9 @@ public final class LeonSpeechController implements TextToSpeech.OnInitListener {
         if (result == TextToSpeech.ERROR) {
             activeUtteranceId = null;
             states.request(LeonState.IDLE);
-            fail("The installed text-to-speech engine rejected the utterance.");
+            // A single utterance rejection does not mean the engine itself is unusable. Keep the
+            // initialized controller ready so the next valid Speak request can be attempted.
+            setStatus(Status.ERROR, "The installed text-to-speech engine rejected that utterance.");
         }
     }
 
