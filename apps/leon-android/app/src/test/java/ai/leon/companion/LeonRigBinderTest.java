@@ -108,6 +108,21 @@ public class LeonRigBinderTest {
     }
 
     @Test
+    public void breathingMustNotVisiblyPulseTheTorsosWidth() {
+        // Reported straight off the device: "his waist shrinks and expands as his hands get closer
+        // to his body." The chest widening on every inhale (BREATH_CHEST_X) is intentional breathing,
+        // but at its original magnitude it read as the whole torso silhouette pulsing, most
+        // noticeable right where idle's resting hands sit close to the torso. Bounds the chest's own
+        // width scale so a future tuning pass can't reintroduce a visible pulse.
+        binder.apply(pose);
+        pose.set(LeonChannel.CHEST_BREATH, 1f);
+        binder.apply(pose);
+
+        assertTrue("a full breath must not visibly widen the torso, chest scaleX was "
+                + rig.bone(LeonRig.Bones.CHEST).scaleX, rig.bone(LeonRig.Bones.CHEST).scaleX < 1.01f);
+    }
+
+    @Test
     public void headYawShiftsTheHeadAndCounterShiftsTheFaceLayers() {
         binder.apply(pose);
         float restHeadX = rig.bone(LeonRig.Bones.HEAD).offsetX;
