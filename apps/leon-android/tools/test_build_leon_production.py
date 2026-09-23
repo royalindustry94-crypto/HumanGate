@@ -37,11 +37,11 @@ class BuildLeonProductionTest(unittest.TestCase):
         self.assertEqual(0, out[0, 0][3])
         self.assertEqual(255, out[2, 2][3])
 
-    def test_committed_character_sheet_extracts_complete_master(self):
+    def test_committed_front_source_extracts_complete_master(self):
         repo_root = Path(__file__).resolve().parents[3]
-        sheet_path = repo_root / "docs" / "leon-reference" / "leon-character-sheet.png"
-        with Image.open(sheet_path) as sheet:
-            master = extract_reference_master(sheet)
+        source_path = repo_root / "docs" / "leon-reference" / "leon-front-source.png"
+        with Image.open(source_path) as source:
+            master = extract_reference_master(source)
 
         self.assertEqual((360, 640), master.size)
         box = master.getchannel("A").getbbox()
@@ -49,6 +49,23 @@ class BuildLeonProductionTest(unittest.TestCase):
         self.assertLessEqual(box[1], 20)
         self.assertGreaterEqual(box[3] - 1, 619)
         self.assertGreater(box[2] - box[0], 150)
+
+    def test_extraction_leaves_no_green_screen_residue(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        source_path = repo_root / "docs" / "leon-reference" / "leon-front-source.png"
+        with Image.open(source_path) as source:
+            master = extract_reference_master(source)
+
+        opaque = 0
+        spill = 0
+        for r, g, b, a in master.getdata():
+            if a < 16:
+                continue
+            opaque += 1
+            if g >= 135 and g - max(r, b) >= 70:
+                spill += 1
+        self.assertGreater(opaque, 0)
+        self.assertLess(spill / opaque, 0.0005)
 
     def test_manifest_pins_source_and_full_body_bounds(self):
         source = Image.new("RGBA", (360, 640), (0, 0, 0, 0))

@@ -43,7 +43,7 @@ jobs:
 
       - name: Generate deterministic Leon previews
         working-directory: apps/leon-android/tools
-        run: python3 render_contract.py --sheet ../../../docs/leon-reference/leon-character-sheet.png --out ../app/build/reports/leon-preview
+        run: python3 render_contract.py --sheet ../../../docs/leon-reference/leon-front-source.png --out ../app/build/reports/leon-preview
 
       - name: Upload Leon visual contract
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -58,6 +58,7 @@ jobs:
         with:
           name: Leon-reference-diagnostics
           path: |
+            docs/leon-reference/leon-front-source.png
             docs/leon-reference/leon-character-sheet.png
             docs/leon-reference/leon-reference.png
           if-no-files-found: error
