@@ -111,6 +111,11 @@ public final class LeonMeshRig {
                 360, 640, 20f, 619f, 180f);
     }
 
+    /** Exposed for tests that need to drive a pose through {@code LeonRigBinder} on this exact rig. */
+    public Rig rig() {
+        return rig;
+    }
+
     public float[] canonicalVertices() {
         return canonicalVertices;
     }
@@ -184,8 +189,23 @@ public final class LeonMeshRig {
             float side = Math.abs(x - DESIGN_CENTRE_X);
             if (side > 72f) {
                 boolean left = x < DESIGN_CENTRE_X;
-                if (y < 285f) return one(left ? armL : armR);
-                if (y < 360f) return one(left ? forearmL : forearmR);
+                // A short blend right at the elbow and wrist, not across the whole limb: a rigid
+                // one-bone-per-row binding leaves a hard seam at each cutoff that a large rotation
+                // stretches into a sliver (drawBitmapMesh still draws the quad connecting the row on
+                // each side of the seam, however far apart a bent joint has pushed them), but blending
+                // too widely bleeds the forearm's rotation into the middle of the hand and visibly
+                // bends the wrist even at a small idle elbow bend. 30px on each side of a joint is
+                // enough to remove the seam without smearing the limb.
+                if (y < 270f) return one(left ? armL : armR);
+                if (y < 300f) {
+                    float t = smooth((y - 270f) / 30f);
+                    return two(left ? armL : armR, 1f - t, left ? forearmL : forearmR, t);
+                }
+                if (y < 345f) return one(left ? forearmL : forearmR);
+                if (y < 375f) {
+                    float t = smooth((y - 345f) / 30f);
+                    return two(left ? forearmL : forearmR, 1f - t, left ? handL : handR, t);
+                }
                 return one(left ? handL : handR);
             }
             if (y < 285f) return one(chest);
@@ -198,6 +218,20 @@ public final class LeonMeshRig {
         }
 
         boolean left = x < DESIGN_CENTRE_X;
+        float legSide = Math.abs(x - DESIGN_CENTRE_X);
+        if (legSide > 72f) {
+            // Off to the side of the torso -- this is the hand/sleeve fading toward background below
+            // where an arm hangs, not leg territory, even though it shares this row range with the
+            // legs in the middle columns. Binding it to hip/thigh regardless of side (as this used to)
+            // means a hand swung away from rest snaps back to a stationary hip on the very next row,
+            // the same seam-stretch problem as the elbow/wrist above. Fading it to root instead means
+            // it settles toward the untouched canonical position rather than jumping to one.
+            if (y < 485f) {
+                float t = smooth((y - 395f) / 90f);
+                return two(left ? handL : handR, 1f - t, root, t);
+            }
+            return one(root);
+        }
         if (y < 515f) {
             float t = smooth((y - 395f) / 120f);
             return two(hips, 1f - t, left ? thighL : thighR, t);

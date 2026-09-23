@@ -110,8 +110,8 @@ public final class LeonStateProfile {
             case IDLE:
                 // Only IDLE wanders -- Leon should stay put and attentive in every other state.
                 p.walkAuto = 1f;
-                p.walkMin = 50f;
-                p.walkMax = 110f;
+                p.walkMin = 18f;
+                p.walkMax = 35f;
                 pose.set(LeonChannel.AURA, 0.18f);
                 pose.set(LeonChannel.EXPR_NEUTRAL, 1f);
                 pose.set(LeonChannel.ELBOW_L, 0.12f);

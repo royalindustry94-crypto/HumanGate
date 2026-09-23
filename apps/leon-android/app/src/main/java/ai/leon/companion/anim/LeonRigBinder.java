@@ -45,7 +45,12 @@ public final class LeonRigBinder {
     private static final float TORSO_TWIST_SQUASH = 0.05f;
     private static final float WEIGHT_SHIFT_X = 8f;
     private static final float WEIGHT_SHIFT_DEG = 2.2f;
-    private static final float THIGH_SWING_DEG = 26f;
+    // Viewed strictly from the front (the only view a single fixed photo can give), a thigh that
+    // *rotates* the way a side view's forward stride would reads as a lateral kick, not a step --
+    // there is no foreshortening to sell "forward." A believable front-facing gait leans much more on
+    // the knee lifting (which does read correctly from the front) and a vertical hip bob, with only a
+    // small thigh rotation to keep the knee lift looking connected to the hip instead of floating.
+    private static final float THIGH_SWING_DEG = 9f;
     private static final float SHIN_SWING_DEG = 34f;
     private static final float WALK_BOB_LIFT = 3.2f;
     private static final float ARM_SWING_DEG = 26f;
