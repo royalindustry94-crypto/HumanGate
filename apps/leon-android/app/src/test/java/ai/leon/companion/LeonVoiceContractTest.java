@@ -68,7 +68,9 @@ public class LeonVoiceContractTest {
     @Test
     public void controlCentreSurfacesSpeechStatusAndErrors() throws Exception {
         String activity = source("ai/leon/companion/MainActivity.java");
-        assertTrue(activity.contains("LeonSpeechController.Listener"));
+        String normalized = activity.replaceAll("\\s+", " ");
+        assertTrue(normalized.matches(
+                ".*public final class MainActivity extends Activity implements [^\\{]*LeonSpeechController\\.Listener[^\\{]*\\{.*"));
         assertTrue(activity.contains("runtime.speech().setListener(this)"));
         assertTrue(activity.contains("onSpeechStatusChanged"));
     }
