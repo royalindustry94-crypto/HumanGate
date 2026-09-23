@@ -119,6 +119,58 @@ public class LeonMeshRigTest {
     }
 
     @Test
+    public void handRaiseAloneDoesNotStretchTheWristSeam() {
+        // THINKING's chin/pocket gesture drives HAND_R_RAISE, which used to also swing the arm bone
+        // alongside bending the forearm. Each bone's own rotation stayed within LeonRigBinder's
+        // render-safe clamp, but the two compound in world space (a child bone's rotation adds to its
+        // parent's), pushing the net rotation at the wrist past what this mesh's forearm/hand blend
+        // seam can render cleanly -- a real-device screenshot showed a skin-toned sliver folding out
+        // near the pocket, in the fingertip region where the hand blends toward the hip (LeonMeshRig's
+        // leg-side fade below the hand). Restricted to exactly that zone: a global worst-row-stretch
+        // (or a wider zone that includes the unrelated arm/torso boundary column) is dominated by
+        // geometry this fix never touches and measures ~2.0 unchanged whether or not the compound
+        // rotation is reintroduced -- confirmed by running this same measurement against the pre-fix
+        // binder, where it reported an identical ratio and so never would have caught this regression.
+        // This zone/threshold was chosen by measuring the same known-clean pose (ELBOW_R alone, no
+        // shoulder swing -- see armSwingAloneDoesNotStretchTheShoulderSeam above) at ~0.86 and this
+        // fix's HAND_R_RAISE-alone pose at ~0.79, against the pre-fix binder's ~1.30 for that same pose.
+        LeonMeshRig mesh = LeonMeshRig.createForTest(16, 28);
+        LeonRigBinder binder = new LeonRigBinder(mesh.rig());
+        LeonPose pose = new LeonPose();
+        pose.set(LeonChannel.HAND_R_RAISE, 0.95f);
+        binder.apply(pose);
+        mesh.updateFromSolvedRig();
+
+        float[] canon = mesh.canonicalVertices();
+        float[] deformed = mesh.deformedVertices();
+        int cols = mesh.meshCols();
+        int rows = mesh.meshRows();
+        float worstRatio = 0f;
+        int seamRowsChecked = 0;
+        for (int col = 0; col <= cols; col++) {
+            float colX = canon[col * 2];
+            if (colX < 300f || colX > 384f) continue; // fingertip columns, on-canvas only
+            for (int row = 0; row < rows; row++) {
+                int i0 = row * (cols + 1) + col;
+                int i1 = (row + 1) * (cols + 1) + col;
+                float y0 = canon[i0 * 2 + 1];
+                float y1 = canon[i1 * 2 + 1];
+                if (Math.min(y0, y1) < 375f || Math.max(y0, y1) > 460f) continue; // hand-to-hip fade
+                float restDist = (float) Math.hypot(
+                        canon[i1 * 2] - canon[i0 * 2], canon[i1 * 2 + 1] - canon[i0 * 2 + 1]);
+                if (restDist < 1f) continue;
+                seamRowsChecked++;
+                float deformedDist = (float) Math.hypot(
+                        deformed[i1 * 2] - deformed[i0 * 2], deformed[i1 * 2 + 1] - deformed[i0 * 2 + 1]);
+                worstRatio = Math.max(worstRatio, deformedDist / restDist);
+            }
+        }
+        assertTrue("expected several fingertip-seam rows in the test mesh geometry", seamRowsChecked > 2);
+        assertTrue("a hand raise alone must not stretch the fingertip/hip-fade seam, worst "
+                + "adjacent-row stretch ratio was " + worstRatio, worstRatio < 1.1f);
+    }
+
+    @Test
     public void idleElbowBendDoesNotWarpTheHandsShape() {
         // The hand is a child of the forearm, so it correctly swings as a rigid whole when the elbow
         // bends -- that is real anatomy, not a bug. What must not happen is the hand's own shape
