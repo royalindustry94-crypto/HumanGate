@@ -198,6 +198,29 @@ public final class MainActivity extends Activity
             }
         });
         root.addView(send, withBottom(8));
+
+        Button speak = button("Speak");
+        speak.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String text = input.getText().toString().trim();
+                if (text.isEmpty()) {
+                    toast("Type something for Leon to say");
+                    return;
+                }
+                runtime.speech().speak(text);
+            }
+        });
+        root.addView(speak, withBottom(8));
+
+        Button stopVoice = button("Stop voice");
+        stopVoice.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                runtime.speech().stop();
+            }
+        });
+        root.addView(stopVoice, withBottom(8));
         conversationStatus = caption("");
         root.addView(conversationStatus, withBottom(22));
 
@@ -342,9 +365,9 @@ public final class MainActivity extends Activity
         });
         section.addView(battery, withBottom(8));
 
-        section.addView(caption("Voice and the live AI brain are deliberately not in this build. "
-                + "The animation system already accepts viseme events, so speech can drive Leon's "
-                + "mouth without any rig changes."));
+        section.addView(caption("Android text-to-speech is enabled for local voice playback. "
+                + "The live AI brain is still separate, so Leon only speaks text you explicitly "
+                + "give him in this build."));
         return section;
     }
 
