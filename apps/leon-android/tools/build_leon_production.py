@@ -5,7 +5,7 @@ import json
 from collections import deque
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
+from PIL import Image, ImageEnhance
 
 MESH_COLS = 16
 MESH_ROWS = 28
@@ -104,70 +104,35 @@ def key_green(image: Image.Image) -> Image.Image:
     return keyed
 
 
-def extract_reference_master(sheet: Image.Image) -> Image.Image:
-    """Extract the canonical front turnaround from the committed character sheet.
+def extract_reference_master(source: Image.Image) -> Image.Image:
+    """Extract Leon's production texture from his committed green-screen reference photo.
 
-    The old bundled leon-front.webp is truncated and cannot be decoded reliably.
-    This extraction is deterministic and uses only the exact committed reference art.
+    An earlier version of this function hand-drew a polygon mask over a ~95x345px crop of the
+    low-resolution character-sheet contact print (docs/leon-reference/leon-character-sheet.png)
+    and upscaled it ~1.7x. That crop's hoodie and background share the same luminance in the
+    sheet, so the hand-drawn polygon could not trace the true edge: it left dark cutout residue
+    around the head and left side and produced faded, torn-looking lower legs after upscaling a
+    tiny, imprecise source. See docs/leon-reference/README.md.
+
+    This extracts from docs/leon-reference/leon-front-source.png instead: a full-resolution
+    (941x1672) front-facing photo on a real chroma-green background. key_green() — a proper
+    flood-fill key from the border plus edge despill, not a hand-authored outline — removes the
+    background cleanly at native resolution, so there is no polygon to get wrong and no large
+    upscale to blur the edges.
     """
-    src = sheet.convert("RGBA")
-    if src.size != (1223, 1286):
-        raise ValueError(f"Unexpected Leon character-sheet size: {src.size}")
+    src = source.convert("RGBA")
+    keyed = key_green(src)
 
-    # Canonical FRONT panel in docs/leon-reference/leon-character-sheet.png.
-    crop = src.crop((820, 35, 930, 410))
-    mask = Image.new("L", crop.size, 0)
-    d = ImageDraw.Draw(mask)
-
-    # Head / neck.
-    d.polygon([
-        (45, 11), (62, 11), (70, 16), (75, 27), (75, 44), (70, 55),
-        (64, 62), (45, 62), (39, 56), (35, 46), (35, 30), (39, 18)
-    ], fill=255)
-
-    # Hoodie / arms / hands.
-    d.polygon([
-        (36, 58), (27, 61), (20, 68), (16, 80), (14, 101), (14, 124),
-        (12, 145), (14, 163), (19, 176), (25, 181), (30, 176), (32, 168),
-        (32, 181), (81, 181), (82, 168), (85, 176), (91, 181), (96, 176),
-        (100, 162), (100, 140), (98, 114), (97, 92), (93, 76), (87, 65),
-        (77, 60), (69, 57), (63, 66), (47, 66), (42, 58)
-    ], fill=255)
-
-    # Legs.
-    d.polygon([
-        (31, 176), (54, 176), (55, 214), (53, 252), (52, 287), (49, 320),
-        (46, 329), (31, 329), (29, 319), (31, 292), (30, 258), (30, 220)
-    ], fill=255)
-    d.polygon([
-        (56, 176), (82, 176), (81, 219), (82, 258), (81, 292), (84, 319),
-        (82, 329), (65, 329), (61, 321), (60, 292), (59, 256), (57, 219)
-    ], fill=255)
-
-    # Shoes.
-    d.polygon([
-        (28, 322), (48, 322), (50, 328), (52, 333), (51, 340),
-        (46, 344), (24, 344), (21, 341), (22, 333), (25, 327)
-    ], fill=255)
-    d.polygon([
-        (64, 322), (84, 322), (88, 328), (91, 334), (90, 340),
-        (86, 344), (64, 344), (61, 341), (61, 333)
-    ], fill=255)
-
-    mask = mask.filter(ImageFilter.GaussianBlur(0.45))
-    cut = crop.copy()
-    cut.putalpha(mask)
-    cut = cut.crop((8, 5, 103, 350))
-    box = cut.getchannel("A").getbbox()
+    box = keyed.getchannel("A").getbbox()
     if box is None:
-        raise ValueError("Leon front turnaround extraction produced no pixels")
-    figure = cut.crop(box)
+        raise ValueError("Leon front-source extraction produced no pixels")
+    figure = keyed.crop(box)
 
     scale = min(330.0 / figure.width, 600.0 / figure.height)
     size = (round(figure.width * scale), round(figure.height * scale))
     figure = figure.resize(size, Image.Resampling.LANCZOS)
 
-    # A mild post-upscale sharpen helps preserve tattoo/hoodie edges at phone-overlay size.
+    # A mild post-downscale sharpen helps preserve tattoo/hoodie edges at phone-overlay size.
     rgb = ImageEnhance.Sharpness(figure.convert("RGB")).enhance(1.35)
     figure = Image.merge("RGBA", (*rgb.split(), figure.getchannel("A")))
 
@@ -220,7 +185,7 @@ def build(source_path: Path, landmarks_path: Path, output_dir: Path) -> None:
     manifest = build_manifest(master, master, source_bytes, landmarks)
     manifest["reference_width"] = sheet.width
     manifest["reference_height"] = sheet.height
-    manifest["reference_source"] = "docs/leon-reference/leon-character-sheet.png"
+    manifest["reference_source"] = "docs/leon-reference/leon-front-source.png"
 
     output_dir.mkdir(parents=True, exist_ok=True)
     master.save(output_dir / "leon.png", format="PNG", optimize=False)
