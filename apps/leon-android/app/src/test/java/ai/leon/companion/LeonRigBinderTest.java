@@ -82,6 +82,32 @@ public class LeonRigBinderTest {
     }
 
     @Test
+    public void breathingMustNotChangeTheHeadsOrArmsSizeOnScreen() {
+        // Chest is the parent of neck/head and of both shoulders. An uncorrected chest breathing
+        // scale multiplies through the whole chain, so a real device shows the head and arms
+        // visibly swelling and shrinking with every breath -- exactly the "unnatural, getting
+        // bigger and smaller" defect a person on the phone actually saw. World-space scale
+        // (not the bone's own local scale) is what the mesh renderer and a viewer's eye see.
+        binder.apply(pose);
+        float restHeadScale = worldScaleY(rig.bone(LeonRig.Bones.HEAD));
+        float restArmScale = worldScaleY(rig.bone(LeonRig.Bones.SHOULDER_L));
+
+        pose.set(LeonChannel.CHEST_BREATH, 1f);
+        binder.apply(pose);
+
+        assertEquals("a full breath must not change the head's rendered size", restHeadScale,
+                worldScaleY(rig.bone(LeonRig.Bones.HEAD)), 0.001f);
+        assertEquals("a full breath must not change the shoulder/arm rendered size", restArmScale,
+                worldScaleY(rig.bone(LeonRig.Bones.SHOULDER_L)), 0.001f);
+    }
+
+    /** World-space Y scale magnitude of a solved bone, independent of its own local scale field. */
+    private static float worldScaleY(ai.leon.companion.rig.Bone bone) {
+        ai.leon.companion.rig.Mat2D w = bone.world();
+        return (float) Math.hypot(w.c, w.d);
+    }
+
+    @Test
     public void headYawShiftsTheHeadAndCounterShiftsTheFaceLayers() {
         binder.apply(pose);
         float restHeadX = rig.bone(LeonRig.Bones.HEAD).offsetX;

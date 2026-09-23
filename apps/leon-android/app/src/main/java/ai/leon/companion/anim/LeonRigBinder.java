@@ -167,15 +167,24 @@ public final class LeonRigBinder {
         root.scaleY = scale;
 
         // ---- torso ----
+        // Breathing scales the CHEST bone so the ribcage region of the mesh rises and falls. Chest
+        // is the parent of the neck/head chain AND of both shoulders, so left uncorrected that scale
+        // multiplies through and the head and arms visibly swell with every breath -- on a real body
+        // the head does not get larger when you inhale. neckCounterScale below cancels the chest's
+        // scale contribution at the neck (and so at the head, its child) and at both shoulders, so
+        // only the torso mesh region actually changes size; the neck/shoulders still shift position
+        // slightly with the chest lift, which is what a real breath looks like from the outside.
         float breath = Mathx.clamp01(pose.get(LeonChannel.CHEST_BREATH));
         chest.scaleY = 1f + BREATH_CHEST_Y * breath;
         chest.scaleX = 1f + BREATH_CHEST_X * breath;
         chest.offsetY = -BREATH_LIFT * breath;
-        torso.scaleY = 1f + BREATH_CHEST_Y * 0.6f * breath;
 
         float twist = clampSigned(pose.get(LeonChannel.TORSO_TWIST));
         chest.scaleX *= 1f - TORSO_TWIST_SQUASH * Math.abs(twist);
         chest.offsetX = twist * 4f;
+
+        neck.scaleX = 1f / chest.scaleX;
+        neck.scaleY = 1f / chest.scaleY;
 
         float leanX = clampSigned(pose.get(LeonChannel.TORSO_LEAN_X));
         float leanY = clampSigned(pose.get(LeonChannel.TORSO_LEAN_Y));
@@ -190,12 +199,19 @@ public final class LeonRigBinder {
         thighR.rotationDeg = -weight * WEIGHT_SHIFT_DEG * 1.4f;
 
         // ---- shoulders (independent, plus a breath-driven lift) ----
+        // Counter-scaled for the same reason as the neck: shoulders are chest's children too, and
+        // both arm chains hang from them, so an uncorrected chest breath would swell the whole upper
+        // body on every inhale instead of just lifting the shoulders slightly.
         float shL = clampSigned(pose.get(LeonChannel.SHOULDER_L));
         float shR = clampSigned(pose.get(LeonChannel.SHOULDER_R));
         shoulderL.rotationDeg = shL * SHOULDER_DEG;
         shoulderL.offsetY = -shL * SHOULDER_LIFT - breath * 3f;
+        shoulderL.scaleX = 1f / chest.scaleX;
+        shoulderL.scaleY = 1f / chest.scaleY;
         shoulderR.rotationDeg = -shR * SHOULDER_DEG;
         shoulderR.offsetY = -shR * SHOULDER_LIFT - breath * 3f;
+        shoulderR.scaleX = 1f / chest.scaleX;
+        shoulderR.scaleY = 1f / chest.scaleY;
 
         // ---- arms ----
         armL.rotationDeg = clampSigned(pose.get(LeonChannel.ARM_L_SWING)) * ARM_SWING_DEG;
