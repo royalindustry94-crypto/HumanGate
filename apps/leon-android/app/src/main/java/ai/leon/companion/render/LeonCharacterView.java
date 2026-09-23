@@ -7,7 +7,6 @@ import android.view.Choreographer;
 import android.view.View;
 
 import ai.leon.companion.anim.LeonAnimationController;
-import ai.leon.companion.asset.LeonArtProvider;
 import ai.leon.companion.rig.Rig;
 
 /**
@@ -27,7 +26,7 @@ public final class LeonCharacterView extends View {
     private static final long MAX_FRAME_NANOS = 100_000_000L;
 
     private final LeonAnimationController controller;
-    private final LeonRenderer renderer;
+    private final LeonPuppetRenderer renderer;
     private final Choreographer choreographer;
 
     private long lastFrameNanos;
@@ -58,18 +57,18 @@ public final class LeonCharacterView extends View {
     };
 
     public LeonCharacterView(Context context, Rig rig, LeonAnimationController controller,
-                             LeonArtProvider art) {
+                             ProductionLeonTexture texture) {
         super(context);
         if (controller == null) throw new IllegalArgumentException("animation controller required");
         this.controller = controller;
-        this.renderer = new LeonRenderer(rig, art);
+        this.renderer = new LeonPuppetRenderer(rig, texture);
         this.choreographer = Choreographer.getInstance();
         setBackgroundColor(Color.TRANSPARENT);
         // Leon must look like he is standing on the user's screen, not sitting on a card.
         setWillNotDraw(false);
     }
 
-    public LeonRenderer renderer() {
+    public LeonPuppetRenderer renderer() {
         return renderer;
     }
 
@@ -147,7 +146,7 @@ public final class LeonCharacterView extends View {
         renderer.draw(canvas);
     }
 
-    /** Releases the loop. The art provider is owned by the caller and released separately. */
+    /** Releases the animation loop. The production texture is owned by the caller. */
     public void release() {
         stopLoop();
         controller.release();

@@ -8,6 +8,7 @@ on:
       - ".github/workflows/leon-android-apk.yml"
   push:
     branches:
+      - main
       - "claude/**"
       - "feature/leon-**"
     paths:
@@ -33,8 +34,35 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      # The animation core is plain Java with no Android dependencies, so it is fully
-      # unit-testable. These must pass before an APK is produced.
+      - name: Python image tooling
+        run: python3 -m pip install --disable-pip-version-check pillow==11.3.0
+
+      - name: Production asset contract tests
+        working-directory: apps/leon-android/tools
+        run: python3 -m unittest -v test_build_leon_production.py test_render_contract.py test_validate_emulator_screenshot.py
+
+      - name: Generate deterministic Leon previews
+        working-directory: apps/leon-android/tools
+        run: python3 render_contract.py --sheet ../../../docs/leon-reference/leon-character-sheet.png --out ../app/build/reports/leon-preview
+
+      - name: Upload Leon visual contract
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Leon-visual-contract
+          path: apps/leon-android/app/build/reports/leon-preview/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Leon reference diagnostics
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Leon-reference-diagnostics
+          path: |
+            docs/leon-reference/leon-character-sheet.png
+            docs/leon-reference/leon-reference.png
+          if-no-files-found: error
+          retention-days: 2
+
       - name: Unit tests
         working-directory: apps/leon-android
         run: gradle :app:testDebugUnitTest --stacktrace
@@ -63,7 +91,53 @@ jobs:
 
       - name: Build debug APK
         working-directory: apps/leon-android
-        run: gradle :app:assembleDebug --stacktrace
+        run: gradle :app:assembleDebug -PleonVersionCode=${{ github.run_number }} --stacktrace
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Boot exact APK and capture Android screenshots
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
+          script: |
+            mkdir -p apps/leon-android/app/build/reports/leon-preview
+            adb install -r apps/leon-android/app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -W -n ai.leon.companion/.MainActivity --ez ai.leon.companion.VISUAL_HOST true --es ai.leon.companion.TEST_POSE idle --ez ai.leon.companion.DISABLE_RANDOM true
+            sleep 3
+            adb exec-out screencap -p > apps/leon-android/app/build/reports/leon-preview/emulator-main.png
+            adb shell am force-stop ai.leon.companion
+            adb shell appops set ai.leon.companion SYSTEM_ALERT_WINDOW allow
+            adb shell am start -W -n ai.leon.companion/.MainActivity --ez ai.leon.companion.OVERLAY_HOST true --ez ai.leon.companion.START_TEST_OVERLAY true
+            sleep 3
+            adb exec-out screencap -p > apps/leon-android/app/build/reports/leon-preview/emulator-overlay.png
+
+      - name: Validate emulator screenshots
+        working-directory: apps/leon-android/tools
+        run: |
+          python3 validate_emulator_screenshot.py \
+            ../app/build/reports/leon-preview/emulator-main.png \
+            ../app/build/reports/leon-preview/emulator-overlay.png \
+            --min-height-fraction 0.55
+
+      - name: Upload emulator screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Leon-emulator-screenshots
+          path: |
+            apps/leon-android/app/build/reports/leon-preview/emulator-main.png
+            apps/leon-android/app/build/reports/leon-preview/emulator-overlay.png
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

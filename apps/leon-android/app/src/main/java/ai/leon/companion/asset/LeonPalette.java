@@ -3,7 +3,7 @@ package ai.leon.companion.asset;
 import android.graphics.Color;
 
 /**
- * Leon's colour scheme, in one place so the development rig stays visually consistent and so the
+ * Leon's colour scheme, in one place so the built-in artwork stays visually consistent and so the
  * production art brief has exact values to match.
  */
 public final class LeonPalette {

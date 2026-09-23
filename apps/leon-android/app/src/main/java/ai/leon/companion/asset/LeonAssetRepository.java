@@ -15,7 +15,8 @@ import java.util.Set;
 /**
  * Decides which artwork the renderer draws, and says so plainly.
  *
- * <p>Production art files win over the bundled development rig, per layer. What the repository will
+ * <p>Order of preference per layer: an individual art file, then a slice of the single photo or
+ * render source, then the built-in drawing. What the repository will
  * not do is quietly present a mixed or incomplete set as finished: {@link #report()} names the
  * source of every layer and lists any the production set is missing, and the control centre shows
  * that report. A partially delivered Leon therefore looks partially delivered.
@@ -23,8 +24,9 @@ import java.util.Set;
 public final class LeonAssetRepository implements LeonArtProvider {
     private static final String TAG = "LeonArt";
 
-    private final AssetDirArtProvider production;
-    private final DevRigArt development;
+    private final PhotoLayerArtProvider photo;
+    private final AssetDirArtProvider custom;
+    private final ProceduralLeonArt builtIn;
     private final List<String> missingFromProduction = new ArrayList<>();
     private final Set<String> requiredKeys = new LinkedHashSet<>();
     private boolean released;
@@ -33,26 +35,26 @@ public final class LeonAssetRepository implements LeonArtProvider {
         if (rig == null) throw new IllegalArgumentException("rig required");
         for (RigPart part : rig.parts()) requiredKeys.add(part.artKey);
 
-        this.production = AssetDirArtProvider.createIfPresent(context);
-        this.development = new DevRigArt(rig, artScale);
+        this.photo = PhotoLayerArtProvider.createIfPresent(context, rig);
+        this.custom = AssetDirArtProvider.createIfPresent(context);
+        this.builtIn = new ProceduralLeonArt(rig, artScale);
 
-        if (production == null) {
-            missingFromProduction.addAll(requiredKeys);
-        } else {
-            Set<String> available = production.availableKeys();
-            for (String key : requiredKeys) {
-                if (!available.contains(key)) missingFromProduction.add(key);
-            }
+        Set<String> available = custom == null
+                ? java.util.Collections.<String>emptySet() : custom.availableKeys();
+        for (String key : requiredKeys) {
+            boolean covered = available.contains(key)
+                    || (photo != null && PhotoLayerArtProvider.coversKey(key));
+            if (!covered) missingFromProduction.add(key);
         }
         Log.i(TAG, report());
     }
 
-    /** True once every rig layer is covered by real art files. */
+    /** True once every rig layer is covered by custom art files rather than the built-in art. */
     public boolean hasCompleteProductionArt() {
-        return production != null && missingFromProduction.isEmpty();
+        return (custom != null || photo != null) && missingFromProduction.isEmpty();
     }
 
-    /** Layers the production art set does not yet supply. */
+    /** Layers no custom art file supplies, which the built-in artwork draws instead. */
     public List<String> missingFromProduction() {
         return java.util.Collections.unmodifiableList(missingFromProduction);
     }
@@ -61,25 +63,25 @@ public final class LeonAssetRepository implements LeonArtProvider {
         return requiredKeys.size();
     }
 
-    /** Bitmap memory held by the development rig. Shown in the control centre's diagnostics. */
+    /** Bitmap memory held by Leon's built-in artwork. Shown in the control centre's diagnostics. */
     public long developmentArtBytes() {
-        return development.allocatedBytes();
+        return builtIn.allocatedBytes();
     }
 
     /** One-line summary for logs and the control centre. */
     public String report() {
         int supplied = requiredKeys.size() - missingFromProduction.size();
-        if (production == null) {
-            return "Leon art: 0/" + requiredKeys.size() + " layers from production files; "
-                    + "all layers drawn by the bundled development rig.";
+        if (custom == null && photo == null) {
+            return "Leon art: all " + requiredKeys.size() + " layers from the built-in artwork.";
         }
         if (missingFromProduction.isEmpty()) {
-            return "Leon art: " + requiredKeys.size() + "/" + requiredKeys.size()
-                    + " layers from production files.";
+            return "Leon art: all " + requiredKeys.size() + " layers from "
+                    + (photo != null ? "the photo source" : "custom art files") + ".";
         }
-        return "Leon art: " + supplied + "/" + requiredKeys.size()
-                + " layers from production files; " + missingFromProduction.size()
-                + " still drawn by the development rig (" + summariseMissing() + ").";
+        String from = photo != null ? "the photo source" : "custom art files";
+        return "Leon art: " + supplied + "/" + requiredKeys.size() + " layers from " + from + "; "
+                + missingFromProduction.size() + " from the built-in artwork ("
+                + summariseMissing() + ").";
     }
 
     private String summariseMissing() {
@@ -103,17 +105,23 @@ public final class LeonAssetRepository implements LeonArtProvider {
     @Override
     public Bitmap bitmapFor(String artKey) {
         if (released) return null;
-        if (production != null) {
-            Bitmap b = production.bitmapFor(artKey);
+        // Per-layer art files win, then the photo source, then the built-in drawing.
+        if (custom != null) {
+            Bitmap b = custom.bitmapFor(artKey);
             if (b != null) return b;
         }
-        return development.bitmapFor(artKey);
+        if (photo != null) {
+            Bitmap b = photo.bitmapFor(artKey);
+            if (b != null) return b;
+        }
+        return builtIn.bitmapFor(artKey);
     }
 
     @Override
     public void release() {
         released = true;
-        if (production != null) production.release();
-        development.release();
+        if (custom != null) custom.release();
+        if (photo != null) photo.release();
+        builtIn.release();
     }
 }

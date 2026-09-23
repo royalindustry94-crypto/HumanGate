@@ -22,7 +22,7 @@ public class RigTest {
     public void leonRigBuildsWithBonesAndLayers() {
         Rig rig = LeonRig.build();
         assertEquals(27, rig.bones().size());
-        assertEquals(45, rig.parts().size());
+        assertEquals(46, rig.parts().size());
         assertEquals(LeonRig.DESIGN_W, rig.designWidth, EPS);
         assertEquals(LeonRig.DESIGN_H, rig.designHeight, EPS);
     }
@@ -128,6 +128,20 @@ public class RigTest {
         assertTrue("head above neck", head < neck);
         assertTrue("neck above chest", neck < chest);
         assertTrue("chest above hips", chest < hips);
+    }
+
+    @Test
+    public void photoModeHasAFullDesignContinuityLayerAndUniqueLegArt() {
+        Rig rig = LeonRig.build();
+        RigPart backfill = rig.part(LeonRig.Parts.PHOTO_BACKFILL);
+        assertEquals(LeonRig.Bones.ROOT, backfill.bone.name);
+        assertEquals(LeonRig.DESIGN_W, backfill.width, EPS);
+        assertEquals(LeonRig.DESIGN_H, backfill.height, EPS);
+
+        assertTrue(!rig.part(LeonRig.Parts.THIGH_L).artKey
+                .equals(rig.part(LeonRig.Parts.THIGH_R).artKey));
+        assertTrue(!rig.part(LeonRig.Parts.SHIN_L).artKey
+                .equals(rig.part(LeonRig.Parts.SHIN_R).artKey));
     }
 
     @Test

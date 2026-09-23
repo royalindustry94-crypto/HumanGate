@@ -1,10 +1,10 @@
 package ai.leon.companion.rig;
 
 /**
- * The canonical Leon skeleton and layer stack: 27 bones and 45 independently transformable layers.
+ * The canonical Leon skeleton and layer stack: 27 bones and 46 independently transformable layers.
  *
  * <p>This class defines <em>structure only</em> — no artwork. Bitmaps are resolved later from
- * {@link RigPart#artKey}, which is how the placeholder development rig and finished production art
+ * {@link RigPart#artKey}, which is how the built-in artwork and any custom art files
  * can share one skeleton, one binder and one state machine.
  *
  * <p>Character spec encoded here: bald head with a tattoo wrapping the side and back of the skull,
@@ -14,23 +14,27 @@ package ai.leon.companion.rig;
  */
 public final class LeonRig {
     /**
-     * Design space: 384 x 768, origin top-left, +y down (Canvas convention). The figure is laid out
-     * as a stylised ~5.3-head proportion, head crown at y=46 and sneaker sole at y=738, so the whole
-     * character fits the box with no part overrunning it.
+     * Design space: 384 x 768, origin top-left, +y down (Canvas convention). Stylised ~6-head
+     * figure, crown at y=44 and sole at y=732, laid out so the arms hang OUTSIDE the torso
+     * silhouette — a sleeve tucked behind the body reads as a rectangle stuck to the side rather
+     * than as a limb.
      */
     public static final float DESIGN_W = 384f;
     public static final float DESIGN_H = 768f;
 
     private static final float CENTRE_X = 192f;
-    /** Ground line. The root sits here so a weight shift or the minimised scale pivots at the feet. */
-    private static final float GROUND_Y = 756f;
+    /** Ground line, just under the soles, so a weight shift or the minimised scale pivots there. */
+    private static final float GROUND_Y = 740f;
 
     // Vertical landmarks, all in design space.
-    private static final float HIP_Y = 392f;
-    private static final float SPINE_Y = 352f;
-    private static final float CHEST_Y = 214f;   // shoulder line
-    private static final float NECK_Y = 172f;    // just under the chin
-    private static final float HEAD_Y = 111f;    // head centre; art spans 46..176
+    private static final float HIP_Y = 398f;
+    private static final float SPINE_Y = 348f;
+    private static final float CHEST_Y = 206f;   // shoulder line
+    private static final float NECK_Y = 178f;    // base of the skull
+    private static final float HEAD_Y = 112f;    // head centre; art spans 44..180
+
+    /** Shoulder joints sit wide enough that the sleeves clear the torso's half-width of 78. */
+    private static final float SHOULDER_X = 70f;
 
     private LeonRig() {}
 
@@ -46,90 +50,99 @@ public final class LeonRig {
         b.bone(Bones.HEAD, Bones.NECK, 0f, HEAD_Y - NECK_Y);
 
         // Head sub-joints. Everything here inherits the head turn for free.
-        b.bone(Bones.JAW, Bones.HEAD, 0f, 36f);
-        b.bone(Bones.BROW_L, Bones.HEAD, -27f, -24f);
-        b.bone(Bones.BROW_R, Bones.HEAD, 27f, -24f);
-        b.bone(Bones.EYE_L, Bones.HEAD, -25f, -4f);
-        b.bone(Bones.EYE_R, Bones.HEAD, 25f, -4f);
+        b.bone(Bones.JAW, Bones.HEAD, 0f, 38f);
+        b.bone(Bones.BROW_L, Bones.HEAD, -29f, -24f);
+        b.bone(Bones.BROW_R, Bones.HEAD, 29f, -24f);
+        b.bone(Bones.EYE_L, Bones.HEAD, -27f, -2f);
+        b.bone(Bones.EYE_R, Bones.HEAD, 27f, -2f);
 
         // Hood and necklace hang off the chest. The hood is worn DOWN, bunched behind the shoulders.
-        b.bone(Bones.HOOD, Bones.CHEST, 0f, -26f);
-        b.bone(Bones.NECKLACE, Bones.CHEST, 0f, -28f);
+        b.bone(Bones.HOOD, Bones.CHEST, 0f, -22f);
+        b.bone(Bones.NECKLACE, Bones.CHEST, 0f, -26f);
 
-        // Arms. The screen-left arm is layered behind the torso, the screen-right in front, so both
-        // read as separate limbs instead of merging into the silhouette.
-        b.bone(Bones.SHOULDER_L, Bones.CHEST, -64f, -12f);
-        b.bone(Bones.ARM_L, Bones.SHOULDER_L, 0f, 8f);
-        b.bone(Bones.FOREARM_L, Bones.ARM_L, 0f, 118f);
-        b.bone(Bones.HAND_L, Bones.FOREARM_L, 0f, 104f);
+        // Arms. Screen-left is layered behind the torso, screen-right in front, and both hang clear
+        // of the body so each reads as a limb.
+        b.bone(Bones.SHOULDER_L, Bones.CHEST, -SHOULDER_X, -4f);
+        b.bone(Bones.ARM_L, Bones.SHOULDER_L, 0f, 10f);
+        b.bone(Bones.FOREARM_L, Bones.ARM_L, 0f, 112f);
+        b.bone(Bones.HAND_L, Bones.FOREARM_L, 0f, 100f);
 
-        b.bone(Bones.SHOULDER_R, Bones.CHEST, 64f, -12f);
-        b.bone(Bones.ARM_R, Bones.SHOULDER_R, 0f, 8f);
-        b.bone(Bones.FOREARM_R, Bones.ARM_R, 0f, 118f);
-        b.bone(Bones.HAND_R, Bones.FOREARM_R, 0f, 104f);
+        b.bone(Bones.SHOULDER_R, Bones.CHEST, SHOULDER_X, -4f);
+        b.bone(Bones.ARM_R, Bones.SHOULDER_R, 0f, 10f);
+        b.bone(Bones.FOREARM_R, Bones.ARM_R, 0f, 112f);
+        b.bone(Bones.HAND_R, Bones.FOREARM_R, 0f, 100f);
 
         // Legs.
-        b.bone(Bones.THIGH_L, Bones.HIPS, -34f, 10f);
-        b.bone(Bones.SHIN_L, Bones.THIGH_L, 0f, 145f);
-        b.bone(Bones.FOOT_L, Bones.SHIN_L, 0f, 150f);
-        b.bone(Bones.THIGH_R, Bones.HIPS, 34f, 10f);
-        b.bone(Bones.SHIN_R, Bones.THIGH_R, 0f, 145f);
-        b.bone(Bones.FOOT_R, Bones.SHIN_R, 0f, 150f);
+        b.bone(Bones.THIGH_L, Bones.HIPS, -36f, 8f);
+        b.bone(Bones.SHIN_L, Bones.THIGH_L, 0f, 142f);
+        b.bone(Bones.FOOT_L, Bones.SHIN_L, 0f, 144f);
+        b.bone(Bones.THIGH_R, Bones.HIPS, 36f, 8f);
+        b.bone(Bones.SHIN_R, Bones.THIGH_R, 0f, 142f);
+        b.bone(Bones.FOOT_R, Bones.SHIN_R, 0f, 144f);
 
         // ---------------- layers, back to front ----------------
         // Presentation-only state ring. Never carries character animation.
-        b.part(Parts.AURA, Art.AURA, Bones.CHEST, 0f, 120f, 300f, 300f, 0.5f, 0.5f, 0f, 0, null);
+        b.part(Parts.AURA, Art.AURA, Bones.CHEST, 0f, 110f, 320f, 320f, 0.5f, 0.5f, 0f, 0, null);
 
-        b.part(Parts.HOOD_DOWN, Art.HOOD_DOWN, Bones.HOOD, 0f, 22f, 150f, 100f, 0.5f, 0.12f, 0f, 5, null);
+        // Photo-mode continuity layer. PhotoLayerArtProvider fills ONLY source pixels that fall
+        // outside the independently animated major-part rectangles, so the rest pose reconstructs
+        // the whole photographed character without turning Leon back into one flat moving image.
+        // It is bound to ROOT so it follows minimised scaling but not breathing/head/limb motion.
+        b.part(Parts.PHOTO_BACKFILL, Art.PHOTO_BACKFILL, Bones.ROOT,
+                -CENTRE_X, -GROUND_Y, DESIGN_W, DESIGN_H, 0f, 0f, 0f, 4, null);
+
+        b.part(Parts.HOOD_DOWN, Art.HOOD_DOWN, Bones.HOOD, 0f, 20f, 164f, 104f, 0.5f, 0.1f, 0f, 5, null);
 
         // Legs and white sneakers.
-        b.part(Parts.THIGH_L, Art.PANT_LEG, Bones.THIGH_L, 0f, 70f, 54f, 150f, 0.5f, 0.5f, 0f, 10, null);
-        b.part(Parts.THIGH_R, Art.PANT_LEG, Bones.THIGH_R, 0f, 70f, 54f, 150f, 0.5f, 0.5f, 0f, 10, null);
-        b.part(Parts.SHIN_L, Art.PANT_SHIN, Bones.SHIN_L, 0f, 72f, 46f, 152f, 0.5f, 0.5f, 0f, 11, null);
-        b.part(Parts.SHIN_R, Art.PANT_SHIN, Bones.SHIN_R, 0f, 72f, 46f, 152f, 0.5f, 0.5f, 0f, 11, null);
-        b.part(Parts.SHOE_L, Art.SNEAKER_L, Bones.FOOT_L, -3f, 18f, 78f, 46f, 0.5f, 0.5f, 0f, 12, null);
-        b.part(Parts.SHOE_R, Art.SNEAKER_R, Bones.FOOT_R, 3f, 18f, 78f, 46f, 0.5f, 0.5f, 0f, 12, null);
+        // Left/right legs intentionally have distinct art keys. A single source photo cannot reuse
+        // one leg crop on both sides without cloning the left-leg pixels onto the right leg.
+        b.part(Parts.THIGH_L, Art.PANT_LEG_L, Bones.THIGH_L, 0f, 70f, 58f, 148f, 0.5f, 0.5f, 0f, 10, null);
+        b.part(Parts.THIGH_R, Art.PANT_LEG_R, Bones.THIGH_R, 0f, 70f, 58f, 148f, 0.5f, 0.5f, 0f, 10, null);
+        b.part(Parts.SHIN_L, Art.PANT_SHIN_L, Bones.SHIN_L, 0f, 70f, 50f, 146f, 0.5f, 0.5f, 0f, 11, null);
+        b.part(Parts.SHIN_R, Art.PANT_SHIN_R, Bones.SHIN_R, 0f, 70f, 50f, 146f, 0.5f, 0.5f, 0f, 11, null);
+        b.part(Parts.SHOE_L, Art.SNEAKER_L, Bones.FOOT_L, -6f, 14f, 84f, 48f, 0.5f, 0.45f, 0f, 12, null);
+        b.part(Parts.SHOE_R, Art.SNEAKER_R, Bones.FOOT_R, 6f, 14f, 84f, 48f, 0.5f, 0.45f, 0f, 12, null);
 
         // Screen-left arm, behind the torso.
-        b.part(Parts.ARM_L_UPPER, Art.SLEEVE_UPPER_L, Bones.ARM_L, 0f, 54f, 50f, 124f, 0.5f, 0.42f, 0f, 14, null);
-        b.part(Parts.ARM_L_FORE, Art.FOREARM_TATTOO_L, Bones.FOREARM_L, 0f, 48f, 42f, 112f, 0.5f, 0.42f, 0f, 15, null);
-        b.part(Parts.HAND_L, Art.HAND_L, Bones.HAND_L, 0f, 18f, 42f, 52f, 0.5f, 0.3f, 0f, 16, null);
+        b.part(Parts.ARM_L_UPPER, Art.SLEEVE_UPPER_L, Bones.ARM_L, 0f, 50f, 54f, 116f, 0.5f, 0.45f, 0f, 14, null);
+        b.part(Parts.ARM_L_FORE, Art.FOREARM_TATTOO_L, Bones.FOREARM_L, 0f, 46f, 41f, 104f, 0.5f, 0.42f, 0f, 15, null);
+        b.part(Parts.HAND_L, Art.HAND_L, Bones.HAND_L, 0f, 14f, 33f, 42f, 0.5f, 0.22f, 0f, 16, null);
 
         // Skin and tattoos sit BEHIND the hoodie; the hoodie art carries a transparent V-neck so the
         // neck and upper-chest tattoos show through the opening instead of being painted over it.
-        b.part(Parts.NECK, Art.NECK_SKIN, Bones.NECK, 0f, 10f, 48f, 60f, 0.5f, 0.5f, 0f, 17, null);
-        b.part(Parts.NECK_TATTOO, Art.NECK_TATTOO, Bones.NECK, 0f, 12f, 48f, 58f, 0.5f, 0.5f, 0f, 18, null);
-        b.part(Parts.CHEST_TATTOO, Art.CHEST_TATTOO, Bones.CHEST, 0f, 22f, 58f, 72f, 0.5f, 0.5f, 0f, 19, null);
+        b.part(Parts.NECK, Art.NECK_SKIN, Bones.NECK, 0f, 12f, 56f, 54f, 0.5f, 0.5f, 0f, 17, null);
+        b.part(Parts.NECK_TATTOO, Art.NECK_TATTOO, Bones.NECK, 0f, 12f, 56f, 54f, 0.5f, 0.5f, 0f, 18, null);
+        b.part(Parts.CHEST_TATTOO, Art.CHEST_TATTOO, Bones.CHEST, 0f, 36f, 66f, 80f, 0.5f, 0.5f, 0f, 19, null);
 
-        b.part(Parts.TORSO, Art.HOODIE_BODY, Bones.CHEST, 0f, 90f, 176f, 200f, 0.5f, 0.5f, 0f, 20, null);
-        b.part(Parts.HOODIE_POCKET, Art.HOODIE_POCKET, Bones.CHEST, 0f, 160f, 110f, 46f, 0.5f, 0.5f, 0f, 21, null);
-        b.part(Parts.NECKLACE, Art.NECKLACE, Bones.NECKLACE, 0f, 34f, 92f, 76f, 0.5f, 0.08f, 0f, 25, null);
+        b.part(Parts.TORSO, Art.HOODIE_BODY, Bones.CHEST, 0f, 99f, 156f, 210f, 0.5f, 0.5f, 0f, 20, null);
+        b.part(Parts.HOODIE_POCKET, Art.HOODIE_POCKET, Bones.CHEST, 0f, 168f, 104f, 44f, 0.5f, 0.5f, 0f, 21, null);
+        b.part(Parts.NECKLACE, Art.NECKLACE, Bones.NECKLACE, 0f, 30f, 96f, 84f, 0.5f, 0.06f, 0f, 25, null);
 
         // Screen-right arm, in front of the torso.
-        b.part(Parts.ARM_R_UPPER, Art.SLEEVE_UPPER_R, Bones.ARM_R, 0f, 54f, 50f, 124f, 0.5f, 0.42f, 0f, 30, null);
-        b.part(Parts.ARM_R_FORE, Art.FOREARM_TATTOO_R, Bones.FOREARM_R, 0f, 48f, 42f, 112f, 0.5f, 0.42f, 0f, 31, null);
-        b.part(Parts.HAND_R, Art.HAND_R, Bones.HAND_R, 0f, 18f, 42f, 52f, 0.5f, 0.3f, 0f, 32, null);
+        b.part(Parts.ARM_R_UPPER, Art.SLEEVE_UPPER_R, Bones.ARM_R, 0f, 50f, 54f, 116f, 0.5f, 0.45f, 0f, 30, null);
+        b.part(Parts.ARM_R_FORE, Art.FOREARM_TATTOO_R, Bones.FOREARM_R, 0f, 46f, 41f, 104f, 0.5f, 0.42f, 0f, 31, null);
+        b.part(Parts.HAND_R, Art.HAND_R, Bones.HAND_R, 0f, 14f, 33f, 42f, 0.5f, 0.22f, 0f, 32, null);
 
         // Head stack.
-        b.part(Parts.HEAD_BASE, Art.HEAD_BALD, Bones.HEAD, 0f, 0f, 104f, 130f, 0.5f, 0.5f, 0f, 35, null);
-        b.part(Parts.HEAD_TATTOO, Art.HEAD_TATTOO_WRAP, Bones.HEAD, 0f, -12f, 104f, 92f, 0.5f, 0.5f, 0f, 36, null);
-        b.part(Parts.EAR_L, Art.EAR_L, Bones.HEAD, -50f, 4f, 20f, 34f, 0.5f, 0.5f, 0f, 37, null);
-        b.part(Parts.EAR_R, Art.EAR_R, Bones.HEAD, 50f, 4f, 20f, 34f, 0.5f, 0.5f, 0f, 37, null);
+        b.part(Parts.HEAD_BASE, Art.HEAD_BALD, Bones.HEAD, 0f, 0f, 112f, 136f, 0.5f, 0.5f, 0f, 35, null);
+        b.part(Parts.HEAD_TATTOO, Art.HEAD_TATTOO_WRAP, Bones.HEAD, 0f, -16f, 112f, 86f, 0.5f, 0.5f, 0f, 36, null);
+        b.part(Parts.EAR_L, Art.EAR_L, Bones.HEAD, -53f, 4f, 22f, 38f, 0.5f, 0.5f, 0f, 37, null);
+        b.part(Parts.EAR_R, Art.EAR_R, Bones.HEAD, 53f, 4f, 22f, 38f, 0.5f, 0.5f, 0f, 37, null);
 
         // Eyes. Each lid is its own layer pivoted at its TOP edge, so a blink is a lid physically
         // closing over the eye rather than the eye bitmap being swapped or squashed.
-        b.part(Parts.EYE_L_WHITE, Art.EYE_WHITE, Bones.EYE_L, 0f, 0f, 30f, 18f, 0.5f, 0.5f, 0f, 40, null);
-        b.part(Parts.EYE_R_WHITE, Art.EYE_WHITE, Bones.EYE_R, 0f, 0f, 30f, 18f, 0.5f, 0.5f, 0f, 40, null);
-        b.part(Parts.IRIS_L, Art.IRIS, Bones.EYE_L, 0f, 0f, 14f, 14f, 0.5f, 0.5f, 0f, 41, null);
-        b.part(Parts.IRIS_R, Art.IRIS, Bones.EYE_R, 0f, 0f, 14f, 14f, 0.5f, 0.5f, 0f, 41, null);
-        b.part(Parts.LID_L, Art.EYELID, Bones.EYE_L, 0f, -10f, 32f, 22f, 0.5f, 0f, 0f, 42, null);
-        b.part(Parts.LID_R, Art.EYELID, Bones.EYE_R, 0f, -10f, 32f, 22f, 0.5f, 0f, 0f, 42, null);
+        b.part(Parts.EYE_L_WHITE, Art.EYE_WHITE, Bones.EYE_L, 0f, 0f, 34f, 20f, 0.5f, 0.5f, 0f, 40, null);
+        b.part(Parts.EYE_R_WHITE, Art.EYE_WHITE, Bones.EYE_R, 0f, 0f, 34f, 20f, 0.5f, 0.5f, 0f, 40, null);
+        b.part(Parts.IRIS_L, Art.IRIS, Bones.EYE_L, 0f, 0f, 16f, 16f, 0.5f, 0.5f, 0f, 41, null);
+        b.part(Parts.IRIS_R, Art.IRIS, Bones.EYE_R, 0f, 0f, 16f, 16f, 0.5f, 0.5f, 0f, 41, null);
+        b.part(Parts.LID_L, Art.EYELID, Bones.EYE_L, 0f, -11f, 36f, 24f, 0.5f, 0f, 0f, 42, null);
+        b.part(Parts.LID_R, Art.EYELID, Bones.EYE_R, 0f, -11f, 36f, 24f, 0.5f, 0f, 0f, 42, null);
 
         // Brows on their own bones — raise, lower and angle independently per side.
-        b.part(Parts.BROW_L, Art.BROW_L, Bones.BROW_L, 0f, 0f, 32f, 11f, 0.5f, 0.5f, 0f, 43, null);
-        b.part(Parts.BROW_R, Art.BROW_R, Bones.BROW_R, 0f, 0f, 32f, 11f, 0.5f, 0.5f, 0f, 43, null);
+        b.part(Parts.BROW_L, Art.BROW_L, Bones.BROW_L, 0f, 0f, 36f, 12f, 0.5f, 0.5f, 0f, 43, null);
+        b.part(Parts.BROW_R, Art.BROW_R, Bones.BROW_R, 0f, 0f, 36f, 12f, 0.5f, 0.5f, 0f, 43, null);
 
-        b.part(Parts.NOSE, Art.NOSE, Bones.HEAD, 0f, 20f, 17f, 24f, 0.5f, 0.4f, 0f, 45, null);
+        b.part(Parts.NOSE, Art.NOSE, Bones.HEAD, 0f, 22f, 18f, 26f, 0.5f, 0.4f, 0f, 45, null);
 
         // Mouth swap group — the viseme set the lip-sync contract promises.
         mouth(b, Parts.MOUTH_CLOSED, Art.MOUTH_CLOSED);
@@ -145,15 +158,15 @@ public final class LeonRig {
 
         // Sunglasses lenses are deliberately translucent so the blink underneath still reads on a
         // phone-sized overlay. See LeonPalette.LENS.
-        b.part(Parts.SUNGLASSES, Art.SUNGLASSES, Bones.HEAD, 0f, -4f, 112f, 40f, 0.5f, 0.5f, 0f, 50, null);
-        b.part(Parts.EARRING, Art.EARRING, Bones.HEAD, -52f, 20f, 11f, 18f, 0.5f, 0.2f, 0f, 51, null);
+        b.part(Parts.SUNGLASSES, Art.SUNGLASSES, Bones.HEAD, 0f, -2f, 124f, 44f, 0.5f, 0.5f, 0f, 50, null);
+        b.part(Parts.EARRING, Art.EARRING, Bones.HEAD, -55f, 22f, 12f, 20f, 0.5f, 0.2f, 0f, 51, null);
 
         return b.build();
     }
 
     private static void mouth(Rig.Builder b, String part, String art) {
         // All mouth shapes share one slot on the jaw bone; per-layer alpha decides which is showing.
-        b.part(part, art, Bones.JAW, 0f, 12f, 46f, 34f, 0.5f, 0.25f, 0f, 46, Groups.MOUTH);
+        b.part(part, art, Bones.JAW, 0f, 8f, 46f, 30f, 0.5f, 0.25f, 0f, 46, Groups.MOUTH);
     }
 
     /** Bone names. Referenced by the binder and by any externally authored rig spec. */
@@ -192,6 +205,7 @@ public final class LeonRig {
     /** Layer names. */
     public static final class Parts {
         public static final String AURA = "aura";
+        public static final String PHOTO_BACKFILL = "photo_backfill";
         public static final String HOOD_DOWN = "hood_down";
         public static final String THIGH_L = "thigh_l";
         public static final String THIGH_R = "thigh_r";
@@ -250,9 +264,12 @@ public final class LeonRig {
     /** Logical art keys. The render layer maps these to bitmaps. */
     public static final class Art {
         public static final String AURA = "aura";
+        public static final String PHOTO_BACKFILL = "photo_backfill";
         public static final String HOOD_DOWN = "hood_down";
-        public static final String PANT_LEG = "pant_leg";
-        public static final String PANT_SHIN = "pant_shin";
+        public static final String PANT_LEG_L = "pant_leg_l";
+        public static final String PANT_LEG_R = "pant_leg_r";
+        public static final String PANT_SHIN_L = "pant_shin_l";
+        public static final String PANT_SHIN_R = "pant_shin_r";
         public static final String SNEAKER_L = "sneaker_l";
         public static final String SNEAKER_R = "sneaker_r";
         public static final String SLEEVE_UPPER_L = "sleeve_upper_l";

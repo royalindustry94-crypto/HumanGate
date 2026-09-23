@@ -4,7 +4,7 @@ import android.graphics.Bitmap;
 
 /**
  * Resolves a rig layer's logical art key to a bitmap. The renderer only ever talks to this
- * interface, so the bundled development rig and finished production art are interchangeable without
+ * interface, so Leon's built-in artwork and any custom art files are interchangeable without
  * a single change to the rig, the animation layer or the overlay.
  */
 public interface LeonArtProvider {
