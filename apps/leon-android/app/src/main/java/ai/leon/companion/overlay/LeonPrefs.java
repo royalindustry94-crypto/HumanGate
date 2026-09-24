@@ -21,6 +21,8 @@ public final class LeonPrefs {
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_HIDDEN_UNTIL = "hidden_until";
     private static final String KEY_RIG_DEBUG = "rig_debug";
+    private static final String KEY_VOICE_BASE_URL = "voice_base_url";
+    private static final String KEY_VOICE_APP_TOKEN = "voice_app_token";
 
     /** Default resting place: right-hand side, a little above the middle. */
     private static final float DEFAULT_FRACTION_X = 1f;
@@ -104,5 +106,23 @@ public final class LeonPrefs {
 
     public void setRigDebugEnabled(boolean enabled) {
         prefs.edit().putBoolean(KEY_RIG_DEBUG, enabled).apply();
+    }
+
+    /** Base URL of the deployed voice backend (apps/api), e.g. https://your-app.vercel.app. */
+    public String leonVoiceBaseUrl() {
+        return prefs.getString(KEY_VOICE_BASE_URL, "");
+    }
+
+    public void setLeonVoiceBaseUrl(String url) {
+        prefs.edit().putString(KEY_VOICE_BASE_URL, url == null ? "" : url.trim()).apply();
+    }
+
+    /** The shared app token the backend's LEON_VOICE_APP_TOKEN checks -- see the Settings screen. */
+    public String leonVoiceAppToken() {
+        return prefs.getString(KEY_VOICE_APP_TOKEN, "");
+    }
+
+    public void setLeonVoiceAppToken(String token) {
+        prefs.edit().putString(KEY_VOICE_APP_TOKEN, token == null ? "" : token.trim()).apply();
     }
 }

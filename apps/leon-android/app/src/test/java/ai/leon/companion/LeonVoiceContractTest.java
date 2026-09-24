@@ -87,9 +87,14 @@ public class LeonVoiceContractTest {
     }
 
     @Test
-    public void manifestExposesTtsEngineDiscoveryWithoutNetworkPermission() throws Exception {
+    public void manifestExposesTtsEngineDiscoveryAndTheRealVoiceBackendPermissions() throws Exception {
+        // INTERNET/RECORD_AUDIO used to be deliberately absent, locking in "no AI brain, no network,
+        // Leon only speaks text you hand him" for this milestone. A real voice backend now exists
+        // (ai.leon.companion.voice.LeonVoiceBackend calling apps/api's /leon/voice-turn), so both are
+        // required; the on-device TTS engine discovery this test also covers is unaffected by that.
         String manifest = manifest();
         assertTrue(manifest.contains("android.intent.action.TTS_SERVICE"));
-        assertFalse(manifest.contains("android.permission.INTERNET"));
+        assertTrue(manifest.contains("android.permission.INTERNET"));
+        assertTrue(manifest.contains("android.permission.RECORD_AUDIO"));
     }
 }
