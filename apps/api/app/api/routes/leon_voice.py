@@ -69,8 +69,10 @@ def _require_app_token(authorization: str | None) -> None:
     if presented.lower().startswith("bearer "):
         presented = presented[7:]
     presented = presented.strip()
-    if not presented or len(presented) != len(expected) or not hmac.compare_digest(
-        presented, expected
+    if (
+        not presented
+        or len(presented) != len(expected)
+        or not hmac.compare_digest(presented, expected)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
