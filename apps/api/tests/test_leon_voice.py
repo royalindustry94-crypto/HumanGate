@@ -53,7 +53,9 @@ def _happy_path_handler(request: httpx.Request) -> httpx.Response:
     if "messages" in str(request.url):
         return httpx.Response(
             200,
-            json={"content": [{"type": "text", "text": "hey there, good to hear from you"}]},
+            json={
+                "content": [{"type": "text", "text": "hey there, good to hear from you"}]
+            },
         )
     raise AssertionError(f"unexpected request: {request.url}")
 
@@ -168,7 +170,9 @@ async def test_malformed_provider_json_becomes_controlled_502(monkeypatch, clien
 async def test_empty_tts_audio_becomes_controlled_502(monkeypatch, client):
     def handler(request: httpx.Request) -> httpx.Response:
         if "audio/speech" in str(request.url):
-            return httpx.Response(200, content=b"", headers={"content-type": "audio/mpeg"})
+            return httpx.Response(
+                200, content=b"", headers={"content-type": "audio/mpeg"}
+            )
         return _happy_path_handler(request)
 
     _install_transport(monkeypatch, handler)
@@ -257,7 +261,9 @@ async def test_malformed_history_is_rejected(client):
 @pytest.mark.asyncio
 async def test_an_upstream_failure_becomes_a_safe_502(monkeypatch, client):
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, text="internal provider error with secrets sk-abc123")
+        return httpx.Response(
+            500, text="internal provider error with secrets sk-abc123"
+        )
 
     _install_transport(monkeypatch, handler)
 
