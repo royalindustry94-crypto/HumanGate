@@ -39,32 +39,46 @@ public final class LeonVoiceRecorder {
      *         requested format is unsupported); the caller has nothing further to wait for.
      */
     public boolean start(Listener listener) {
-        if (recording.get()) return false;
+        // Claim the recording slot atomically: the old `if (recording.get()) return false; ...
+        // recording.set(true)` left a window where two concurrent start() calls could both pass the
+        // check and both open the mic -- two AudioRecords contending for the same hardware, two
+        // capture threads racing to set `listener`, and (if both finish) two uploads of the same
+        // turn. compareAndSet closes that window; every early return below must reset it back to
+        // false so a rejected start() does not permanently wedge the recorder as "recording".
+        if (!recording.compareAndSet(false, true)) return false;
         this.listener = listener;
 
         final int minBufferBytes = AudioRecord.getMinBufferSize(
                 SAMPLE_RATE_HZ, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
         if (minBufferBytes <= 0) {
+            recording.set(false);
             notifyFailed("This device does not support the required audio format.");
             return false;
         }
 
         final AudioRecord record;
         try {
+            // Sized larger than the minimum (not the minimum itself) so the hardware has slack to
+            // buffer audio if the read loop is delayed by scheduling jitter or a GC pause -- Android's
+            // own guidance is to avoid the bare minimum here, since it makes an under/overrun (dropped
+            // or corrupted samples) more likely, not less. This buffer size is unrelated to how much
+            // audio one read() call returns (that is bounded by minBufferBytes in captureLoop below),
+            // so it has no bearing on the MAX_DURATION_MS ceiling.
             record = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, SAMPLE_RATE_HZ,
                     AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
                     minBufferBytes * 4);
         } catch (SecurityException | IllegalArgumentException e) {
+            recording.set(false);
             notifyFailed("Could not start the microphone.");
             return false;
         }
         if (record.getState() != AudioRecord.STATE_INITIALIZED) {
             record.release();
+            recording.set(false);
             notifyFailed("Could not start the microphone.");
             return false;
         }
 
-        recording.set(true);
         captureThread = new Thread(new Runnable() {
             @Override
             public void run() {
