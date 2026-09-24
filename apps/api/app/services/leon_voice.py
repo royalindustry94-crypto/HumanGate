@@ -55,26 +55,54 @@ LEON_SYSTEM_PROMPT = (
 
 
 class LeonVoiceError(RuntimeError):
-    """A provider call failed or is not configured. `detail` is safe to
-    return to the client; it never contains a key or raw provider payload.
+    """A provider call failed or is not configured.
+
+    `detail` and `stage` are safe to return to the client; neither contains
+    credentials or raw provider payloads.
     """
 
-    def __init__(self, detail: str):
+    def __init__(self, detail: str, *, stage: str):
         super().__init__(detail)
         self.detail = detail
+        self.stage = stage
+
+
+def _safe_json(response: httpx.Response, *, stage: str, fallback: str) -> dict:
+    """Decode a provider JSON object without letting malformed 2xx bodies become raw 500s."""
+    try:
+        body = response.json()
+    except ValueError as exc:
+        logger.warning(
+            "leon_voice_provider_invalid_json",
+            extra={"provider_stage": stage, "status_code": response.status_code},
+        )
+        raise LeonVoiceError(fallback, stage=stage) from exc
+    if not isinstance(body, dict):
+        logger.warning(
+            "leon_voice_provider_invalid_shape",
+            extra={"provider_stage": stage, "status_code": response.status_code},
+        )
+        raise LeonVoiceError(fallback, stage=stage)
+    return body
 
 
 def _require_anthropic_key() -> str:
     key = get_settings().anthropic_api_key
     if not key:
-        raise LeonVoiceError("voice conversation is not configured (missing Anthropic key)")
+        raise LeonVoiceError(
+            "voice conversation is not configured (missing Anthropic key)",
+            stage="llm",
+        )
     return key
 
 
 def _require_openai_key() -> str:
     key = get_settings().openai_api_key
     if not key:
-        raise LeonVoiceError("voice conversation is not configured (missing OpenAI key)")
+        raise LeonVoiceError(
+            "voice conversation is not configured (missing OpenAI key)",
+            stage="openai",
+        )
     return key
 
 
@@ -91,18 +119,24 @@ async def transcribe_audio(audio_bytes: bytes, *, filename: str, content_type: s
             )
     except httpx.HTTPError as exc:
         logger.warning("leon_voice_stt_transport_error", extra={"error": str(exc)})
-        raise LeonVoiceError("speech recognition is unavailable right now") from exc
+        raise LeonVoiceError("speech recognition is unavailable right now", stage="stt") from exc
 
     if response.status_code >= 400:
         logger.warning(
             "leon_voice_stt_failed",
             extra={"status_code": response.status_code, "body": response.text[:200]},
         )
-        raise LeonVoiceError("could not understand that audio")
+        raise LeonVoiceError("could not understand that audio", stage="stt")
 
-    text = (response.json().get("text") or "").strip()
-    if not text:
-        raise LeonVoiceError("didn't catch that — try again")
+    body = _safe_json(
+        response,
+        stage="stt",
+        fallback="speech recognition returned an unexpected response",
+    )
+    text = body.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise LeonVoiceError("didn't catch that — try again", stage="stt")
+    text = text.strip()
     return text
 
 
@@ -128,14 +162,14 @@ async def generate_reply(user_text: str, *, history: list[dict[str, str]]) -> st
             )
     except httpx.HTTPError as exc:
         logger.warning("leon_voice_llm_transport_error", extra={"error": str(exc)})
-        raise LeonVoiceError("Leon's brain is unavailable right now") from exc
+        raise LeonVoiceError("Leon's brain is unavailable right now", stage="llm") from exc
 
     if response.status_code >= 400:
         logger.warning(
             "leon_voice_llm_failed",
             extra={"status_code": response.status_code, "body": response.text[:200]},
         )
-        raise LeonVoiceError("Leon couldn't think of a reply just now")
+        raise LeonVoiceError("Leon couldn't think of a reply just now", stage="llm")
 
     body = response.json()
     parts = [
@@ -164,14 +198,23 @@ async def synthesize_speech(text: str) -> bytes:
             )
     except httpx.HTTPError as exc:
         logger.warning("leon_voice_tts_transport_error", extra={"error": str(exc)})
-        raise LeonVoiceError("Leon's voice is unavailable right now") from exc
+        raise LeonVoiceError("Leon's voice is unavailable right now", stage="tts") from exc
 
     if response.status_code >= 400:
         logger.warning(
             "leon_voice_tts_failed",
             extra={"status_code": response.status_code, "body": response.text[:200]},
         )
-        raise LeonVoiceError("Leon's voice is unavailable right now")
+        raise LeonVoiceError("Leon's voice is unavailable right now", stage="tts")
+    if not response.content:
+        raise LeonVoiceError("Leon's voice returned empty audio", stage="tts")
+    content_type = response.headers.get("content-type", "").lower()
+    if content_type.startswith("application/json"):
+        logger.warning(
+            "leon_voice_tts_unexpected_content_type",
+            extra={"status_code": response.status_code, "content_type": content_type[:80]},
+        )
+        raise LeonVoiceError("Leon's voice returned an unexpected response", stage="tts")
     return response.content
 
 
@@ -190,7 +233,7 @@ async def run_voice_turn(
     resolved_text = (user_text or "").strip()
     if not resolved_text:
         if not audio_bytes:
-            raise LeonVoiceError("no speech or text was provided")
+            raise LeonVoiceError("no speech or text was provided", stage="input")
         resolved_text = await transcribe_audio(
             audio_bytes, filename=audio_filename, content_type=audio_content_type
         )
