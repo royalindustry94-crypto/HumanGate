@@ -54,7 +54,9 @@ def _happy_path_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
             json={
-                "content": [{"type": "text", "text": "hey there, good to hear from you"}]
+                "content": [
+                    {"type": "text", "text": "hey there, good to hear from you"}
+                ]
             },
         )
     raise AssertionError(f"unexpected request: {request.url}")
