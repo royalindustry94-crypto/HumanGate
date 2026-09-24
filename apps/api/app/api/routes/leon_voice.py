@@ -65,7 +65,7 @@ def _require_app_token(authorization: str | None) -> None:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="voice conversation is not configured",
         )
-    presented = (authorization or "")
+    presented = authorization or ""
     if presented.lower().startswith("bearer "):
         presented = presented[7:]
     presented = presented.strip()
