@@ -124,7 +124,60 @@ async def test_reports_a_safe_error_when_no_provider_keys_are_configured(monkeyp
     )
 
     assert response.status_code == 502
-    assert "not configured" in response.json()["detail"]
+    detail = response.json()["detail"]
+    assert "not configured" in detail["message"]
+    assert detail["stage"] in {"llm", "openai"}
+    assert detail["error_code"] == "voice_upstream_failure"
+
+
+@pytest.mark.asyncio
+async def test_voice_status_is_authenticated_and_secret_free(client):
+    response = await client.get("/leon/voice-status", headers=_auth_headers())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["configured"] is True
+    assert body["anthropic_configured"] is True
+    assert body["openai_configured"] is True
+    assert body["request_id"]
+    assert "key" not in json.dumps(body).lower()
+    assert _APP_TOKEN not in json.dumps(body)
+
+
+@pytest.mark.asyncio
+async def test_malformed_provider_json_becomes_controlled_502(monkeypatch, client):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "messages" in str(request.url):
+            return httpx.Response(200, content=b"not-json")
+        return _happy_path_handler(request)
+
+    _install_transport(monkeypatch, handler)
+    response = await client.post(
+        "/leon/voice-turn", headers=_auth_headers(), data={"text": "hi leon"}
+    )
+
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert detail["stage"] == "llm"
+    assert detail["error_code"] == "voice_upstream_failure"
+
+
+@pytest.mark.asyncio
+async def test_empty_tts_audio_becomes_controlled_502(monkeypatch, client):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "audio/speech" in str(request.url):
+            return httpx.Response(200, content=b"", headers={"content-type": "audio/mpeg"})
+        return _happy_path_handler(request)
+
+    _install_transport(monkeypatch, handler)
+    response = await client.post(
+        "/leon/voice-turn", headers=_auth_headers(), data={"text": "hi leon"}
+    )
+
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert detail["stage"] == "tts"
+    assert detail["error_code"] == "voice_upstream_failure"
 
 
 @pytest.mark.asyncio
@@ -212,3 +265,6 @@ async def test_an_upstream_failure_becomes_a_safe_502(monkeypatch, client):
 
     assert response.status_code == 502
     assert "sk-abc123" not in response.text
+    detail = response.json()["detail"]
+    assert detail["error_code"] == "voice_upstream_failure"
+    assert detail["stage"] in {"stt", "llm", "tts"}
