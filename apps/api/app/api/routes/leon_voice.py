@@ -86,11 +86,13 @@ def _parse_history(raw: str | None) -> list[dict[str, str]]:
         parsed = json.loads(raw)
     except (TypeError, ValueError) as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="history must be a JSON array"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="history must be a JSON array",
         ) from exc
     if not isinstance(parsed, list):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="history must be a JSON array"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="history must be a JSON array",
         )
     turns: list[dict[str, str]] = []
     for item in parsed[-MAX_HISTORY_TURNS:]:
