@@ -87,6 +87,15 @@ public class LeonVoiceContractTest {
     }
 
     @Test
+    public void backendErrorsSurfaceStageAndRequestIdInsteadOfOnlyStatusCode() throws Exception {
+        String client = source("ai/leon/companion/voice/LeonVoiceApiClient.java");
+        assertTrue(client.contains("X-Request-ID"));
+        assertTrue(client.contains("object.optString(\"stage\""));
+        assertTrue(client.contains("response.code() == 502"));
+        assertTrue(client.contains("temporarily unavailable"));
+    }
+
+    @Test
     public void manifestExposesTtsEngineDiscoveryAndTheRealVoiceBackendPermissions() throws Exception {
         // INTERNET/RECORD_AUDIO used to be deliberately absent, locking in "no AI brain, no network,
         // Leon only speaks text you hand him" for this milestone. A real voice backend now exists
