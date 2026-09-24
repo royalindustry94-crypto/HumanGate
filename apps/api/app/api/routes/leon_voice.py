@@ -33,6 +33,31 @@ router = APIRouter(prefix="/leon", tags=["leon-voice"])
 _ALLOWED_HISTORY_ROLES = {"user", "assistant"}
 
 
+@router.get("/voice-status")
+async def voice_status(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> dict[str, object]:
+    """Authenticated, secret-free runtime configuration check for the companion.
+
+    This intentionally does not make cost-bearing provider calls. It answers whether
+    the deployed API has the three pieces a voice turn requires, while the global
+    fail-closed rate limiter separately proves the runtime DB path is usable.
+    """
+    _require_app_token(authorization)
+    settings = get_settings()
+    return {
+        "configured": bool(
+            settings.leon_voice_app_token
+            and settings.anthropic_api_key
+            and settings.openai_api_key
+        ),
+        "anthropic_configured": bool(settings.anthropic_api_key),
+        "openai_configured": bool(settings.openai_api_key),
+        "request_id": getattr(request.state, "request_id", None),
+    }
+
+
 def _require_app_token(authorization: str | None) -> None:
     expected = (get_settings().leon_voice_app_token or "").strip()
     if not expected:
@@ -123,8 +148,16 @@ async def voice_turn(
             request,
             "leon_voice_turn_failed",
             had_audio=audio_bytes is not None,
+            failure_stage=exc.stage,
         )
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.detail) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "message": exc.detail,
+                "stage": exc.stage,
+                "error_code": "voice_upstream_failure",
+            },
+        ) from exc
 
     audit(
         request,
