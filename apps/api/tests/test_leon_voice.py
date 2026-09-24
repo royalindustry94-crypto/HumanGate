@@ -114,7 +114,9 @@ async def test_rejects_audio_over_the_size_bound(client):
 
 
 @pytest.mark.asyncio
-async def test_reports_a_safe_error_when_no_provider_keys_are_configured(monkeypatch, client):
+async def test_reports_a_safe_error_when_no_provider_keys_are_configured(
+    monkeypatch, client
+):
     monkeypatch.delenv("anthkey", raising=False)
     monkeypatch.delenv("ANTHTOPIC_APO_KEY", raising=False)
     get_settings.cache_clear()
