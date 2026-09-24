@@ -171,13 +171,24 @@ async def generate_reply(user_text: str, *, history: list[dict[str, str]]) -> st
         )
         raise LeonVoiceError("Leon couldn't think of a reply just now", stage="llm")
 
-    body = response.json()
+    body = _safe_json(
+        response,
+        stage="llm",
+        fallback="Leon's brain returned an unexpected response",
+    )
+    content = body.get("content")
+    if not isinstance(content, list):
+        raise LeonVoiceError("Leon's brain returned an unexpected response", stage="llm")
     parts = [
-        block.get("text", "") for block in body.get("content", []) if block.get("type") == "text"
+        block.get("text", "")
+        for block in content
+        if isinstance(block, dict)
+        and block.get("type") == "text"
+        and isinstance(block.get("text"), str)
     ]
     reply = "".join(parts).strip()
     if not reply:
-        raise LeonVoiceError("Leon couldn't think of a reply just now")
+        raise LeonVoiceError("Leon couldn't think of a reply just now", stage="llm")
     return reply
 
 
