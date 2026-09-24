@@ -125,6 +125,28 @@ async def test_exempt_paths_are_never_limited(rl_client: httpx.AsyncClient):
         assert resp.status_code == 200
 
 
+class _FailingLimiter:
+    def __init__(self, **kwargs):
+        pass
+
+    async def check(self, key: str):
+        raise RuntimeError("database unavailable")
+
+
+async def test_limiter_backend_failure_fails_closed_with_controlled_503():
+    app = _build_app(limiter_cls=_FailingLimiter)
+    transport = ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        response = await ac.get("/thing")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "service temporarily unavailable",
+        "error_code": "rate_limit_backend_unavailable",
+    }
+    assert response.headers["Retry-After"] == "5"
+
+
 def test_shared_app_does_not_attach_rate_limiting_under_test_env():
     """Locks in the WP-P1-010 design decision: the process-wide `app`
     singleton (imported once for the whole pytest session, per
