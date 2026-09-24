@@ -129,12 +129,41 @@ final class LeonVoiceApiClient {
     }
 
     private static String friendlyError(Response response) {
-        if (response.code() == 401 || response.code() == 503) {
-            return "Leon's voice backend is not set up yet.";
+        if (response.code() == 401) {
+            return "Leon's voice backend token is not accepted.";
         }
         if (response.code() == 413) {
             return "That recording was too long.";
         }
-        return "Leon's voice backend had a problem (code " + response.code() + ").";
+
+        String requestId = response.header("X-Request-ID", "");
+        String message = "";
+        String stage = "";
+        try {
+            String bodyText = response.body() != null ? response.body().string() : "";
+            if (!bodyText.isEmpty()) {
+                JSONObject json = new JSONObject(bodyText);
+                Object detail = json.opt("detail");
+                if (detail instanceof JSONObject) {
+                    JSONObject object = (JSONObject) detail;
+                    message = object.optString("message", "");
+                    stage = object.optString("stage", "");
+                } else if (detail instanceof String) {
+                    message = (String) detail;
+                }
+            }
+        } catch (IOException | JSONException ignored) {
+            // Fall through to the status-code based message below.
+        }
+
+        String suffix = requestId.isEmpty() ? "" : " Request " + requestId + ".";
+        if (response.code() == 502 && !message.isEmpty()) {
+            String where = stage.isEmpty() ? "" : " [" + stage + "]";
+            return message + where + suffix;
+        }
+        if (response.code() == 503) {
+            return "Leon's voice service is temporarily unavailable." + suffix;
+        }
+        return "Leon's voice backend had a problem (code " + response.code() + ")." + suffix;
     }
 }
