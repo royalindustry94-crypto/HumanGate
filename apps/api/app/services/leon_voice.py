@@ -5,23 +5,27 @@ generic 500 — a caller (the Android app) needs to tell "you're not
 configured yet" apart from "the provider rejected this audio" apart from
 "the provider is down right now".
 
-Deliberately stateless and DB-free: no workspace, no spend-cap reservation,
-no job orchestration. Those exist elsewhere in this service for the async
-content-production pipeline, which is not what a synchronous voice turn is
-— see the PR description for why they were not reused here. The safety net
-for this route is the request-level bounds below (audio size, reply length)
-plus the caller's own provider-account spending limits, not a workspace
-spend cap.
+Each provider call is gated by app.services.leon_voice_spend: reserve an
+estimated cost before the call, commit the real cost on success, release
+the reservation on failure. See that module's docstring for why this reuses
+the same spend_caps/spend_reservations/spend_logs ledger as the async
+content pipeline (via a fixed system workspace seeded in migration 0059)
+rather than a parallel spend-tracking mechanism. This still has no
+workspace/job orchestration otherwise -- no pipeline run, no content item --
+a voice turn is not a pipeline stage.
 """
 
 from __future__ import annotations
 
 import base64
 import logging
+import uuid
+from decimal import Decimal
 
 import httpx
 
 from app.core.config import get_settings
+from app.services import leon_voice_spend
 
 logger = logging.getLogger(__name__)
 
@@ -106,19 +110,37 @@ def _require_openai_key() -> str:
     return key
 
 
+async def _reserve_or_fail(*, provider: str, estimated_cost_usd: Decimal, stage: str) -> uuid.UUID:
+    try:
+        return await leon_voice_spend.reserve(
+            provider=provider, estimated_cost_usd=estimated_cost_usd
+        )
+    except leon_voice_spend.LeonSpendExceeded as exc:
+        logger.warning("leon_voice_spend_cap_reached", extra={"provider": provider, "stage": stage})
+        raise LeonVoiceError(
+            "Leon has reached today's conversation budget — try again later", stage="spend"
+        ) from exc
+
+
 async def transcribe_audio(audio_bytes: bytes, *, filename: str, content_type: str) -> str:
     """Speech to text via OpenAI's Whisper API."""
     key = _require_openai_key()
+    reservation_id = await _reserve_or_fail(
+        provider="openai-whisper",
+        estimated_cost_usd=leon_voice_spend.stt_reserve_estimate_usd(),
+        stage="stt",
+    )
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
             response = await client.post(
                 _OPENAI_TRANSCRIPTION_API,
                 headers={"Authorization": f"Bearer {key}"},
-                data={"model": "whisper-1"},
+                data={"model": "whisper-1", "response_format": "verbose_json"},
                 files={"file": (filename, audio_bytes, content_type or "audio/m4a")},
             )
     except httpx.HTTPError as exc:
         logger.warning("leon_voice_stt_transport_error", extra={"error": str(exc)})
+        await leon_voice_spend.release(reservation_id=reservation_id)
         raise LeonVoiceError("speech recognition is unavailable right now", stage="stt") from exc
 
     if response.status_code >= 400:
@@ -126,23 +148,43 @@ async def transcribe_audio(audio_bytes: bytes, *, filename: str, content_type: s
             "leon_voice_stt_failed",
             extra={"status_code": response.status_code, "body": response.text[:200]},
         )
+        await leon_voice_spend.release(reservation_id=reservation_id)
         raise LeonVoiceError("could not understand that audio", stage="stt")
 
-    body = _safe_json(
-        response,
-        stage="stt",
-        fallback="speech recognition returned an unexpected response",
-    )
+    try:
+        body = _safe_json(
+            response,
+            stage="stt",
+            fallback="speech recognition returned an unexpected response",
+        )
+    except LeonVoiceError:
+        await leon_voice_spend.release(reservation_id=reservation_id)
+        raise
     text = body.get("text")
     if not isinstance(text, str) or not text.strip():
+        await leon_voice_spend.release(reservation_id=reservation_id)
         raise LeonVoiceError("didn't catch that — try again", stage="stt")
     text = text.strip()
+    duration = body.get("duration")
+    await leon_voice_spend.commit(
+        reservation_id=reservation_id,
+        actual_cost_usd=leon_voice_spend.stt_actual_cost_usd(
+            duration if isinstance(duration, int | float) else None
+        ),
+    )
     return text
 
 
 async def generate_reply(user_text: str, *, history: list[dict[str, str]]) -> str:
     """Leon's reply to one turn, via the Claude Messages API."""
     key = _require_anthropic_key()
+    reservation_id = await _reserve_or_fail(
+        provider="anthropic",
+        estimated_cost_usd=leon_voice_spend.llm_reserve_estimate_usd(
+            history=history, user_text=user_text
+        ),
+        stage="llm",
+    )
     messages = [*history, {"role": "user", "content": user_text}]
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
@@ -162,6 +204,7 @@ async def generate_reply(user_text: str, *, history: list[dict[str, str]]) -> st
             )
     except httpx.HTTPError as exc:
         logger.warning("leon_voice_llm_transport_error", extra={"error": str(exc)})
+        await leon_voice_spend.release(reservation_id=reservation_id)
         raise LeonVoiceError("Leon's brain is unavailable right now", stage="llm") from exc
 
     if response.status_code >= 400:
@@ -169,32 +212,54 @@ async def generate_reply(user_text: str, *, history: list[dict[str, str]]) -> st
             "leon_voice_llm_failed",
             extra={"status_code": response.status_code, "body": response.text[:200]},
         )
+        await leon_voice_spend.release(reservation_id=reservation_id)
         raise LeonVoiceError("Leon couldn't think of a reply just now", stage="llm")
 
-    body = _safe_json(
-        response,
-        stage="llm",
-        fallback="Leon's brain returned an unexpected response",
+    try:
+        body = _safe_json(
+            response,
+            stage="llm",
+            fallback="Leon's brain returned an unexpected response",
+        )
+        content = body.get("content")
+        if not isinstance(content, list):
+            raise LeonVoiceError("Leon's brain returned an unexpected response", stage="llm")
+        parts = [
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
+        ]
+        reply = "".join(parts).strip()
+        if not reply:
+            raise LeonVoiceError("Leon couldn't think of a reply just now", stage="llm")
+    except LeonVoiceError:
+        await leon_voice_spend.release(reservation_id=reservation_id)
+        raise
+
+    raw_usage = body.get("usage")
+    usage: dict = raw_usage if isinstance(raw_usage, dict) else {}
+    input_tokens = usage.get("input_tokens")
+    output_tokens = usage.get("output_tokens")
+    await leon_voice_spend.commit(
+        reservation_id=reservation_id,
+        actual_cost_usd=leon_voice_spend.llm_actual_cost_usd(
+            input_tokens=input_tokens if isinstance(input_tokens, int) else 0,
+            output_tokens=output_tokens if isinstance(output_tokens, int) else 0,
+        ),
     )
-    content = body.get("content")
-    if not isinstance(content, list):
-        raise LeonVoiceError("Leon's brain returned an unexpected response", stage="llm")
-    parts = [
-        block.get("text", "")
-        for block in content
-        if isinstance(block, dict)
-        and block.get("type") == "text"
-        and isinstance(block.get("text"), str)
-    ]
-    reply = "".join(parts).strip()
-    if not reply:
-        raise LeonVoiceError("Leon couldn't think of a reply just now", stage="llm")
     return reply
 
 
 async def synthesize_speech(text: str) -> bytes:
     """Text to speech via OpenAI's TTS API. Returns MP3 bytes."""
     key = _require_openai_key()
+    reservation_id = await _reserve_or_fail(
+        provider="openai-tts",
+        estimated_cost_usd=leon_voice_spend.tts_cost_usd(text),
+        stage="tts",
+    )
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
             response = await client.post(
@@ -209,6 +274,7 @@ async def synthesize_speech(text: str) -> bytes:
             )
     except httpx.HTTPError as exc:
         logger.warning("leon_voice_tts_transport_error", extra={"error": str(exc)})
+        await leon_voice_spend.release(reservation_id=reservation_id)
         raise LeonVoiceError("Leon's voice is unavailable right now", stage="tts") from exc
 
     if response.status_code >= 400:
@@ -216,8 +282,10 @@ async def synthesize_speech(text: str) -> bytes:
             "leon_voice_tts_failed",
             extra={"status_code": response.status_code, "body": response.text[:200]},
         )
+        await leon_voice_spend.release(reservation_id=reservation_id)
         raise LeonVoiceError("Leon's voice is unavailable right now", stage="tts")
     if not response.content:
+        await leon_voice_spend.release(reservation_id=reservation_id)
         raise LeonVoiceError("Leon's voice returned empty audio", stage="tts")
     content_type = response.headers.get("content-type", "").lower()
     if content_type.startswith("application/json"):
@@ -225,7 +293,13 @@ async def synthesize_speech(text: str) -> bytes:
             "leon_voice_tts_unexpected_content_type",
             extra={"status_code": response.status_code, "content_type": content_type[:80]},
         )
+        await leon_voice_spend.release(reservation_id=reservation_id)
         raise LeonVoiceError("Leon's voice returned an unexpected response", stage="tts")
+    # Exact cost -- text length is known up front, so the reservation
+    # estimate and the actual charge are the same value.
+    await leon_voice_spend.commit(
+        reservation_id=reservation_id, actual_cost_usd=leon_voice_spend.tts_cost_usd(text)
+    )
     return response.content
 
 

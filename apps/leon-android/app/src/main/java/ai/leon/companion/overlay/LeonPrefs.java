@@ -22,16 +22,21 @@ public final class LeonPrefs {
     private static final String KEY_HIDDEN_UNTIL = "hidden_until";
     private static final String KEY_RIG_DEBUG = "rig_debug";
     private static final String KEY_VOICE_BASE_URL = "voice_base_url";
-    private static final String KEY_VOICE_APP_TOKEN = "voice_app_token";
+    // Legacy plaintext key, kept only so an existing install can be migrated once into
+    // LeonSecureTokenStore's Keystore-encrypted, backup-excluded storage -- see
+    // leonVoiceAppToken() below. Never written to after that migration.
+    private static final String KEY_VOICE_APP_TOKEN_PLAINTEXT_LEGACY = "voice_app_token";
 
     /** Default resting place: right-hand side, a little above the middle. */
     private static final float DEFAULT_FRACTION_X = 1f;
     private static final float DEFAULT_FRACTION_Y = 0.42f;
 
+    private final Context context;
     private final SharedPreferences prefs;
 
     public LeonPrefs(Context context) {
-        prefs = context.getApplicationContext().getSharedPreferences(FILE, Context.MODE_PRIVATE);
+        this.context = context.getApplicationContext();
+        prefs = this.context.getSharedPreferences(FILE, Context.MODE_PRIVATE);
     }
 
     public boolean hasSavedPosition() {
@@ -117,12 +122,27 @@ public final class LeonPrefs {
         prefs.edit().putString(KEY_VOICE_BASE_URL, url == null ? "" : url.trim()).apply();
     }
 
-    /** The shared app token the backend's LEON_VOICE_APP_TOKEN checks -- see the Settings screen. */
+    /**
+     * The shared app token the backend's LEON_VOICE_APP_TOKEN checks -- see the Settings screen.
+     * Stored Keystore-encrypted and excluded from Auto Backup (LeonSecureTokenStore), not in this
+     * plaintext prefs file. An install that saved a token before that storage existed is migrated
+     * to it here, once, on first read.
+     */
     public String leonVoiceAppToken() {
-        return prefs.getString(KEY_VOICE_APP_TOKEN, "");
+        migrateLegacyPlaintextTokenIfPresent();
+        return LeonSecureTokenStore.read(context);
     }
 
     public void setLeonVoiceAppToken(String token) {
-        prefs.edit().putString(KEY_VOICE_APP_TOKEN, token == null ? "" : token.trim()).apply();
+        LeonSecureTokenStore.store(context, token == null ? "" : token.trim());
+    }
+
+    private void migrateLegacyPlaintextTokenIfPresent() {
+        String legacy = prefs.getString(KEY_VOICE_APP_TOKEN_PLAINTEXT_LEGACY, "");
+        if (legacy.isEmpty()) return;
+        if (!LeonSecureTokenStore.hasStoredToken(context)) {
+            LeonSecureTokenStore.store(context, legacy);
+        }
+        prefs.edit().remove(KEY_VOICE_APP_TOKEN_PLAINTEXT_LEGACY).apply();
     }
 }

@@ -185,6 +185,24 @@ class Settings(BaseSettings):
     # other purpose in this app.
     leon_voice_app_token: str | None = Field(default=None)
 
+    # Fail-closed budget for the voice route's cost-bearing provider calls
+    # (STT/LLM/TTS). Deliberately much smaller than default_daily/monthly_
+    # spend_cap_usd above -- those size the whole multi-tenant product;
+    # this bounds one person's companion app so a leaked/misused app token
+    # cannot run an unbounded bill.
+    leon_voice_daily_spend_cap_usd: float = Field(default=2.0)
+    leon_voice_monthly_spend_cap_usd: float = Field(default=20.0)
+    # Per-unit provider pricing used only to size spend reservations/commits
+    # for the voice route. These are estimates the operator should confirm
+    # against each provider's current published pricing -- getting one of
+    # them slightly wrong does not defeat the cap (it still fails closed at
+    # the configured dollar ceiling either way), it only makes the ceiling
+    # measure usage a bit loosely.
+    leon_stt_cost_usd_per_minute: float = Field(default=0.006)
+    leon_llm_input_cost_usd_per_1k_tokens: float = Field(default=0.003)
+    leon_llm_output_cost_usd_per_1k_tokens: float = Field(default=0.015)
+    leon_tts_cost_usd_per_1k_chars: float = Field(default=0.015)
+
     # --- GitHub live status (Operations Dashboard V2) ---
     # Optional. When unset, GitHub widgets report unavailable (never fake).
     # Prefer GITHUB_TOKEN from Actions; GITHUB_API_TOKEN is an alternate name.

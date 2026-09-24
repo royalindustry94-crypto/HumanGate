@@ -12,9 +12,12 @@ import json
 
 import httpx
 import pytest
+from sqlalchemy import text
 
 from app.core.config import get_settings
+from app.db.session import AsyncSessionLocal
 from app.services import leon_voice as lv
+from app.services import leon_voice_spend
 
 _APP_TOKEN = "test-leon-app-token"
 
@@ -79,9 +82,7 @@ async def test_reports_unavailable_when_no_app_token_is_configured(monkeypatch, 
     monkeypatch.delenv("LEON_VOICE_APP_TOKEN", raising=False)
     get_settings.cache_clear()
 
-    response = await client.post(
-        "/leon/voice-turn", headers=_auth_headers(), data={"text": "hi"}
-    )
+    response = await client.post("/leon/voice-turn", headers=_auth_headers(), data={"text": "hi"})
     assert response.status_code == 503
 
 
@@ -113,10 +114,46 @@ async def test_rejects_audio_over_the_size_bound(client):
     assert response.status_code == 413
 
 
+class _UnboundedStream:
+    """An UploadFile-like stream that fails the test if asked to read past
+    the caller's own hard bound -- proves the route never materializes an
+    unbounded body before the size check, not just that it eventually
+    responds 413.
+    """
+
+    def __init__(self, total_bytes: int):
+        self._remaining = total_bytes
+        self.max_single_read = 0
+        self.total_read = 0
+
+    async def read(self, size: int = -1) -> bytes:
+        assert size > 0, "route must always request a bounded chunk size"
+        assert self.total_read + size <= lv.MAX_AUDIO_BYTES + 1, (
+            "route requested more than MAX_AUDIO_BYTES + 1 bytes total"
+        )
+        self.max_single_read = max(self.max_single_read, size)
+        take = min(size, self._remaining)
+        self._remaining -= take
+        self.total_read += take
+        return b"0" * take
+
+
 @pytest.mark.asyncio
-async def test_reports_a_safe_error_when_no_provider_keys_are_configured(
-    monkeypatch, client
-):
+async def test_oversized_audio_is_never_fully_materialized(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.api.routes.leon_voice import _read_audio_bounded
+
+    huge = _UnboundedStream(total_bytes=lv.MAX_AUDIO_BYTES * 10)
+    with pytest.raises(HTTPException) as exc_info:
+        await _read_audio_bounded(huge)  # type: ignore[arg-type]
+
+    assert exc_info.value.status_code == 413
+    assert huge.total_read <= lv.MAX_AUDIO_BYTES + 1
+
+
+@pytest.mark.asyncio
+async def test_reports_a_safe_error_when_no_provider_keys_are_configured(monkeypatch, client):
     monkeypatch.delenv("anthkey", raising=False)
     monkeypatch.delenv("ANTHTOPIC_APO_KEY", raising=False)
     get_settings.cache_clear()
@@ -256,6 +293,109 @@ async def test_malformed_history_is_rejected(client):
         data={"text": "hi", "history": "not-json"},
     )
     assert response.status_code == 400
+
+
+@pytest.fixture
+async def _tiny_leon_spend_cap():
+    """Lowers the seeded Leon voice spend cap to effectively zero for one
+    test, then restores it -- the cap row is a fixed singleton (migration
+    0059), not per-test data, so it must not leak into other tests.
+    """
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text(
+                "UPDATE spend_caps SET daily_cap_usd = 0.00001 "
+                "WHERE workspace_id = :ws AND provider IS NULL"
+            ),
+            {"ws": str(leon_voice_spend.LEON_SYSTEM_WORKSPACE_ID)},
+        )
+        await session.commit()
+    try:
+        yield
+    finally:
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                text(
+                    "UPDATE spend_caps SET daily_cap_usd = 2.0 "
+                    "WHERE workspace_id = :ws AND provider IS NULL"
+                ),
+                {"ws": str(leon_voice_spend.LEON_SYSTEM_WORKSPACE_ID)},
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_exhausted_daily_budget_fails_closed_with_402(
+    monkeypatch, client, _tiny_leon_spend_cap
+):
+    _install_transport(monkeypatch, _happy_path_handler)
+
+    response = await client.post(
+        "/leon/voice-turn", headers=_auth_headers(), data={"text": "hi leon"}
+    )
+
+    assert response.status_code == 402
+    detail = response.json()["detail"]
+    assert detail["stage"] == "spend"
+    assert detail["error_code"] == "voice_spend_cap_reached"
+
+
+@pytest.mark.asyncio
+async def test_a_provider_failure_releases_its_reservation_not_the_budget(monkeypatch, client):
+    """A failed call must not permanently consume the reservation it made --
+    release() must run on the failure path so the next turn can still spend
+    that budget, not just that the caller gets a clean error.
+    """
+
+    # One handler installed for the whole test (see _install_transport: each
+    # call re-wraps the *current* patched httpx.AsyncClient rather than
+    # replacing it, so calling it twice in one test nests instead of
+    # swapping) -- a mutable flag switches its behavior between the two
+    # requests below instead of re-installing the transport.
+    should_fail = {"value": True}
+
+    def switchable_handler(request: httpx.Request) -> httpx.Response:
+        if should_fail["value"] and "messages" in str(request.url):
+            return httpx.Response(200, content=b"not-json")
+        return _happy_path_handler(request)
+
+    _install_transport(monkeypatch, switchable_handler)
+
+    async with AsyncSessionLocal() as session:
+        before = (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM spend_reservations "
+                    "WHERE workspace_id = :ws AND status = 'released'"
+                ),
+                {"ws": str(leon_voice_spend.LEON_SYSTEM_WORKSPACE_ID)},
+            )
+        ).scalar_one()
+
+    response = await client.post(
+        "/leon/voice-turn", headers=_auth_headers(), data={"text": "hi leon"}
+    )
+    assert response.status_code == 502
+
+    async with AsyncSessionLocal() as session:
+        after = (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM spend_reservations "
+                    "WHERE workspace_id = :ws AND status = 'released'"
+                ),
+                {"ws": str(leon_voice_spend.LEON_SYSTEM_WORKSPACE_ID)},
+            )
+        ).scalar_one()
+    assert after == before + 1
+
+    # And the budget that reservation held is free again -- a subsequent
+    # turn must still be able to spend it, not find it stuck as "reserved".
+    should_fail["value"] = False
+    retry = await client.post(
+        "/leon/voice-turn", headers=_auth_headers(), data={"text": "try again"}
+    )
+    assert retry.status_code == 200
 
 
 @pytest.mark.asyncio

@@ -31,6 +31,28 @@ from app.services.leon_voice import (
 router = APIRouter(prefix="/leon", tags=["leon-voice"])
 
 _ALLOWED_HISTORY_ROLES = {"user", "assistant"}
+# Read in bounded slices so a caller that lies about Content-Length (or a
+# proxy that doesn't enforce one) can never make this handler materialize
+# more than MAX_AUDIO_BYTES + 1 bytes before the size check below runs.
+_AUDIO_READ_CHUNK_BYTES = 1024 * 1024
+
+
+async def _read_audio_bounded(audio: UploadFile) -> bytes:
+    limit = MAX_AUDIO_BYTES + 1
+    chunks: list[bytes] = []
+    total = 0
+    while total <= MAX_AUDIO_BYTES:
+        chunk = await audio.read(min(_AUDIO_READ_CHUNK_BYTES, limit - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    if total > MAX_AUDIO_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"audio must be at most {MAX_AUDIO_BYTES} bytes",
+        )
+    return b"".join(chunks)
 
 
 @router.get("/voice-status")
@@ -48,9 +70,7 @@ async def voice_status(
     settings = get_settings()
     return {
         "configured": bool(
-            settings.leon_voice_app_token
-            and settings.anthropic_api_key
-            and settings.openai_api_key
+            settings.leon_voice_app_token and settings.anthropic_api_key and settings.openai_api_key
         ),
         "anthropic_configured": bool(settings.anthropic_api_key),
         "openai_configured": bool(settings.openai_api_key),
@@ -126,12 +146,7 @@ async def voice_turn(
 
     audio_bytes: bytes | None = None
     if audio is not None:
-        audio_bytes = await audio.read()
-        if len(audio_bytes) > MAX_AUDIO_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail=f"audio must be at most {MAX_AUDIO_BYTES} bytes",
-            )
+        audio_bytes = await _read_audio_bounded(audio)
 
     if not audio_bytes and not (text or "").strip():
         raise HTTPException(
@@ -154,6 +169,15 @@ async def voice_turn(
             had_audio=audio_bytes is not None,
             failure_stage=exc.stage,
         )
+        if exc.stage == "spend":
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={
+                    "message": exc.detail,
+                    "stage": exc.stage,
+                    "error_code": "voice_spend_cap_reached",
+                },
+            ) from exc
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
