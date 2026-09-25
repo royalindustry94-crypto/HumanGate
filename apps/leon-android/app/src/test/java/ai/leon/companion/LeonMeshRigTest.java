@@ -245,12 +245,30 @@ public class LeonMeshRigTest {
         // completely unblended cutoff -- every other seam in this class blends smoothly, this one
         // didn't. This measures adjacent-COLUMN (not adjacent-row) stretch, since this seam runs
         // vertically alongside the hip, not across a horizontal joint like the others above.
+        // Both signs: PostureBehaviour's weightTarget alternates ("always shift away from the
+        // current side"), and a Codex review of this PR caught that they are not equivalent here --
+        // deformedDist/restDist alone only ever grows above 1 for a seam that *stretches*, so a pose
+        // whose seam *compresses* instead (ratio below 1) could never move worstRatio and would pass
+        // even the unfixed hard-cutoff mesh. Measured directly (see PR discussion): the pre-fix seam
+        // hit a symmetric worst ratio of 1.28 at +0.5 but 1.39 at -0.5 -- negative was the worse
+        // direction, and this test would have missed it entirely with only one sign and a one-way
+        // ratio.
+        for (float weightShift : new float[]{0.5f, -0.5f}) {
+            float worstRatio = worstHipBandSeamRatio(weightShift);
+            assertTrue("idle's autonomous weight-shift (sign=" + weightShift + ") must not pinch "
+                    + "the hip/hand column seam, worst adjacent-column ratio was " + worstRatio,
+                    worstRatio < 1.25f);
+        }
+    }
+
+    /** Worst adjacent-column distance ratio (either direction) in the hip/hand-resting band. */
+    private static float worstHipBandSeamRatio(float weightShift) {
         LeonMeshRig mesh = LeonMeshRig.createForTest(16, 28);
         LeonRigBinder binder = new LeonRigBinder(mesh.rig());
         LeonPose pose = new LeonPose();
-        pose.set(LeonChannel.WEIGHT_SHIFT, 0.5f);
-        pose.set(LeonChannel.ARM_L_SWING, 0.5f * 0.18f);
-        pose.set(LeonChannel.ARM_R_SWING, 0.5f * 0.18f);
+        pose.set(LeonChannel.WEIGHT_SHIFT, weightShift);
+        pose.set(LeonChannel.ARM_L_SWING, weightShift * 0.18f);
+        pose.set(LeonChannel.ARM_R_SWING, weightShift * 0.18f);
         binder.apply(pose);
         mesh.updateFromSolvedRig();
 
@@ -258,7 +276,7 @@ public class LeonMeshRigTest {
         float[] deformed = mesh.deformedVertices();
         int cols = mesh.meshCols();
         int rows = mesh.meshRows();
-        float worstRatio = 0f;
+        float worstRatio = 1f;
         int seamColumnsChecked = 0;
         for (int row = 0; row <= rows; row++) {
             float y = canon[(row * (cols + 1)) * 2 + 1];
@@ -275,12 +293,14 @@ public class LeonMeshRigTest {
                 seamColumnsChecked++;
                 float deformedDist = (float) Math.hypot(
                         deformed[i1 * 2] - deformed[i0 * 2], deformed[i1 * 2 + 1] - deformed[i0 * 2 + 1]);
-                worstRatio = Math.max(worstRatio, deformedDist / restDist);
+                // max(ratio, 1/ratio): a pinch is either the seam stretching OR compressing, and
+                // deformedDist/restDist alone only ever detects the former.
+                float ratio = deformedDist / restDist;
+                worstRatio = Math.max(worstRatio, Math.max(ratio, 1f / ratio));
             }
         }
         assertTrue("expected several hip-band seam columns in the test mesh geometry",
                 seamColumnsChecked > 4);
-        assertTrue("idle's autonomous weight-shift must not pinch the hip/hand column seam, worst "
-                + "adjacent-column stretch ratio was " + worstRatio, worstRatio < 1.2f);
+        return worstRatio;
     }
 }
