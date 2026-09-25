@@ -17,6 +17,16 @@ import ai.leon.companion.rig.Rig;
  */
 public final class LeonMeshRig {
     private static final float DESIGN_CENTRE_X = LeonRig.DESIGN_W * 0.5f;
+    // Column-direction blend margin around the side>72 torso/limb boundary (see weightsFor). The
+    // mesh's column pitch here is ~26 design units (16 columns across the ~415-unit design width),
+    // so a symmetric 30px margin blends across a little more than one column on each side -- a
+    // narrower 20px margin measurably reduced the hip/hand pinch this fixes but did not remove it
+    // (worst adjacent-column stretch ratio 1.20 vs 30px's 1.16, against the unblended original's
+    // 1.28), the same trade-off already tuned for the row-direction joint blends elsewhere in this
+    // file (see sideWeightsFor's own 30px-margin comment).
+    private static final float COLUMN_BLEND_MARGIN = 30f;
+    private static final float COLUMN_BLEND_START = 72f - COLUMN_BLEND_MARGIN;
+    private static final float COLUMN_BLEND_END = 72f + COLUMN_BLEND_MARGIN;
 
     private final Rig rig;
     private final int meshCols;
@@ -186,63 +196,90 @@ public final class LeonMeshRig {
         }
 
         if (y < 395f) {
+            // Column-direction (x) blend across the side>72 torso/limb boundary, mirroring the
+            // row-direction (y) blends used everywhere else in this method. Real-device report:
+            // the hip visibly pinched/compressed right where the resting hand sits against it, at
+            // plain IDLE with no gesture at all. Root cause was that this boundary used to be a
+            // hard, unblended cutoff -- every OTHER seam in this file blends smoothly across a
+            // margin, but center columns (side<=72, chest/spine/hips) and side columns (side>72,
+            // shoulder/arm/forearm/hand) met with a single-pixel jump in bone binding. That is
+            // invisible at rest (every bone's transform is identity there) but PostureBehaviour's
+            // autonomous idle weight-shift moves the hips bone (a translation/rotation around the
+            // hip pivot) while also feeding a fraction of the same signal into ARM_*_SWING ("arms
+            // hang from the shoulders, so they inherit part of the sway" -- PostureBehaviour), a
+            // rotation around a completely different pivot (the shoulder). The two never move in
+            // lockstep, so the unblended column boundary right at hand-resting-on-hip height (this
+            // whole y<395 band) pinches on every idle weight-shift cycle -- no arm channel, gesture,
+            // or large pose needed to see it, unlike every other seam bug already fixed in this file.
             float side = Math.abs(x - DESIGN_CENTRE_X);
-            if (side > 72f) {
-                boolean left = x < DESIGN_CENTRE_X;
-                // A short blend at the shoulder, elbow and wrist, not across the whole limb: a rigid
-                // one-bone-per-row binding leaves a hard seam at each cutoff that a large rotation
-                // stretches into a sliver (drawBitmapMesh still draws the quad connecting the row on
-                // each side of the seam, however far apart a bent joint has pushed them), but blending
-                // too widely bleeds a bone's rotation into the middle of the next segment and visibly
-                // warps it even at a small bend. 30px on each side of a joint is enough to remove the
-                // seam without smearing the limb.
-                //
-                // The shoulder seam (205-235) matters even for channels that only move the arm, not the
-                // shoulder itself: the block above (y<205) binds every column to a head/neck/chest blend
-                // without checking side at all, so an arm-side column just above y=205 was still
-                // chest-bound at rest. Swinging just the arm without blending this seam stretched the
-                // collar/chest toward the arm's new position -- a fuzzy diagonal smear across the chest
-                // and shoulder with only the arm swung, no elbow or hand movement at all.
-                if (y < 235f) {
-                    float t = smooth((y - 205f) / 30f);
-                    return two(chest, 1f - t, left ? armL : armR, t);
-                }
-                if (y < 270f) return one(left ? armL : armR);
-                if (y < 300f) {
-                    float t = smooth((y - 270f) / 30f);
-                    return two(left ? armL : armR, 1f - t, left ? forearmL : forearmR, t);
-                }
-                if (y < 345f) return one(left ? forearmL : forearmR);
-                if (y < 375f) {
-                    float t = smooth((y - 345f) / 30f);
-                    return two(left ? forearmL : forearmR, 1f - t, left ? handL : handR, t);
-                }
-                return one(left ? handL : handR);
-            }
-            if (y < 285f) return one(chest);
-            if (y < 345f) {
-                float t = smooth((y - 285f) / 60f);
-                return two(chest, 1f - t, spine, t);
-            }
-            float t = smooth((y - 345f) / 50f);
-            return two(spine, 1f - t, hips, t);
+            boolean left = x < DESIGN_CENTRE_X;
+            if (side <= COLUMN_BLEND_START) return centerWeightsFor(y);
+            VertexWeights limb = sideWeightsFor(y, left);
+            if (side >= COLUMN_BLEND_END) return limb;
+            float t = smooth((side - COLUMN_BLEND_START) / (COLUMN_BLEND_END - COLUMN_BLEND_START));
+            return blend(centerWeightsFor(y), 1f - t, limb, t);
         }
 
         boolean left = x < DESIGN_CENTRE_X;
         float legSide = Math.abs(x - DESIGN_CENTRE_X);
-        if (legSide > 72f) {
-            // Off to the side of the torso -- this is the hand/sleeve fading toward background below
-            // where an arm hangs, not leg territory, even though it shares this row range with the
-            // legs in the middle columns. Binding it to hip/thigh regardless of side (as this used to)
-            // means a hand swung away from rest snaps back to a stationary hip on the very next row,
-            // the same seam-stretch problem as the elbow/wrist above. Fading it to root instead means
-            // it settles toward the untouched canonical position rather than jumping to one.
-            if (y < 485f) {
-                float t = smooth((y - 395f) / 90f);
-                return two(left ? handL : handR, 1f - t, root, t);
-            }
-            return one(root);
+        // Same column-direction seam as the torso/limb boundary above, at the same x threshold, one
+        // row-band lower: this is where the hand-fade-to-root region (see below) meets the hip/thigh
+        // region, i.e. immediately below where the hand rests against the hip. Blended for the same
+        // reason -- PostureBehaviour's idle weight-shift moves the hips bone while independently
+        // feeding the arm/hand, so an unblended cutoff here pinches on the same idle cycle.
+        if (legSide <= COLUMN_BLEND_START) return legWeightsFor(y, left);
+        VertexWeights sideFade = legSideFadeWeightsFor(y, left);
+        if (legSide >= COLUMN_BLEND_END) return sideFade;
+        float legT = smooth((legSide - COLUMN_BLEND_START) / (COLUMN_BLEND_END - COLUMN_BLEND_START));
+        return blend(legWeightsFor(y, left), 1f - legT, sideFade, legT);
+    }
+
+    /** Chest/spine/hips chain for the torso columns of the y in [205,395) band -- ignores x. */
+    private VertexWeights centerWeightsFor(float y) {
+        if (y < 285f) return one(chest);
+        if (y < 345f) {
+            float t = smooth((y - 285f) / 60f);
+            return two(chest, 1f - t, spine, t);
         }
+        float t = smooth((y - 345f) / 50f);
+        return two(spine, 1f - t, hips, t);
+    }
+
+    /** Shoulder/arm/forearm/hand chain for the limb columns of the y in [205,395) band. */
+    private VertexWeights sideWeightsFor(float y, boolean left) {
+        // A short blend at the shoulder, elbow and wrist, not across the whole limb: a rigid
+        // one-bone-per-row binding leaves a hard seam at each cutoff that a large rotation
+        // stretches into a sliver (drawBitmapMesh still draws the quad connecting the row on
+        // each side of the seam, however far apart a bent joint has pushed them), but blending
+        // too widely bleeds a bone's rotation into the middle of the next segment and visibly
+        // warps it even at a small bend. 30px on each side of a joint is enough to remove the
+        // seam without smearing the limb.
+        //
+        // The shoulder seam (205-235) matters even for channels that only move the arm, not the
+        // shoulder itself: the block above (y<205) binds every column to a head/neck/chest blend
+        // without checking side at all, so an arm-side column just above y=205 was still
+        // chest-bound at rest. Swinging just the arm without blending this seam stretched the
+        // collar/chest toward the arm's new position -- a fuzzy diagonal smear across the chest
+        // and shoulder with only the arm swung, no elbow or hand movement at all.
+        if (y < 235f) {
+            float t = smooth((y - 205f) / 30f);
+            return two(chest, 1f - t, left ? armL : armR, t);
+        }
+        if (y < 270f) return one(left ? armL : armR);
+        if (y < 300f) {
+            float t = smooth((y - 270f) / 30f);
+            return two(left ? armL : armR, 1f - t, left ? forearmL : forearmR, t);
+        }
+        if (y < 345f) return one(left ? forearmL : forearmR);
+        if (y < 375f) {
+            float t = smooth((y - 345f) / 30f);
+            return two(left ? forearmL : forearmR, 1f - t, left ? handL : handR, t);
+        }
+        return one(left ? handL : handR);
+    }
+
+    /** Hip/thigh/shin/foot chain for the torso-width columns of the y >= 395 band. */
+    private VertexWeights legWeightsFor(float y, boolean left) {
         if (y < 515f) {
             float t = smooth((y - 395f) / 120f);
             return two(hips, 1f - t, left ? thighL : thighR, t);
@@ -254,6 +291,21 @@ public final class LeonMeshRig {
         if (y < 748f) {
             float t = smooth((y - 655f) / 93f);
             return two(left ? shinL : shinR, 1f - t, left ? footL : footR, t);
+        }
+        return one(root);
+    }
+
+    /** Hand-fading-to-root chain for the side columns of the y >= 395 band. */
+    private VertexWeights legSideFadeWeightsFor(float y, boolean left) {
+        // Off to the side of the torso -- this is the hand/sleeve fading toward background below
+        // where an arm hangs, not leg territory, even though it shares this row range with the
+        // legs in the middle columns. Binding it to hip/thigh regardless of side (as this used to)
+        // means a hand swung away from rest snaps back to a stationary hip on the very next row,
+        // the same seam-stretch problem as the elbow/wrist above. Fading it to root instead means
+        // it settles toward the untouched canonical position rather than jumping to one.
+        if (y < 485f) {
+            float t = smooth((y - 395f) / 90f);
+            return two(left ? handL : handR, 1f - t, root, t);
         }
         return one(root);
     }
@@ -275,6 +327,27 @@ public final class LeonMeshRig {
     private static VertexWeights three(Binding a, float aw, Binding b, float bw,
                                        Binding c, float cw) {
         return normalized(new Binding[]{a, b, c}, new float[]{aw, bw, cw});
+    }
+
+    /**
+     * Combines two already-normalized weight sets (each possibly several bindings deep, e.g. a
+     * mid-blend torso set and a mid-blend limb set) by an outer factor, for the column-direction
+     * blend in {@link #weightsFor}. Unlike {@link #two}/{@link #three}, the inputs are whole
+     * {@link VertexWeights}, not raw bones, since each side of this blend is itself already a
+     * row-direction blend of up to three bones.
+     */
+    private static VertexWeights blend(VertexWeights a, float aw, VertexWeights b, float bw) {
+        Binding[] bindings = new Binding[a.count + b.count];
+        float[] values = new float[bindings.length];
+        for (int i = 0; i < a.count; i++) {
+            bindings[i] = a.bindings[i];
+            values[i] = a.values[i] * aw;
+        }
+        for (int i = 0; i < b.count; i++) {
+            bindings[a.count + i] = b.bindings[i];
+            values[a.count + i] = b.values[i] * bw;
+        }
+        return normalized(bindings, values);
     }
 
     private static VertexWeights normalized(Binding[] bindings, float[] values) {
