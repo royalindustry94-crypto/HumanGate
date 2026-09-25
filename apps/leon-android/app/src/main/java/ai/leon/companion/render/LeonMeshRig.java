@@ -118,18 +118,19 @@ public final class LeonMeshRig {
     /**
      * JVM-test convenience: exact production geometry with a canonical Leon rig.
      *
-     * <p>The source dimensions (941x1672) and landmarks (20/619/180) must match
-     * docs/leon-reference/leon-front-source.png and app/src/main/assets/leon/leon-front.txt
-     * exactly, not just be "close" -- weightsFor's blend margins operate on the resulting design
-     * -space column/row pitch, which scales with these numbers. A mismatch here (this helper
-     * previously hardcoded 360x640, roughly 2.6x smaller than the real 941x1672 photo) makes every
-     * seam-blend test in this class measure a mesh resolution nothing actually renders at, which
-     * silently invalidated a fix that measured clean here but visibly regressed a different seam
-     * on a real device -- see LeonMeshRigTest for what that looked like once caught.
+     * <p>360x640, not docs/leon-reference/leon-front-source.png's raw 941x1672: build_leon_
+     * production.py's extract_reference_master() crops/keys/rescales that raw photo onto a fixed
+     * 360x640 canvas and writes manifest.json's "source_width"/"source_height" from THAT
+     * composited image's size (ProductionAssetContractTest locks this at 360/640), not the raw
+     * photo's -- the 941x1672 figure is recorded separately as "reference_width"/"reference_
+     * height" and never reaches LeonMeshRig. A previous change here briefly used 941x1672,
+     * reasoning backwards from the raw photo's own pixel size instead of the generated manifest's
+     * contract; Codex's review of that change caught it. Landmarks (20/619/180) are already
+     * authored in this 360x640 canvas space (soleY=619 sits near the bottom of a 640-tall canvas).
      */
     public static LeonMeshRig createForTest(int cols, int rows) {
         return new LeonMeshRig(LeonRig.build(), cols, rows,
-                941, 1672, 20f, 619f, 180f);
+                360, 640, 20f, 619f, 180f);
     }
 
     /** Exposed for tests that need to drive a pose through {@code LeonRigBinder} on this exact rig. */
@@ -234,17 +235,18 @@ public final class LeonMeshRig {
         boolean left = x < DESIGN_CENTRE_X;
         float legSide = Math.abs(x - DESIGN_CENTRE_X);
         // Deliberately NOT column-blended, unlike the torso/limb boundary above: a real-device
-        // regression report and a re-check at the real production image resolution (941x1672,
-        // not this file's old 360x640 test assumption -- see LeonMeshRigTest) showed this blend
-        // actively pulling upper-thigh vertices toward the dangling hand/root instead of fixing
-        // anything. At chest/shoulder height (above) the torso and arm are one continuous
-        // silhouette, so blending across that seam is anatomically correct. Down here, a hand
-        // hanging past the hip is NOT attached to the thigh -- legSideFadeWeightsFor's own comment
-        // already explains why this region fades to root instead of hip/thigh: to avoid exactly
-        // this kind of false attachment. Blending softened that boundary right back into the
-        // failure it was written to avoid, just pulling the opposite direction (thigh vertices
-        // picking up hand/root weight -- measured up to ~30% hand_l, ~19% root on a real thigh
-        // vertex -- rather than hand vertices picking up hip weight).
+        // regression report led to a probe of this exact production geometry (360x640, see
+        // createForTest) that showed this blend actively pulling upper-thigh vertices toward the
+        // dangling hand/root instead of fixing anything. At chest/shoulder height (above) the
+        // torso and arm are one continuous silhouette, so blending across that seam is
+        // anatomically correct. Down here, a hand hanging past the hip is NOT attached to the
+        // thigh -- legSideFadeWeightsFor's own comment already explains why this region fades to
+        // root instead of hip/thigh: to avoid exactly this kind of false attachment. Blending
+        // softened that boundary right back into the failure it was written to avoid, just
+        // pulling the opposite direction (thigh vertices picking up hand/root weight -- measured
+        // up to ~31% hand_l, ~33% root on real thigh vertices, e.g. WEIGHT_SHIFT-driven idle at
+        // canonical (x=114, y=441): hips=0.244 thigh_l=0.120 hand_l=0.307 root=0.330 -- rather
+        // than hand vertices picking up hip weight).
         if (legSide > 72f) return legSideFadeWeightsFor(y, left);
         return legWeightsFor(y, left);
     }

@@ -145,13 +145,6 @@ public class LeonMeshRigTest {
         float[] deformed = mesh.deformedVertices();
         int cols = mesh.meshCols();
         int rows = mesh.meshRows();
-        // Widened from the original 375-460 (chosen against this file's old, wrong 360x640 test
-        // dimensions -- see createForTest) to 250-600: at the real 941x1672 production resolution
-        // the mesh's row pitch is ~69 design units, so a 20-85-unit window can land between rows
-        // and check nothing at all. 250-600 reliably spans several real adjacent-row pairs in the
-        // one real column (x=323) that falls past x=300 on-canvas, covering the same fingertip/
-        // hand-to-hip-fade seam this test targets, just measured against geometry that matches
-        // what's actually rendered.
         float worstRatio = 0f;
         int seamRowsChecked = 0;
         for (int col = 0; col <= cols; col++) {
@@ -162,7 +155,7 @@ public class LeonMeshRigTest {
                 int i1 = (row + 1) * (cols + 1) + col;
                 float y0 = canon[i0 * 2 + 1];
                 float y1 = canon[i1 * 2 + 1];
-                if (Math.min(y0, y1) < 250f || Math.max(y0, y1) > 600f) continue; // hand-to-hip fade
+                if (Math.min(y0, y1) < 375f || Math.max(y0, y1) > 460f) continue; // hand-to-hip fade
                 float restDist = (float) Math.hypot(
                         canon[i1 * 2] - canon[i0 * 2], canon[i1 * 2 + 1] - canon[i0 * 2 + 1]);
                 if (restDist < 1f) continue;
@@ -173,18 +166,8 @@ public class LeonMeshRigTest {
             }
         }
         assertTrue("expected several fingertip-seam rows in the test mesh geometry", seamRowsChecked > 2);
-        // 1.1f was tuned against this file's old, wrong 360x640 createForTest geometry (row pitch
-        // ~27 units); at the real 941x1672 resolution (row pitch ~69 units) the same HAND_R_RAISE
-        // pose measures ~1.117 on the one real fingertip column (x=323) -- confirmed unrelated to
-        // this PR's column-blend fix by re-running with COLUMN_BLEND_MARGIN forced to 0 (x=323's
-        // legSide is 131, outside that blend's reach either way): identical 1.1173618 both times.
-        // 1.2 keeps real headroom below this same file's own known-bad baseline for this exact
-        // pose/bug (~1.30, from PR #184's probe reproduction of the pre-fix compound-rotation
-        // regression), so this still fails if that regression comes back, while accepting the
-        // real, correctly-measured mesh's coarser clean baseline instead of the old test's wrong
-        // finer-mesh clean baseline (~0.79-0.86).
         assertTrue("a hand raise alone must not stretch the fingertip/hip-fade seam, worst "
-                + "adjacent-row stretch ratio was " + worstRatio, worstRatio < 1.2f);
+                + "adjacent-row stretch ratio was " + worstRatio, worstRatio < 1.1f);
     }
 
     @Test
@@ -210,25 +193,24 @@ public class LeonMeshRigTest {
         int cols = mesh.meshCols();
         int rows = mesh.meshRows();
         java.util.List<Integer> handVertices = new java.util.ArrayList<>();
-        // x0 > 294, y in [290,510]: at the real 941x1672 production resolution (see createForTest)
-        // only ONE on-canvas column (x=323, legSide=131) sits fully outside the torso/limb column
-        // blend (legSide > COLUMN_BLEND_END=102); a wider x0 > 250 was tried first to reach the
-        // "several vertices" this assertion wants, but that pulls in x=255 (legSide=63), a column
-        // still inside COLUMN_BLEND_START/END's intentional torso-blend margin -- not hand at all
-        // near rest, and genuinely not rigid with a real hand vertex, so it measured a shear
-        // (~1.29) between two different weighting domains, not a hand-shape defect. Restricting to
-        // x0 > 294 and widening y instead (to the same column's 4 real on-canvas rows spanning the
-        // forearm/hand and hand/root blend bands -- see sideWeightsFor/legSideFadeWeightsFor)
-        // measures actual hand-region shape stability and drops the worst ratio to ~1.095.
+        // x0 > 294, not the old > 264: LeonMeshRig now blends the torso/limb column boundary itself
+        // (fixing hips visibly pinching against a resting hand at idle -- see LeonMeshRig's
+        // COLUMN_BLEND_* constants), so columns within that blend margin (x0 up to design-centre 192
+        // + COLUMN_BLEND_END 102 = 294) are now intentionally partly hip/spine-bound too, not pure
+        // hand. This test's premise (hand-only motion must move these vertices as one rigid piece)
+        // only holds for the columns still purely hand-bound, i.e. strictly beyond that boundary.
         for (int col = 0; col <= cols; col++) {
             float x0 = canon[col * 2];
             if (x0 <= 294f || x0 > 384f) continue;
             for (int row = 0; row <= rows; row++) {
                 int i = row * (cols + 1) + col;
                 float y0 = canon[i * 2 + 1];
-                if (y0 >= 290f && y0 <= 510f) handVertices.add(i);
+                if (y0 >= 375f && y0 < 395f) handVertices.add(i);
             }
         }
+        // Exactly 4, not >4: of this mesh's 5 columns past the new pure-hand boundary (x0 > 294),
+        // one (x0=398.7) is off the 384-wide texture and already excluded by the x0 > 384 check
+        // above, same as every other seam test in this class excludes off-canvas columns.
         assertTrue("expected several hand vertices in the test mesh geometry",
                 handVertices.size() >= 4);
 
@@ -245,14 +227,8 @@ public class LeonMeshRigTest {
                 worstRatio = Math.max(worstRatio, Math.max(def / rest, rest / def));
             }
         }
-        // 1.05f assumed a purely rigid hand under a small bend; at real resolution no on-canvas
-        // vertex is ever 100% hand-bound (the pure-hand window is y in [375,395), a 20-unit band
-        // no real row lands in at ~69-unit row pitch -- see sideWeightsFor), so every real "hand"
-        // vertex here is intentionally blended toward forearm or root and will not be perfectly
-        // rigid with its neighbors. Measured worst ratio among the 4 real vertices is ~1.095;
-        // 1.12 keeps headroom while still catching a materially wider/miscalibrated blend margin.
         assertTrue("a small idle elbow bend must not warp the hand's shape, worst pairwise "
-                + "distance ratio was " + worstRatio, worstRatio < 1.12f);
+                + "distance ratio was " + worstRatio, worstRatio < 1.05f);
     }
 
     @Test
