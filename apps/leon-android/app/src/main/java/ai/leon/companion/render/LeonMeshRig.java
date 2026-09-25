@@ -115,10 +115,21 @@ public final class LeonMeshRig {
                 manifest.crownY, manifest.soleY, manifest.centreX);
     }
 
-    /** JVM-test convenience: exact production geometry with a canonical Leon rig. */
+    /**
+     * JVM-test convenience: exact production geometry with a canonical Leon rig.
+     *
+     * <p>The source dimensions (941x1672) and landmarks (20/619/180) must match
+     * docs/leon-reference/leon-front-source.png and app/src/main/assets/leon/leon-front.txt
+     * exactly, not just be "close" -- weightsFor's blend margins operate on the resulting design
+     * -space column/row pitch, which scales with these numbers. A mismatch here (this helper
+     * previously hardcoded 360x640, roughly 2.6x smaller than the real 941x1672 photo) makes every
+     * seam-blend test in this class measure a mesh resolution nothing actually renders at, which
+     * silently invalidated a fix that measured clean here but visibly regressed a different seam
+     * on a real device -- see LeonMeshRigTest for what that looked like once caught.
+     */
     public static LeonMeshRig createForTest(int cols, int rows) {
         return new LeonMeshRig(LeonRig.build(), cols, rows,
-                360, 640, 20f, 619f, 180f);
+                941, 1672, 20f, 619f, 180f);
     }
 
     /** Exposed for tests that need to drive a pose through {@code LeonRigBinder} on this exact rig. */
@@ -222,16 +233,20 @@ public final class LeonMeshRig {
 
         boolean left = x < DESIGN_CENTRE_X;
         float legSide = Math.abs(x - DESIGN_CENTRE_X);
-        // Same column-direction seam as the torso/limb boundary above, at the same x threshold, one
-        // row-band lower: this is where the hand-fade-to-root region (see below) meets the hip/thigh
-        // region, i.e. immediately below where the hand rests against the hip. Blended for the same
-        // reason -- PostureBehaviour's idle weight-shift moves the hips bone while independently
-        // feeding the arm/hand, so an unblended cutoff here pinches on the same idle cycle.
-        if (legSide <= COLUMN_BLEND_START) return legWeightsFor(y, left);
-        VertexWeights sideFade = legSideFadeWeightsFor(y, left);
-        if (legSide >= COLUMN_BLEND_END) return sideFade;
-        float legT = smooth((legSide - COLUMN_BLEND_START) / (COLUMN_BLEND_END - COLUMN_BLEND_START));
-        return blend(legWeightsFor(y, left), 1f - legT, sideFade, legT);
+        // Deliberately NOT column-blended, unlike the torso/limb boundary above: a real-device
+        // regression report and a re-check at the real production image resolution (941x1672,
+        // not this file's old 360x640 test assumption -- see LeonMeshRigTest) showed this blend
+        // actively pulling upper-thigh vertices toward the dangling hand/root instead of fixing
+        // anything. At chest/shoulder height (above) the torso and arm are one continuous
+        // silhouette, so blending across that seam is anatomically correct. Down here, a hand
+        // hanging past the hip is NOT attached to the thigh -- legSideFadeWeightsFor's own comment
+        // already explains why this region fades to root instead of hip/thigh: to avoid exactly
+        // this kind of false attachment. Blending softened that boundary right back into the
+        // failure it was written to avoid, just pulling the opposite direction (thigh vertices
+        // picking up hand/root weight -- measured up to ~30% hand_l, ~19% root on a real thigh
+        // vertex -- rather than hand vertices picking up hip weight).
+        if (legSide > 72f) return legSideFadeWeightsFor(y, left);
+        return legWeightsFor(y, left);
     }
 
     /** Chest/spine/hips chain for the torso columns of the y in [205,395) band -- ignores x. */
