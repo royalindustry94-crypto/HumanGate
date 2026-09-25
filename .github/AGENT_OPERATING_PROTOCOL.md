@@ -20,7 +20,7 @@ review, and evidence requirement win.
 | Builder (legacy label, still valid) | Claude Code or Cursor, explicitly assigned per task | One queued issue, one branch, implementation, tests, and pull request | Merge; work without a current exact-SHA authorization; weaken controls; work outside the assigned issue |
 | Reviewer / QA | A fresh Codex, Copilot, or other designated agent that did not build the change | Scope review, regression checks, exact-head CI evidence | Modify the reviewed head while claiming independence |
 | Security auditor | Independent agent | PASS / CONDITIONAL / FAIL audit against the exact head SHA and non-negotiables | Approve its own implementation or ignore missing evidence |
-| Build watchdog | GitHub Actions | Monitor the latest repository CI run only and retry genuine failures within bounded limits | Change product code, alter protections, expose secrets, or merge |
+| Build watchdog | GitHub Actions | Enforce continuity by monitoring CI plus Claude completion failures, with one bounded exact-head retry and durable blocked records | Change product code, alter protections, expose secrets, or merge |
 
 Only one Builder/worker owns a task at a time. A task must have an issue, a named owner, a branch, and a pull request before it can reach review.
 
@@ -61,14 +61,16 @@ SHA. A private agent-project instruction cannot override repository state.
 
 ## Continuity and restart rules
 
-The Build Watchdog runs every 30 minutes and can also be started manually. It monitors the latest repository CI run only; it is not a multi-branch build queue and cannot restart a stopped coding-agent session.
+The Build Watchdog runs every 10 minutes, can be started manually, and also reacts to completed `Claude Code Lead` runs.
 
 - Failed, cancelled, timed-out, or stale CI is retried once.
 - A queued or running latest CI build with no update for 90 minutes is treated as stalled, cancelled, and rerun once using the same run record.
 - If no CI run exists, the watchdog dispatches CI on the default branch.
-- After the retry limit, the watchdog fails visibly so a human or Orchestrator can investigate.
-- Successful CI is not rerun merely to consume minutes.
-- A stopped Builder does not justify inventing work; the Orchestrator may restart only a queued task with a real owner.
+- A failed/cancelled/timed-out Claude run tied to a PR head is rerun once only when the PR head SHA is unchanged.
+- Retry state is derived from the GitHub run attempt; no separate mutable retry store is used.
+- A second exact-head Claude failure creates a durable `AUTOMATION_FAIL/BLOCKED` record with PR, SHA, run ID, and next safe action.
+- Task health is tracked as one of: `builder_running`, `review_running`, `waiting_authorized_handoff`, `blocked_external`, `complete`.
+- Green CI alone is never treated as healthy task completion.
 - No retry can bypass Human Review, FORCE RLS, spend controls, provider abstraction, audit logging, branch protection, or an independent audit.
 
 ## Merge gate

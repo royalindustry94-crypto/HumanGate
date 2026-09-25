@@ -1,27 +1,32 @@
 name: Build Watchdog
 
-# Scope: monitors only the latest repository CI run.
-# This can restart GitHub Actions CI; it cannot restart stopped AI coding sessions.
+# Scope: repository-native continuity controller.
+# It can recover CI and Claude runs within bounded retry rules.
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/10 * * * *"
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Claude Code Lead"]
+    types: [completed]
 
 permissions:
   actions: write
   contents: read
+  issues: write
+  pull-requests: read
 
 concurrency:
   group: build-watchdog-${{ github.repository }}
   cancel-in-progress: true
 
 jobs:
-  ensure-ci:
+  continuity:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Inspect and recover CI
+      - name: Inspect and recover continuity
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -29,88 +34,224 @@ jobs:
           set -euo pipefail
 
           repo="$GITHUB_REPOSITORY"
-          workflow="ci.yml"
-          default_branch="$(gh api "repos/$repo" --jq '.default_branch')"
-          latest="$(gh api "repos/$repo/actions/workflows/$workflow/runs?per_page=1" --jq '.workflow_runs[0] // {}')"
+          ci_workflow="ci.yml"
+          claude_workflow="claude.yml"
+          owner="${GITHUB_REPOSITORY%%/*}"
 
-          dispatch() {
+          event_name="$GITHUB_EVENT_NAME"
+
+          default_branch="$(gh api "repos/$repo" --jq '.default_branch')"
+
+          dispatch_ci() {
             local ref="$1"
             echo "Dispatching CI on $ref"
-            gh api --method POST "repos/$repo/actions/workflows/$workflow/dispatches" -f ref="$ref"
+            gh api --method POST "repos/$repo/actions/workflows/$ci_workflow/dispatches" -f ref="$ref"
           }
 
-          if [ "$latest" = "{}" ]; then
-            dispatch "$default_branch"
+          codex_verdict_for_sha() {
+            local pr_number="$1"
+            local sha="$2"
+            gh api "repos/$repo/issues/$pr_number/comments?per_page=100" --paginate |
+              jq -r --arg owner "$owner" --arg sha "$sha" '
+                [.[]
+                  | select(.user.login == $owner)
+                  | select((.body // "") | contains("<!-- codex-audit-gate:v1 -->"))
+                  | select((.body // "") | contains("HEAD_SHA: " + $sha))
+                  | .body]
+                | join("\n")
+                | if contains("CODEX_AUDIT: PASS") then "PASS"
+                  elif contains("CODEX_AUDIT: CHANGES_REQUESTED") then "CHANGES_REQUESTED"
+                  elif contains("CODEX_AUDIT: CHECKPOINT_PASS") then "CHECKPOINT_PASS"
+                  else "none" end'
+          }
+
+          post_blocked_record() {
+            local pr_number="$1"
+            local head_sha="$2"
+            local run_id="$3"
+            local run_attempt="$4"
+            local run_url="$5"
+
+            local marker="<!-- automation-failover:v1 run:$run_id sha:$head_sha -->"
+            local existing
+            existing="$(gh api "repos/$repo/issues/$pr_number/comments?per_page=100" |
+              jq -r --arg marker "$marker" '[.[] | select((.body // "") | contains($marker))] | length')"
+            if [ "$existing" -gt 0 ]; then
+              echo "Blocked record already exists for run $run_id"
+              return
+            fi
+
+            local body
+            body="$marker"$'\n'"AUTOMATION_FAIL/BLOCKED"$'\n\n'"- workflow: Claude Code Lead"$'\n'"- pull_request: #$pr_number"$'\n'"- exact_head_sha: $head_sha"$'\n'"- failed_run_id: $run_id"$'\n'"- run_attempt: $run_attempt"$'\n'"- run_url: $run_url"$'\n'"- health_state: blocked_external"$'\n'"- next_safe_action: Human owner must inspect this exact run and post a fresh exact-head @claude command only after resolving the external failure."
+            gh api --method POST "repos/$repo/issues/$pr_number/comments" -f body="$body"
+          }
+
+          classify_health() {
+            local claude_status="$1"
+            local claude_conclusion="$2"
+            local claude_attempt="$3"
+            local codex_verdict="$4"
+            local ci_ok="$5"
+
+            if [ "$codex_verdict" = "PASS" ] && [ "$ci_ok" = "true" ] && [ "$claude_conclusion" = "success" ]; then
+              echo "complete"
+              return
+            fi
+
+            case "$claude_status" in
+              queued|in_progress|requested|pending|waiting)
+                echo "builder_running"
+                return
+                ;;
+            esac
+
+            case "$claude_conclusion" in
+              failure|cancelled|timed_out|stale|startup_failure)
+                if [ "$claude_attempt" -lt 2 ]; then
+                  echo "builder_running"
+                else
+                  echo "blocked_external"
+                fi
+                return
+                ;;
+            esac
+
+            case "$codex_verdict" in
+              CHANGES_REQUESTED|CHECKPOINT_PASS)
+                echo "waiting_authorized_handoff"
+                return
+                ;;
+            esac
+
+            echo "review_running"
+          }
+
+          inspect_ci() {
+            local latest
+            latest="$(gh api "repos/$repo/actions/workflows/$ci_workflow/runs?per_page=1" --jq '.workflow_runs[0] // {}')"
+            if [ "$latest" = "{}" ]; then
+              dispatch_ci "$default_branch"
+              return
+            fi
+
+            local run_id status conclusion attempt updated_at run_url age_seconds
+            run_id="$(jq -r '.id' <<<"$latest")"
+            status="$(jq -r '.status' <<<"$latest")"
+            conclusion="$(jq -r '.conclusion // ""' <<<"$latest")"
+            attempt="$(jq -r '.run_attempt // 1' <<<"$latest")"
+            updated_at="$(jq -r '.updated_at' <<<"$latest")"
+            run_url="$(jq -r '.html_url' <<<"$latest")"
+            age_seconds="$(( $(date -u +%s) - $(date -u -d "$updated_at" +%s) ))"
+
+            echo "Latest CI: $run_url"
+            echo "status=$status conclusion=$conclusion attempt=$attempt age_seconds=$age_seconds"
+
+            case "$status" in
+              waiting)
+                echo "::warning::CI is waiting on a deployment-protection approval; no automated retry."
+                return
+                ;;
+              queued|in_progress|requested|pending)
+                if [ "$age_seconds" -lt 5400 ]; then
+                  return
+                fi
+                if [ "$attempt" -ge 2 ]; then
+                  echo "::error::CI exhausted its single stale-run retry: $run_url"
+                  return
+                fi
+                gh api --method POST "repos/$repo/actions/runs/$run_id/cancel"
+                gh api --method POST "repos/$repo/actions/runs/$run_id/rerun"
+                return
+                ;;
+              completed)
+                case "$conclusion" in
+                  success|neutral|skipped|action_required)
+                    return
+                    ;;
+                  failure|cancelled|timed_out|stale|startup_failure)
+                    if [ "$attempt" -ge 2 ]; then
+                      echo "::error::CI exhausted its single automatic retry: $run_url"
+                      return
+                    fi
+                    gh api --method POST "repos/$repo/actions/runs/$run_id/rerun-failed-jobs" ||
+                      gh api --method POST "repos/$repo/actions/runs/$run_id/rerun"
+                    return
+                    ;;
+                  *)
+                    echo "::error::Unhandled CI conclusion '$conclusion': $run_url"
+                    return
+                    ;;
+                esac
+                ;;
+            esac
+          }
+
+          recover_claude_run() {
+            local run_json="$1"
+            local run_id status conclusion attempt head_sha run_url
+            run_id="$(jq -r '.id' <<<"$run_json")"
+            status="$(jq -r '.status' <<<"$run_json")"
+            conclusion="$(jq -r '.conclusion // ""' <<<"$run_json")"
+            attempt="$(jq -r '.run_attempt // 1' <<<"$run_json")"
+            head_sha="$(jq -r '.head_sha // ""' <<<"$run_json")"
+            run_url="$(jq -r '.html_url // ""' <<<"$run_json")"
+
+            [ "$status" = "completed" ] || return
+
+            case "$conclusion" in
+              failure|cancelled|timed_out|stale|startup_failure)
+                ;;
+              *)
+                return
+                ;;
+            esac
+
+            local run_detail pr_number
+            run_detail="$(gh api "repos/$repo/actions/runs/$run_id")"
+            pr_number="$(jq -r '.pull_requests[0].number // empty' <<<"$run_detail")"
+            if [ -z "$pr_number" ]; then
+              echo "::warning::Claude run $run_id has no PR context; health_state=blocked_external"
+              return
+            fi
+
+            local current_head codex_verdict ci_conclusion ci_ok health_state
+            current_head="$(gh api "repos/$repo/pulls/$pr_number" --jq '.head.sha')"
+            codex_verdict="$(codex_verdict_for_sha "$pr_number" "$current_head")"
+            ci_conclusion="$(gh api "repos/$repo/actions/workflows/$ci_workflow/runs?head_sha=$current_head&per_page=1" --jq '.workflow_runs[0].conclusion // ""')"
+            ci_ok="false"
+            [ "$ci_conclusion" = "success" ] && ci_ok="true"
+            health_state="$(classify_health "$status" "$conclusion" "$attempt" "$codex_verdict" "$ci_ok")"
+            echo "task_health_state=$health_state pr=$pr_number sha=$current_head ci=$ci_conclusion codex=$codex_verdict"
+
+            if [ "$current_head" != "$head_sha" ]; then
+              echo "task_health_state=review_running pr=$pr_number sha=$current_head reason=stale_failed_run_no_retry"
+              echo "Stale Claude failure on $head_sha (PR #$pr_number now at $current_head); no stale-SHA retry."
+              return
+            fi
+
+            if [ "$attempt" -lt 2 ]; then
+              echo "Retrying Claude run $run_id once for exact unchanged head $head_sha"
+              gh api --method POST "repos/$repo/actions/runs/$run_id/rerun"
+              return
+            fi
+
+            post_blocked_record "$pr_number" "$head_sha" "$run_id" "$attempt" "$run_url"
+            echo "::error::Claude continuity blocked after bounded retry on run $run_id"
+          }
+
+          inspect_ci
+
+          if [ "$event_name" = "workflow_run" ]; then
+            claude_run="$(jq -c '.workflow_run' "$GITHUB_EVENT_PATH")"
+            recover_claude_run "$claude_run"
             exit 0
           fi
 
-          run_id="$(jq -r '.id' <<<"$latest")"
-          status="$(jq -r '.status' <<<"$latest")"
-          conclusion="$(jq -r '.conclusion // ""' <<<"$latest")"
-          attempt="$(jq -r '.run_attempt // 1' <<<"$latest")"
-          updated_at="$(jq -r '.updated_at' <<<"$latest")"
-          run_url="$(jq -r '.html_url' <<<"$latest")"
-          age_seconds="$(( $(date -u +%s) - $(date -u -d "$updated_at" +%s) ))"
-
-          echo "Latest CI: $run_url"
-          echo "status=$status conclusion=$conclusion attempt=$attempt age_seconds=$age_seconds"
-
-          case "$status" in
-            waiting)
-              echo "::warning::CI is waiting on a deployment-protection approval; the watchdog will not cancel or retry it: $run_url"
-              exit 0
-              ;;
-            queued|in_progress|requested|pending)
-              if [ "$age_seconds" -lt 5400 ]; then
-                echo "CI is active and within the 90-minute window."
-                exit 0
-              fi
-              if [ "$attempt" -ge 2 ]; then
-                echo "::error::CI exhausted its single stale-run retry: $run_url"
-                exit 1
-              fi
-              echo "::warning::CI is stale; cancelling run $run_id before one same-run retry."
-              gh api --method POST "repos/$repo/actions/runs/$run_id/cancel"
-              cancelled_status=""
-              for _ in $(seq 1 30); do
-                cancelled_status="$(gh api "repos/$repo/actions/runs/$run_id" --jq '.status')"
-                [ "$cancelled_status" = "completed" ] && break
-                sleep 2
-              done
-              if [ "$cancelled_status" != "completed" ]; then
-                echo "::error::Timed out waiting for stale CI run $run_id to cancel."
-                exit 1
-              fi
-              gh api --method POST "repos/$repo/actions/runs/$run_id/rerun"
-              ;;
-            completed)
-              case "$conclusion" in
-                success)
-                  echo "CI completed successfully; no restart is required."
-                  ;;
-                neutral|skipped)
-                  echo "::warning::CI concluded '$conclusion'; this is not a product-code failure and will not be retried automatically."
-                  ;;
-                action_required)
-                  echo "::warning::CI requires human approval; the watchdog will not bypass it: $run_url"
-                  ;;
-                failure|cancelled|timed_out|stale|startup_failure)
-                  if [ "$attempt" -ge 2 ]; then
-                    echo "::error::CI exhausted its single automatic retry: $run_url"
-                    exit 1
-                  fi
-                  echo "::warning::Retrying unsuccessful CI run $run_id once."
-                  gh api --method POST "repos/$repo/actions/runs/$run_id/rerun-failed-jobs" ||
-                    gh api --method POST "repos/$repo/actions/runs/$run_id/rerun"
-                  ;;
-                *)
-                  echo "::error::Unhandled CI conclusion '$conclusion': $run_url"
-                  exit 1
-                  ;;
-              esac
-              ;;
-            *)
-              echo "::error::Unhandled CI status '$status': $run_url"
-              exit 1
-              ;;
-          esac
+          latest_failed_claude="$(gh api "repos/$repo/actions/workflows/$claude_workflow/runs?per_page=20" --jq '
+            [ .workflow_runs[]
+              | select(.status == "completed")
+              | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out" or .conclusion == "stale" or .conclusion == "startup_failure")
+            ][0] // empty')"
+          if [ -n "$latest_failed_claude" ]; then
+            recover_claude_run "$latest_failed_claude"
+          fi
