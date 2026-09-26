@@ -7,6 +7,7 @@ import static org.junit.Assert.assertTrue;
 import ai.leon.companion.anim.LeonChannel;
 import ai.leon.companion.anim.LeonPose;
 import ai.leon.companion.anim.LeonRigBinder;
+import ai.leon.companion.anim.PostureBehaviour;
 import ai.leon.companion.render.LeonMeshRig;
 
 import org.junit.Test;
@@ -281,37 +282,84 @@ public class LeonMeshRigTest {
         // rest pose -- see the class doc comment -- so a blend that helps a resting hand's small
         // divergence necessarily hurts a reaching hand's large one; there is no single blend weight
         // that avoids both). That blend was reverted, and PostureBehaviour's own sway amplitude was
-        // reduced instead (IDLE_SWAY_SCALE=0.2, see its own comment): with it, this same worst case
-        // measures 5.714, down from 65.302 at full amplitude. It is still not fully closed -- IDLE's
-        // base elbow bend alone, with zero sway at all, already stretches this seam to ~3.1x, a floor
-        // no amount of sway reduction can get under. Closing that remainder needs finer mesh
-        // resolution at this seam or reducing the base elbow bend itself, neither of which is an
-        // animation-amplitude change.
+        // reduced instead (IDLE_SWAY_SCALE=0.2, see its own comment). This sweep also includes
+        // TORSO_TWIST/TORSO_LEAN_X extremes ({@code torso} below) -- a Codex review of an earlier
+        // version of this fix caught that leaving them out hid part of the real worst case, since
+        // they move the chest/spine (and everything hanging off it, including the whole arm chain)
+        // relative to the hips bone just like the arm-swing channels do, through a different bone.
+        // With all three swept together: 6.076, down from 65.302 at full amplitude pre-scale. It is
+        // still not fully closed -- IDLE's base elbow bend alone, with zero sway at all, already
+        // stretches this seam to ~3.1x, a floor no amount of sway reduction can get under. Closing
+        // that remainder needs finer mesh resolution at this seam or reducing the base elbow bend
+        // itself, neither of which is an animation-amplitude change.
         for (float weightShift : new float[]{0.35f, 0.5f, -0.5f, 0.65f, -0.65f, 0.85f, -0.85f}) {
             for (float shoulder : new float[]{0f, 0.5f, -0.5f, 1f, -1f}) {
-                float worstUpper = worstHipBandSeamRatio(weightShift, shoulder, 300f, 400f);
-                assertTrue("idle's autonomous weight-shift (sign=" + weightShift + ", shoulder="
-                        + shoulder + ") must not pinch the torso/limb column seam, worst "
-                        + "adjacent-column ratio was " + worstUpper, worstUpper < 1.3f);
-                float worstLower = worstHipBandSeamRatio(weightShift, shoulder, 395f, 485f);
-                assertTrue("idle's autonomous weight-shift (sign=" + weightShift + ", shoulder="
-                        + shoulder + ") hip/hand-fade column seam regressed well beyond its known, "
-                        + "still-unresolved bound, worst adjacent-column ratio was " + worstLower,
-                        worstLower < 6.2f);
+                for (float torso : new float[]{0f, 0.5f, -0.5f, 1f, -1f}) {
+                    float worstUpper = worstHipBandSeamRatio(weightShift, shoulder, torso, 300f, 400f);
+                    assertTrue("idle's autonomous weight-shift (sign=" + weightShift + ", shoulder="
+                            + shoulder + ", torso=" + torso + ") must not pinch the torso/limb column "
+                            + "seam, worst adjacent-column ratio was " + worstUpper, worstUpper < 1.3f);
+                    float worstLower = worstHipBandSeamRatio(weightShift, shoulder, torso, 395f, 485f);
+                    assertTrue("idle's autonomous weight-shift (sign=" + weightShift + ", shoulder="
+                            + shoulder + ", torso=" + torso + ") hip/hand-fade column seam regressed "
+                            + "well beyond its known, still-unresolved bound, worst adjacent-column "
+                            + "ratio was " + worstLower, worstLower < 6.2f);
+                }
             }
         }
     }
 
+    @Test
+    public void idleTrajectoryDoesNotPinchTheHipBeyondTheSyntheticSweepsBound() {
+        // The synthetic sweep above (static extremes of every contributing channel, all at once)
+        // measures 6.076 worst case -- but a Codex review of an earlier version of this fix pointed
+        // out that PostureBehaviour's springs and independent noise sources don't just sit at their
+        // extremes, they transit through them on their own schedules, and replaying a real seeded
+        // trajectory found a *worse* worst case (8-17x pre-fix) than sweeping static combinations
+        // ever did. Confirmed after the fix too: replaying these five seeds for 90 simulated seconds
+        // each finds 6.478 (seed 91), higher than the static sweep's 6.076, even though no single
+        // static combination in that sweep is more extreme than what these seeds pass through. This
+        // is a second, independent regression guard for that reason -- it can catch a transient
+        // combination the static sweep's fixed sample points miss.
+        long[] seeds = {0L, 7L, 17L, 42L, 91L};
+        float worstLower = 1f;
+        float worstUpper = 1f;
+        for (long seed : seeds) {
+            PostureBehaviour posture = new PostureBehaviour(seed);
+            LeonMeshRig mesh = LeonMeshRig.createForTest(16, 28);
+            LeonRigBinder binder = new LeonRigBinder(mesh.rig());
+            float dt = 1f / 60f;
+            for (int i = 0; i < 60 * 90; i++) {
+                LeonPose pose = new LeonPose();
+                pose.set(LeonChannel.ELBOW_L, 0.12f);
+                pose.set(LeonChannel.ELBOW_R, 0.12f);
+                posture.update(dt, 1f, pose);
+                binder.apply(pose);
+                mesh.updateFromSolvedRig();
+                worstLower = Math.max(worstLower, seamRatioInBand(mesh, 395f, 485f));
+                worstUpper = Math.max(worstUpper, seamRatioInBand(mesh, 300f, 400f));
+            }
+        }
+        assertTrue("a real idle trajectory must not pinch the torso/limb column seam beyond its "
+                + "known bound, worst adjacent-column ratio was " + worstUpper, worstUpper < 1.3f);
+        assertTrue("a real idle trajectory's hip/hand-fade column seam regressed well beyond its "
+                + "known, still-unresolved bound, worst adjacent-column ratio was " + worstLower,
+                worstLower < 7f);
+    }
+
     /**
      * Worst adjacent-column distance ratio (either direction) in the given design-space y band,
-     * under IDLE's own always-on base pose (ELBOW_L/R=0.12) plus WEIGHT_SHIFT and independent
-     * shoulder noise combined exactly as PostureBehaviour combines them post-IDLE_SWAY_SCALE (see
-     * its own ARM_*_SWING/SHOULDER_* lines): {@code shoulder} stands in for its shL/shR noise terms
-     * (each roughly in [-1,1]), which drive SHOULDER_L/R directly (*0.17) and ARM_*_SWING
-     * independently of WEIGHT_SHIFT's own contribution (*0.09); both scaled by the same 0.2 factor
-     * PostureBehaviour applies to just these channels.
+     * under IDLE's own always-on base pose (ELBOW_L/R=0.12) plus WEIGHT_SHIFT, independent shoulder
+     * noise, and independent torso twist/lean, combined exactly as PostureBehaviour combines them
+     * post-IDLE_SWAY_SCALE (see its own ARM_*_SWING, SHOULDER_*, and TORSO_* lines): {@code shoulder}
+     * stands in for its shL/shR noise terms (each roughly in [-1,1]), which drive SHOULDER_L/R
+     * directly (*0.17) and ARM_*_SWING independently of WEIGHT_SHIFT's own contribution (*0.09);
+     * {@code torso} stands in for its twist/lean terms (each roughly in [-1,1]), which drive
+     * TORSO_TWIST and TORSO_LEAN_X (*0.3); all three scaled by the same 0.2 factor PostureBehaviour
+     * applies to just these channels.
      */
-    private static float worstHipBandSeamRatio(float weightShift, float shoulder, float yLo, float yHi) {
+    private static float worstHipBandSeamRatio(float weightShift, float shoulder, float torso,
+                                                float yLo, float yHi) {
         final float sway = 0.2f; // mirrors PostureBehaviour.IDLE_SWAY_SCALE
         LeonMeshRig mesh = LeonMeshRig.createForTest(16, 28);
         LeonRigBinder binder = new LeonRigBinder(mesh.rig());
@@ -323,9 +371,15 @@ public class LeonMeshRigTest {
         pose.set(LeonChannel.SHOULDER_R, shoulder * 0.17f * sway);
         pose.set(LeonChannel.ARM_L_SWING, weightShift * 0.10f * sway + shoulder * 0.09f * sway);
         pose.set(LeonChannel.ARM_R_SWING, weightShift * 0.10f * sway + shoulder * 0.09f * sway);
+        pose.set(LeonChannel.TORSO_TWIST, torso * 0.3f * sway);
+        pose.set(LeonChannel.TORSO_LEAN_X, torso * 0.3f * sway);
         binder.apply(pose);
         mesh.updateFromSolvedRig();
+        return seamRatioInBand(mesh, yLo, yHi);
+    }
 
+    /** Worst adjacent-column distance ratio (either direction) in the given design-space y band. */
+    private static float seamRatioInBand(LeonMeshRig mesh, float yLo, float yHi) {
         float[] canon = mesh.canonicalVertices();
         float[] deformed = mesh.deformedVertices();
         int cols = mesh.meshCols();

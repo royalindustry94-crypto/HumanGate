@@ -20,15 +20,26 @@ public final class PostureBehaviour implements LeonBehaviour {
     private final Spring1D weightSpring = new Spring1D(0f, 9f, 5.2f);
     private final Spring1D twistSpring = new Spring1D(0f, 11f, 5.6f);
 
-    // Scales only the three channels that drive LeonMeshRig's hip/hand-fade seam -- WEIGHT_SHIFT,
-    // SHOULDER_L/R, and the two ARM_*_SWING terms -- not TORSO_TWIST/TORSO_LEAN_X/NECKLACE_SWAY,
-    // which don't touch that seam. Measured against the full real amplitude range combined with
-    // IDLE's own always-on base pose (ELBOW_L/R=0.12, see LeonStateProfile): at the previous full
-    // amplitude that seam reached 65x; at 0.2 it's 5.7x. That's the best amplitude alone can do --
-    // IDLE's base elbow bend, on its own, with zero sway at all, already stretches this same seam
-    // to ~3.1x, a static floor this scale can't reach past no matter how low it goes. Closing the
-    // remaining gap needs either finer mesh resolution at that seam or reducing the base elbow
-    // bend itself, neither of which is an animation-amplitude change.
+    // Scales the channels that drive LeonMeshRig's hip/hand-fade seam: WEIGHT_SHIFT, SHOULDER_L/R,
+    // both ARM_*_SWING terms, and -- caught by a Codex review of an earlier version of this fix,
+    // which only scaled the first three and still measured 8-17x replaying a real trajectory --
+    // TORSO_TWIST and TORSO_LEAN_X too. Those two don't move the hips bone at all, but they do move
+    // chest/spine (LeonRigBinder: chest.offsetX = twist*4f, spine.rotationDeg = leanX*SPINE_LEAN_DEG),
+    // and shoulders/arms/hands are chest's descendants while hips is their common ancestor higher up
+    // the chain -- so torso twist and lean swing the hand side of this seam exactly like the arm-swing
+    // channels do, just through a different bone. NECKLACE_SWAY is also scaled as an unavoidable side
+    // effect of scaling twistValue (it's cosmetic and unrelated to this seam, but derives from the same
+    // spring). Measured against real simulated PostureBehaviour trajectories (250 seeds, 120s each;
+    // see LeonMeshRigTest's own trajectory test) combined with IDLE's own always-on base pose
+    // (ELBOW_L/R=0.12, see LeonStateProfile): before this scale existed the seam reached up to 116x;
+    // with only WEIGHT_SHIFT/SHOULDER/ARM_SWING scaled (torso left at full amplitude) it still reached
+    // 16.8x; with all four scaled together the worst found across every seed was 6.478 (a static sweep
+    // of the same channels' extremes, which misses the spring/noise transients a real trajectory can
+    // produce, undershoots this at 6.076). That's the best amplitude alone can do -- IDLE's base elbow
+    // bend, on its own, with zero sway at all, already stretches this same seam to ~3.1x, a static
+    // floor this scale can't reach past no matter how low it goes. Closing the remaining gap needs
+    // either finer mesh resolution at that seam or reducing the base elbow bend itself, neither of
+    // which is an animation-amplitude change.
     private static final float IDLE_SWAY_SCALE = 0.2f;
 
     private float amount = 1f;
@@ -62,13 +73,13 @@ public final class PostureBehaviour implements LeonBehaviour {
             // Always shift away from the current side, so weight actually travels.
             float side = weightTarget >= 0f ? -1f : 1f;
             weightTarget = side * (0.35f + random.nextFloat() * 0.5f) * IDLE_SWAY_SCALE;
-            twistTarget = (random.nextFloat() * 2f - 1f) * 0.3f;
+            twistTarget = (random.nextFloat() * 2f - 1f) * 0.3f * IDLE_SWAY_SCALE;
             scheduleShift();
         }
 
         float weightValue = weightSpring.update(weightTarget * amount, dt);
         float twistValue = twistSpring.update(twistTarget * amount, dt);
-        float lean = leanNoise.update(dt) * 0.3f * amount;
+        float lean = leanNoise.update(dt) * 0.3f * IDLE_SWAY_SCALE * amount;
         float shL = shoulderNoiseL.update(dt);
         float shR = shoulderNoiseR.update(dt);
 
