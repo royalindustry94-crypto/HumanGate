@@ -50,6 +50,7 @@ public final class MainActivity extends Activity
 
     private static final int OVERLAY_REQUEST = 1201;
     private static final int NOTIFICATION_REQUEST = 1202;
+    private static final int RECORD_AUDIO_REQUEST = 1203;
 
     private LeonRuntime runtime;
     private LeonPrefs prefs;
@@ -67,9 +68,11 @@ public final class MainActivity extends Activity
     private Button enableButton;
     private Button minimiseButton;
     private Button rigDebugButton;
+    private Button micButton;
     private View settingsSection;
     private ScrollView scroll;
     private boolean visualTestHost;
+    private boolean recording;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -203,6 +206,28 @@ public final class MainActivity extends Activity
         });
         root.addView(send, withBottom(8));
 
+        micButton = button("🎤  Hold to talk");
+        micButton.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, android.view.MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case android.view.MotionEvent.ACTION_DOWN:
+                        beginTalking();
+                        return true;
+                    case android.view.MotionEvent.ACTION_UP:
+                    case android.view.MotionEvent.ACTION_CANCEL:
+                        if (recording) {
+                            recording = false;
+                            runtime.voiceBackend().finishListening();
+                        }
+                        return true;
+                    default:
+                        return false;
+                }
+            }
+        });
+        root.addView(micButton, withBottom(8));
+
         Button speak = button("Speak");
         speak.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -227,6 +252,41 @@ public final class MainActivity extends Activity
         root.addView(stopVoice, withBottom(8));
         conversationStatus = caption("");
         root.addView(conversationStatus, withBottom(22));
+
+        root.addView(heading("Voice backend", 19), withBottom(4));
+        root.addView(caption("Where Leon's real voice (speech in, Claude reply, speech out) is "
+                + "served from. Both live only on this device."), withBottom(10));
+
+        final EditText baseUrlInput = new EditText(this);
+        baseUrlInput.setHint("https://your-backend.vercel.app");
+        baseUrlInput.setHintTextColor(Color.rgb(122, 124, 136));
+        baseUrlInput.setTextColor(Color.WHITE);
+        baseUrlInput.setBackground(panel(Color.rgb(26, 27, 33)));
+        baseUrlInput.setPadding(dp(14), dp(12), dp(14), dp(12));
+        baseUrlInput.setText(prefs.leonVoiceBaseUrl());
+        root.addView(baseUrlInput, withBottom(8));
+
+        final EditText appTokenInput = new EditText(this);
+        appTokenInput.setHint("App token");
+        appTokenInput.setHintTextColor(Color.rgb(122, 124, 136));
+        appTokenInput.setTextColor(Color.WHITE);
+        appTokenInput.setBackground(panel(Color.rgb(26, 27, 33)));
+        appTokenInput.setPadding(dp(14), dp(12), dp(14), dp(12));
+        appTokenInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        appTokenInput.setText(prefs.leonVoiceAppToken());
+        root.addView(appTokenInput, withBottom(8));
+
+        Button saveVoiceConfig = button("Save voice backend settings");
+        saveVoiceConfig.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                prefs.setLeonVoiceBaseUrl(baseUrlInput.getText().toString());
+                prefs.setLeonVoiceAppToken(appTokenInput.getText().toString());
+                toast("Saved");
+            }
+        });
+        root.addView(saveVoiceConfig, withBottom(22));
 
         root.addView(heading("Developer", 19), withBottom(8));
         settingsSection = developerSection();
@@ -435,6 +495,34 @@ public final class MainActivity extends Activity
                 != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},
                     NOTIFICATION_REQUEST);
+        }
+    }
+
+    /** Starts a push-to-talk recording, asking for the mic permission first if it is not yet granted. */
+    private void beginTalking() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, RECORD_AUDIO_REQUEST);
+            return;
+        }
+        runtime.conversation().beginListening();
+        recording = runtime.voiceBackend().startListening();
+        if (!recording) toast("Could not start the microphone");
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != RECORD_AUDIO_REQUEST) return;
+        // Deliberately does not auto-start recording here: the touch-down that triggered this
+        // permission request is long since over by the time the system dialog is answered (the
+        // dialog is its own window, so no matching ACTION_UP will ever arrive at the mic button for
+        // that gesture), which would otherwise leave a recording running with no way to stop it
+        // short of the 30s safety ceiling. Ask the user to press again instead.
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            toast("Microphone ready -- hold the mic button to talk");
+        } else {
+            toast("Leon needs the microphone permission to hear you");
         }
     }
 
