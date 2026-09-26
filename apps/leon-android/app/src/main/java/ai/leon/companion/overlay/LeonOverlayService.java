@@ -102,6 +102,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
     private BroadcastReceiver screenReceiver;
     private GestureDetector gestureDetector;
     private ValueAnimator settleAnimator;
+    private boolean overlayInitializing;
     private boolean dragging;
     private int dragStartX;
     private int dragStartY;
@@ -216,54 +217,59 @@ public final class LeonOverlayService extends Service implements LeonStateContro
     // ------------------------------------------------------------------ overlay window
 
     private void showOverlay() {
-        if (windowManager == null || host != null) return;
-
-        rig = LeonRig.build();
-        texture = ProductionLeonTexture.load(this);
-        animation = new LeonAnimationController(rig, runtime.states(), System.nanoTime());
-        runtime.attachSurface(animation);
-
-        characterView = new LeonCharacterView(this, rig, animation, texture);
-        characterView.renderer().setShowRigDebug(prefs.isRigDebugEnabled());
-
-        host = new FrameLayout(this);
-        // No card, no rounded rectangle, no background: Leon stands on the user's own screen.
-        host.setBackgroundColor(Color.TRANSPARENT);
-        host.addView(characterView, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-
-        boolean minimised = runtime.states().isMinimised();
-        int width = dp(minimised ? MINIMISED_WIDTH_DP : EXPANDED_WIDTH_DP);
-        int height = dp(minimised ? MINIMISED_HEIGHT_DP : EXPANDED_HEIGHT_DP);
-
-        params = new WindowManager.LayoutParams(width, height,
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                        | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
-                PixelFormat.TRANSLUCENT);
-        params.gravity = Gravity.TOP | Gravity.START;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            params.layoutInDisplayCutoutMode =
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-        }
-        applySavedPosition(width, height);
-
-        gestureDetector = new GestureDetector(this, new GestureListener());
-        host.setOnTouchListener(new OverlayTouchListener());
+        if (windowManager == null || host != null || overlayInitializing) return;
+        overlayInitializing = true;
 
         try {
-            windowManager.addView(host, params);
-            overlayLive = true;
-            blockedReason = null;
-        } catch (Exception e) {
-            // Nothing to work around here — report it and leave the user in control.
-            Log.e(TAG, "Window manager refused Leon's overlay", e);
-            blockedReason = "Android refused the overlay window on this device.";
-            teardownOverlay();
+            rig = LeonRig.build();
+            texture = ProductionLeonTexture.load(this);
+            animation = new LeonAnimationController(rig, runtime.states(), System.nanoTime());
+            runtime.attachSurface(animation);
+
+            characterView = new LeonCharacterView(this, rig, animation, texture);
+            characterView.renderer().setShowRigDebug(prefs.isRigDebugEnabled());
+
+            host = new FrameLayout(this);
+            // No card, no rounded rectangle, no background: Leon stands on the user's own screen.
+            host.setBackgroundColor(Color.TRANSPARENT);
+            host.addView(characterView, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+            boolean minimised = runtime.states().isMinimised();
+            int width = dp(minimised ? MINIMISED_WIDTH_DP : EXPANDED_WIDTH_DP);
+            int height = dp(minimised ? MINIMISED_HEIGHT_DP : EXPANDED_HEIGHT_DP);
+
+            params = new WindowManager.LayoutParams(width, height,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                            | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                    PixelFormat.TRANSLUCENT);
+            params.gravity = Gravity.TOP | Gravity.START;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                params.layoutInDisplayCutoutMode =
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            }
+            applySavedPosition(width, height);
+
+            gestureDetector = new GestureDetector(this, new GestureListener());
+            host.setOnTouchListener(new OverlayTouchListener());
+
+            try {
+                windowManager.addView(host, params);
+                overlayLive = true;
+                blockedReason = null;
+            } catch (Exception e) {
+                // Nothing to work around here — report it and leave the user in control.
+                Log.e(TAG, "Window manager refused Leon's overlay", e);
+                blockedReason = "Android refused the overlay window on this device.";
+                teardownOverlay();
+            }
+        } finally {
+            overlayInitializing = false;
+            updateNotification();
         }
-        updateNotification();
     }
 
     private void applySavedPosition(int width, int height) {
@@ -318,6 +324,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
         }
         dismissQuickControls();
         overlayLive = false;
+        overlayInitializing = false;
         if (host != null && windowManager != null) {
             try {
                 windowManager.removeView(host);
@@ -718,6 +725,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
                 nowMillis)) {
             return;
         }
+        if (overlayInitializing) return;
         blockedReason = null;
         if (host == null) {
             showOverlay();

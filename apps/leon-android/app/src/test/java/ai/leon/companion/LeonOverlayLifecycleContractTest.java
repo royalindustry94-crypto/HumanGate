@@ -13,6 +13,7 @@ public class LeonOverlayLifecycleContractTest {
         assertTrue(overlay.contains("if (!prefs.isEnabled()) {\n            stopSelf();\n            return;"));
         assertTrue(overlay.contains("if (!prefs.isEnabled()) {\n            stopSelf();\n            return START_NOT_STICKY;"));
         assertTrue(overlay.contains("restoreOverlayIfEligible(now);"));
+        assertTrue(overlay.contains("if (overlayInitializing) return;"));
     }
 
     @Test
@@ -35,6 +36,7 @@ public class LeonOverlayLifecycleContractTest {
     public void unlockPathCanResumeOrRecreateTheOverlayHost() throws Exception {
         String overlay = SourceContracts.source("ai/leon/companion/overlay/LeonOverlayService.java");
 
+        assertTrue(overlay.contains("if (windowManager == null || host != null || overlayInitializing) return;"));
         assertTrue(overlay.contains("if (host == null) {\n            showOverlay();\n            return;\n        }"));
         assertTrue(overlay.contains("if (!host.isAttachedToWindow() || characterView == null) {\n            teardownOverlay();\n            showOverlay();\n            return;\n        }"));
         assertTrue(overlay.contains("host.setVisibility(View.VISIBLE);"));

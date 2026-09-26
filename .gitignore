@@ -16,6 +16,8 @@ node_modules/
 dist/
 apps/web/dist/
 apps/leon-android/.gradle/
+apps/leon-android/gradle/
+apps/leon-android/gradlew
 
 # OS
 .DS_Store
