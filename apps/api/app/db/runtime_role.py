@@ -23,7 +23,7 @@ from collections.abc import Awaitable, Callable
 import asyncpg
 from sqlalchemy.engine.url import make_url
 
-from app.core.config import CANONICAL_RUNTIME_ROLE
+from app.core.config import CANONICAL_RUNTIME_ROLE, database_role_name
 
 ROLE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _KNOWN_DEFAULT_PASSWORDS = frozenset({"postgres", "app_runtime"})
@@ -40,6 +40,9 @@ def parse_runtime_credentials(dsn: str) -> tuple[str, str]:
     password = url.password if url.password is not None else ""
     if not username:
         raise RuntimeRoleError("APP_DATABASE_URL is missing a role name")
+    # Through Supabase's pooler the username is `app_runtime.<project ref>`; the
+    # role to provision is still `app_runtime`.
+    username = database_role_name(username)
     if not ROLE_NAME_RE.fullmatch(username):
         raise RuntimeRoleError("APP_DATABASE_URL role name is not a safe Postgres identifier")
     if username != CANONICAL_RUNTIME_ROLE:

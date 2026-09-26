@@ -567,3 +567,53 @@ async def test_h4_commit_spend_is_idempotent():
             .all()
         )
         assert len(logs) == 1
+
+
+# Supabase's connection pooler (the only route from hosts without IPv6 egress,
+# e.g. Railway) requires `<role>.<project ref>` usernames. Reproduced in
+# production: the canonical-role check rejected `app_runtime.<ref>` and the API
+# crashed on start. It is the same role, so it must be accepted -- but only in
+# that exact form.
+_POOLER = "aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres"
+_REF = "vagfnbcnvtojljggxvxr"
+
+
+@pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
+def test_c2_accepts_supabase_pooler_usernames_for_the_canonical_roles(environment: str):
+    settings = Settings(
+        **_base_settings_kwargs(
+            environment=environment,
+            database_url=f"postgresql://postgres.{_REF}:rotated-owner-password@{_POOLER}",
+            app_database_url=f"postgresql://app_runtime.{_REF}:rotated-runtime-password@{_POOLER}",
+        )
+    )
+    assert settings.app_database_url is not None
+
+
+@pytest.mark.parametrize(
+    "runtime_user",
+    [
+        f"other_runtime.{_REF}",  # pooler form of a non-canonical role
+        "app_runtime.evil",  # suffix is not a Supabase project ref
+        f"app_runtime.{_REF}.x",  # extra segment
+    ],
+)
+def test_c2_pooler_form_does_not_widen_the_canonical_role(runtime_user: str):
+    with pytest.raises(ValidationError, match="canonical"):
+        Settings(
+            **_base_settings_kwargs(
+                environment="production",
+                app_database_url=f"postgresql://{runtime_user}:rotated-runtime-password@{_POOLER}",
+            )
+        )
+
+
+def test_c2_pooler_form_still_rejects_owner_and_runtime_being_one_role():
+    with pytest.raises(ValidationError, match="owner identity"):
+        Settings(
+            **_base_settings_kwargs(
+                environment="production",
+                database_url=f"postgresql://app_runtime.{_REF}:rotated-owner-password@{_POOLER}",
+                app_database_url=f"postgresql://app_runtime:rotated-runtime-password@{_POOLER}",
+            )
+        )

@@ -44,6 +44,24 @@ def test_parse_runtime_credentials_rejects_non_canonical_role():
         )
 
 
+def test_parse_runtime_credentials_maps_supabase_pooler_user_to_the_role():
+    # Through the pooler the username is `app_runtime.<project ref>`; the role
+    # that gets provisioned (ALTER ROLE) must still be plain `app_runtime`.
+    user, password = parse_runtime_credentials(
+        "postgresql://app_runtime.vagfnbcnvtojljggxvxr:rotated-runtime-secret@"
+        "aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres"
+    )
+    assert user == CANONICAL_RUNTIME_ROLE
+    assert password == "rotated-runtime-secret"
+
+
+def test_parse_runtime_credentials_rejects_pooler_form_of_other_role():
+    with pytest.raises(RuntimeRoleError, match="canonical"):
+        parse_runtime_credentials(
+            "postgresql://other_runtime.vagfnbcnvtojljggxvxr:rotated@pooler.example:5432/db"
+        )
+
+
 def test_parse_runtime_credentials_accepts_rotated_secret():
     user, password = parse_runtime_credentials(
         "postgresql://app_runtime:rotated-runtime-secret@127.0.0.1:5432/db"

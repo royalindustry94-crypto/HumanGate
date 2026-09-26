@@ -8,6 +8,7 @@ failure" rule in the project instructions.
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from typing import ClassVar, TypedDict
 from urllib.parse import unquote
@@ -22,6 +23,19 @@ LOCAL_JWT_ISSUER = "content-orchestrator-local"
 # environments must use it as APP_DATABASE_URL — an arbitrary login with
 # CONNECT cannot run the application under FORCE RLS.
 CANONICAL_RUNTIME_ROLE = "app_runtime"
+
+# Supabase's connection pooler (Supavisor) identifies the project by a suffix on
+# the username: `<role>.<20-char project ref>`. The session it opens is still
+# that `<role>`. Hosts that cannot reach Supabase's IPv6-only direct address
+# (Railway, Vercel) must connect through the pooler, so this form is accepted
+# as the same role. The pattern is strict: any other dotted name is not.
+_SUPABASE_POOLER_USER_RE = re.compile(r"^(?P<role>[A-Za-z_][A-Za-z0-9_]{0,62})\.[a-z0-9]{20}$")
+
+
+def database_role_name(username: str) -> str:
+    """The Postgres role a connection username authenticates as."""
+    match = _SUPABASE_POOLER_USER_RE.fullmatch(username)
+    return match.group("role") if match else username
 
 # Fixed secret used only by API tests/CI under ENVIRONMENT=test. Listed in
 # the known-weak set so a production/staging/development process cannot boot
@@ -271,13 +285,15 @@ class Settings(BaseSettings):
                     f"in ENVIRONMENT={self.environment!r}; rotate the "
                     "credential and update the URL before starting"
                 )
-        if runtime_user.casefold() != CANONICAL_RUNTIME_ROLE:
+        runtime_role = database_role_name(runtime_user)
+        owner_role = database_role_name(owner_user)
+        if runtime_role.casefold() != CANONICAL_RUNTIME_ROLE:
             raise ValueError(
                 "APP_DATABASE_URL must use the canonical "
                 f"{CANONICAL_RUNTIME_ROLE} role; migrations grant application "
                 "privileges to that identity only"
             )
-        if owner_user.casefold() == runtime_user.casefold():
+        if owner_role.casefold() == runtime_role.casefold():
             raise ValueError(
                 "APP_DATABASE_URL must not reuse the DATABASE_URL owner identity; "
                 "the owner/superuser role bypasses FORCE RLS"
