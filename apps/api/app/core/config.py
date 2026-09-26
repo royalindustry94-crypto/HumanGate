@@ -12,7 +12,7 @@ from functools import lru_cache
 from typing import ClassVar, TypedDict
 from urllib.parse import unquote
 
-from pydantic import Field, PostgresDsn, model_validator
+from pydantic import AliasChoices, Field, PostgresDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Minted by AUTH_MODE=local (see app/services/local_auth.py) and required on
@@ -166,16 +166,19 @@ class Settings(BaseSettings):
     deployment_ci_status: str | None = Field(default=None)
     deployment_ci_url: str | None = Field(default=None)
 
-    # --- Leon voice conversation (Anthropic + OpenAI) ---
+    # --- Leon voice conversation (OpenAI STT/LLM/TTS) ---
     # Optional: unset means the /leon/voice-turn route reports unavailable
     # rather than failing at startup, since not every deployment runs the
     # Leon Android companion's voice backend. Validation aliases match the
-    # operator's actual Vercel env var names for this project (`anthkey`,
-    # `ANTHTOPIC_APO_KEY` — the latter holds the OpenAI key despite the
-    # name; do not rename here without updating the Vercel dashboard too).
+    # operator's actual Vercel env var names for this project. OPENAI_API_KEY
+    # is the standard name; ANTHTOPIC_APO_KEY is a temporary legacy alias in
+    # production and should be removed once rollout is complete.
     anthropic_api_key: str | None = Field(default=None, validation_alias="anthkey")
-    openai_api_key: str | None = Field(default=None, validation_alias="ANTHTOPIC_APO_KEY")
+    openai_api_key: str | None = Field(
+        default=None, validation_alias=AliasChoices("OPENAI_API_KEY", "ANTHTOPIC_APO_KEY")
+    )
     leon_anthropic_model: str = Field(default="claude-sonnet-5")
+    leon_openai_chat_model: str = Field(default="gpt-4o-mini")
     leon_openai_tts_voice: str = Field(default="alloy")
     # Shared secret the Android app presents as a bearer token. The companion
     # is a single-user overlay with no account system of its own, so this

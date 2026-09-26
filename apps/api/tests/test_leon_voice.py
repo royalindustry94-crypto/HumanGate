@@ -2,7 +2,7 @@
 
 Exercises the route end-to-end (auth, request validation, the three
 upstream calls) with the real ASGI app and a mocked httpx transport for
-Anthropic/OpenAI -- these tests must never reach the real internet.
+OpenAI -- these tests must never reach the real internet.
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ _APP_TOKEN = "test-leon-app-token"
 
 @pytest.fixture(autouse=True)
 def _configured_providers(monkeypatch):
-    monkeypatch.setenv("anthkey", "test-anthropic-key")
-    monkeypatch.setenv("ANTHTOPIC_APO_KEY", "test-openai-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.delenv("ANTHTOPIC_APO_KEY", raising=False)
     monkeypatch.setenv("LEON_VOICE_APP_TOKEN", _APP_TOKEN)
     get_settings.cache_clear()
     yield
@@ -54,10 +54,13 @@ def _happy_path_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200, content=b"fake-mp3-bytes", headers={"content-type": "audio/mpeg"}
         )
-    if "messages" in str(request.url):
+    if "chat/completions" in str(request.url):
         return httpx.Response(
             200,
-            json={"content": [{"type": "text", "text": "hey there"}]},
+            json={
+                "choices": [{"message": {"role": "assistant", "content": "hey there"}}],
+                "usage": {"prompt_tokens": 12, "completion_tokens": 4},
+            },
         )
     raise AssertionError(f"unexpected request: {request.url}")
 
@@ -216,7 +219,7 @@ async def test_chunked_raw_audio_is_rejected_without_consuming_the_full_stream()
 
 @pytest.mark.asyncio
 async def test_reports_a_safe_error_when_no_provider_keys_are_configured(monkeypatch, client):
-    monkeypatch.delenv("anthkey", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHTOPIC_APO_KEY", raising=False)
     get_settings.cache_clear()
 
@@ -227,7 +230,7 @@ async def test_reports_a_safe_error_when_no_provider_keys_are_configured(monkeyp
     assert response.status_code == 502
     detail = response.json()["detail"]
     assert "not configured" in detail["message"]
-    assert detail["stage"] in {"llm", "openai"}
+    assert detail["stage"] == "llm"
     assert detail["error_code"] == "voice_upstream_failure"
 
 
@@ -238,7 +241,7 @@ async def test_voice_status_is_authenticated_and_secret_free(client):
     assert response.status_code == 200
     body = response.json()
     assert body["configured"] is True
-    assert body["anthropic_configured"] is True
+    assert body["anthropic_configured"] is False
     assert body["openai_configured"] is True
     assert body["request_id"]
     assert "key" not in json.dumps(body).lower()
@@ -246,9 +249,23 @@ async def test_voice_status_is_authenticated_and_secret_free(client):
 
 
 @pytest.mark.asyncio
+async def test_voice_status_accepts_legacy_openai_env_alias(monkeypatch, client):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHTOPIC_APO_KEY", "legacy-openai-key")
+    get_settings.cache_clear()
+
+    response = await client.get("/leon/voice-status", headers=_auth_headers())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["configured"] is True
+    assert body["openai_configured"] is True
+
+
+@pytest.mark.asyncio
 async def test_malformed_provider_json_becomes_controlled_502(monkeypatch, client):
     def handler(request: httpx.Request) -> httpx.Response:
-        if "messages" in str(request.url):
+        if "chat/completions" in str(request.url):
             return httpx.Response(200, content=b"not-json")
         return _happy_path_handler(request)
 
@@ -374,10 +391,13 @@ async def test_conversation_history_is_forwarded_to_the_llm(monkeypatch, client)
     captured: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if "messages" in str(request.url):
+        if "chat/completions" in str(request.url):
             captured["body"] = json.loads(request.content)
             return httpx.Response(
-                200, json={"content": [{"type": "text", "text": "sure, I remember"}]}
+                200,
+                json={
+                    "choices": [{"message": {"role": "assistant", "content": "sure, I remember"}}]
+                },
             )
         return _happy_path_handler(request)
 
@@ -395,9 +415,10 @@ async def test_conversation_history_is_forwarded_to_the_llm(monkeypatch, client)
 
     assert response.status_code == 200
     sent_messages = captured["body"]["messages"]
-    assert sent_messages[0] == history[0]
-    assert sent_messages[1] == history[1]
-    assert sent_messages[2] == {"role": "user", "content": "what's my name?"}
+    assert sent_messages[0] == {"role": "system", "content": lv.LEON_SYSTEM_PROMPT}
+    assert sent_messages[1] == history[0]
+    assert sent_messages[2] == history[1]
+    assert sent_messages[3] == {"role": "user", "content": "what's my name?"}
 
 
 @pytest.mark.asyncio
@@ -503,7 +524,7 @@ async def test_a_provider_failure_releases_its_reservation_not_the_budget(monkey
     should_fail = {"value": True}
 
     def switchable_handler(request: httpx.Request) -> httpx.Response:
-        if should_fail["value"] and "messages" in str(request.url):
+        if should_fail["value"] and "chat/completions" in str(request.url):
             return httpx.Response(200, content=b"not-json")
         return _happy_path_handler(request)
 

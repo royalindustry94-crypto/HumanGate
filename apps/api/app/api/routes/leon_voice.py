@@ -413,9 +413,7 @@ async def voice_status(
     _require_app_token(authorization)
     settings = get_settings()
     return {
-        "configured": bool(
-            settings.leon_voice_app_token and settings.anthropic_api_key and settings.openai_api_key
-        ),
+        "configured": bool(settings.leon_voice_app_token and settings.openai_api_key),
         "anthropic_configured": bool(settings.anthropic_api_key),
         "openai_configured": bool(settings.openai_api_key),
         "request_id": getattr(request.state, "request_id", None),
