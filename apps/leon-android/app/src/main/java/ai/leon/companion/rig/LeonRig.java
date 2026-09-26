@@ -105,10 +105,7 @@ public final class LeonRig {
         // Presentation-only state ring. Never carries character animation.
         b.part(Parts.AURA, Art.AURA, Bones.CHEST, 0f, 110f, 320f, 320f, 0.5f, 0.5f, 0f, 0, null);
 
-        // Photo-mode continuity layer. PhotoLayerArtProvider fills ONLY source pixels that fall
-        // outside the independently animated major-part rectangles, so the rest pose reconstructs
-        // the whole photographed character without turning Leon back into one flat moving image.
-        // It is bound to ROOT so it follows minimised scaling but not breathing/head/limb motion.
+        // Bound to ROOT so it follows minimised scaling but not breathing/head/limb motion.
         b.part(Parts.PHOTO_BACKFILL, Art.PHOTO_BACKFILL, Bones.ROOT,
                 -CENTRE_X, -GROUND_Y, DESIGN_W, DESIGN_H, 0f, 0f, 0f, 4, null);
 
@@ -178,7 +175,7 @@ public final class LeonRig {
         mouth(b, Parts.MOUTH_FROWN, Art.MOUTH_FROWN);
 
         // Sunglasses lenses are deliberately translucent so the blink underneath still reads on a
-        // phone-sized overlay. See LeonPalette.LENS.
+        // phone-sized overlay.
         b.part(Parts.SUNGLASSES, Art.SUNGLASSES, Bones.HEAD, 0f, -2f, 124f, 44f, 0.5f, 0.5f, 0f, 50, null);
         b.part(Parts.EARRING, Art.EARRING, Bones.HEAD, -55f, 22f, 12f, 20f, 0.5f, 0.2f, 0f, 51, null);
 

@@ -1,114 +1,88 @@
 # Leon Companion — Android
 
-Leon is an animated character who lives on the user's Android screen: visible
-above other apps, draggable, minimisable, and continuously animated by a real
-skeletal rig and state machine rather than by moving a picture around.
+Leon is an animated companion that lives on the user's Android screen: a
+transparent overlay above other apps that can be dragged and minimised and is
+continuously animated. He can hold a voice conversation through the HumanGate
+API.
 
-## What it does
+## How he is drawn
 
-- Stays on screen above normal apps, on a fully transparent overlay window —
-  no card, no rounded rectangle, no visible container.
-- Animates independently while idle: breathing, natural blinking, head drift,
-  eye saccades, posture and weight shifts, shoulder movement.
-- Nine states — idle, listening, thinking, speaking, happy, serious, sleepy,
-  attention, minimised — with cross-faded transitions and randomised timing, so
-  there is no robotic loop.
-- Ten mouth shapes covering the viseme set (closed, neutral-open, A, E, O, U,
-  M/B/P, F/V, smile, frown), driven by
-  `LeonLipSyncController.onViseme(viseme, intensity, durationMs)` — the contract
-  a speech pipeline will call.
-- Reacts to being tapped by looking at where it was touched.
-- Drag to move, double tap to minimise or restore, long press for quick
-  controls (Chat, Minimise, Hide for a while, Settings).
-- Remembers position and state across a rotation, a process kill, an unlock and
-  a reboot.
-- Stops rendering entirely while the screen is off; 20fps idle, 60fps when
-  something is actually moving.
+One photograph, deformed by a 2D skeleton. There is no 3D model.
 
-Voice and the AI brain are deliberately not in this build.
-`LeonConversationController` reports `NO_BACKEND` rather than inventing a reply.
+- `docs/leon-reference/leon-front-source.png` is the only source image. At build
+  time, `tools/build_leon_production.py` (Gradle task `generateLeonProduction`,
+  which runs before `preBuild`) crops and keys it into
+  `leon/production/leon.png` (360x640 RGBA). It also writes `manifest.json`
+  (mesh size 48x84, plus the landmarks from `assets/leon/leon-front.txt`).
+- `render/LeonPuppetRenderer` draws that one bitmap with
+  `Canvas.drawBitmapMesh`. `render/LeonMeshRig` skins the mesh vertices to 18
+  body bones of the 27-bone `rig/LeonRig`, using a body/arm boundary measured
+  from the texture's own alpha.
+- Joint pivots (shoulder, elbow, wrist) sit on the photo's real joints. See the
+  constants in `LeonRig`.
 
-## Architecture
+**Known limitation:** the jaw, eye, eyelid and mouth parts are animated in the
+rig but never drawn. The mesh binds the whole head to one bone, so blinks and
+lip-sync have no visible effect in this build.
 
-```
-rig/      Skeleton: Mat2D, Bone, RigPart, Rig, LeonRig (27 bones, 45 layers)
-anim/     LeonChannel + LeonPose control surface, LeonRigBinder, behaviours
-          (breath, blink, head drift, gaze, posture, gesture, nod),
-          LeonStateProfile, LeonAnimationController, LeonLipSyncController
-state/    LeonState, LeonStateController, LeonConversationController
-asset/    LeonArtProvider, DevRigArt, AssetDirArtProvider, LeonAssetRepository
-render/   LeonRenderer, LeonCharacterView
-overlay/  LeonOverlayService, LeonQuickControls, LeonPrefs, OverlayPlacement,
-          ScreenMetrics
-```
+## Behaviour
 
-`rig/`, `anim/`, `state/`, `util/` and `OverlayPlacement` contain **no Android
-types**, so the whole animation system is covered by plain JVM unit tests.
+- Nine states: idle, listening, thinking, speaking, happy, serious, sleepy,
+  attention and minimised. Transitions cross-fade and timings are randomised.
+- Idle is always moving: breathing, head drift, weight shift and shoulder
+  movement, plus an occasional walk.
+- Drag to move, double-tap to minimise or restore, long-press for quick
+  controls.
+- Position and state survive rotation, process death, unlock and reboot.
+- Rendering stops while the screen is off: 20 fps when idle, 60 fps while
+  something is moving.
 
-Two indirections keep the character replaceable:
+## Voice
 
-- **`LeonChannel`** is the only way anything reaches a bone. States,
-  behaviours, expressions and lip sync all write channels; `LeonRigBinder` is
-  the only class that knows how a channel becomes a transform.
-- **`LeonArtProvider`** is the only way the renderer sees artwork — a logical
-  art key in, a bitmap out.
+`voice/LeonVoiceRecorder` captures 16 kHz mono 16-bit PCM and wraps it in a WAV
+(RIFF) header. `voice/LeonVoiceApiClient` posts it as `multipart/form-data`
+(part `audio`, `speech.wav`, `audio/wav`, plus an optional `history` JSON part)
+to `POST {base_url}/leon/voice-turn`. The `Authorization: Bearer <app token>`
+header carries the app token. The base URL and token are entered in the control
+centre, and the token is kept in `LeonSecureTokenStore`.
 
-## Character artwork
-
-Leon is drawn in code by `ProceduralLeonArt`, which renders all 40 layers from
-his character specification — bald head with a wrap-around skull tattoo,
-translucent dark sunglasses, neck / chest / arm tattoos, earring and ring, a
-multicolour gemstone necklace, a black hoodie worn hood-down, black pants and
-white sneakers. No PNGs ship with the app, so he is resolution-independent, adds
-nothing to the APK, and his appearance is under version control.
-
-See **`docs/leon-preview/`** for frames rendered straight from the shipped rig,
-including a blink strip and the viseme set, so he can be reviewed without a
-device.
-
-Custom artwork can replace him layer by layer — drop PNGs into
-`app/src/main/assets/leon/` and they win per layer, no code change.
-**`docs/LEON_CHARACTER_ASSET_SPEC.md`** gives every file, size and pivot, plus
-the layers with non-obvious requirements (the eyelid's top pivot, the hoodie's
-transparent V-neck, translucent lenses).
+The server side is `apps/api/app/api/routes/leon_voice.py`: Whisper for speech
+to text, an Anthropic model for the reply, OpenAI for speech. It needs
+`LEON_VOICE_APP_TOKEN`, `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`, and is
+spend-capped by `LEON_VOICE_DAILY_SPEND_CAP_USD` and
+`LEON_VOICE_MONTHLY_SPEND_CAP_USD` (fail-closed). `GET /leon/voice-status`
+reports whether the server is configured, without making any paid call.
 
 ## Build and test
 
 ```bash
 cd apps/leon-android
-gradle :app:testDebugUnitTest     # 98 unit tests
+gradle :app:testDebugUnitTest
 gradle :app:lintDebug
-gradle :app:assembleDebug         # app/build/outputs/apk/debug/app-debug.apk
+gradle :app:assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
 ```
 
-CI runs all three on pushes to the Leon branches and on pull requests, and
-uploads the APK plus the test and lint reports.
+Mesh tests read the generated texture, so they need `generateLeonProduction`
+to have run (any Gradle build does it first). CI (`leon-android-apk.yml`) also
+boots the APK on an emulator and checks a visual matrix of states.
 
-## Installing
+## Installing and upgrading
 
-1. Install the debug APK.
-2. Open **Leon Companion** and tap **Enable Leon**.
-3. Grant **Display over other apps** when asked.
+Debug and CI builds are signed with the committed, public, debug-only
+`app/leon-ci-debug.keystore`, and CI sets `versionCode` to the workflow run
+number. A newer CI APK therefore installs over an older one. Any APK built
+before commit `b56f3c1` used a different key and has to be uninstalled once.
+Release signing is described in `app/build.gradle`.
 
-Leon appears at the right-hand side of the screen. Tap him to open the control
-centre, which has a live preview, the current state, and a button per animation
-state.
+1. Install the APK, open **Leon Companion** and tap **Enable Leon**.
+2. Grant **Display over other apps** and, to talk to him, **Microphone**.
 
-### Device notes
+Android hides every overlay over secure surfaces such as the lock screen and
+permission dialogs. Some OEMs (Xiaomi, Oppo, Vivo, Huawei, strict Samsung
+battery modes) also need auto-start allowed by hand, or they kill the
+foreground service after a reboot.
 
-- **Display over other apps** is a special permission and is revocable; the app
-  re-checks it on every entry point.
-- Android hides all overlays over secure surfaces such as the lock screen and
-  permission dialogs. That is correct behaviour and is not worked around.
-- Several OEMs (Xiaomi, Oppo, Vivo, Huawei, and Samsung's stricter battery
-  modes) additionally require **auto-start** to be allowed by hand, or they will
-  kill the foreground service after a reboot. The control centre links to the
-  app-info screen; this cannot be fixed in code.
+## Further reading
 
-## Design decisions
-
-`docs/LEON_ANDROID_AUDIT.md` records the audit of the previous prototype, why a
-single `ImageView` cannot meet the requirement, the Android constraints that
-apply to a persistent overlay, and why Rive, Live2D and Spine were each
-evaluated and set aside in favour of a custom skeletal rig — along with what
-would have to change to adopt Rive later.
+`docs/LEON_TECHNICAL_TRUTH_AUDIT.md` has the evidence-based audit of the
+renderer, voice, signing and the mesh defects fixed so far.
