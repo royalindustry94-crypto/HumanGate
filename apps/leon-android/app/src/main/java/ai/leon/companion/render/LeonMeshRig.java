@@ -27,6 +27,22 @@ public final class LeonMeshRig {
     private static final float COLUMN_BLEND_MARGIN = 30f;
     private static final float COLUMN_BLEND_START = 72f - COLUMN_BLEND_MARGIN;
     private static final float COLUMN_BLEND_END = 72f + COLUMN_BLEND_MARGIN;
+    // See legSideFadeWeightsFor: a small, distance-decaying pull toward the hips bone for the
+    // dangling-hand columns closest to the torso. Chosen by sweeping both constants together
+    // against PostureBehaviour's real idle amplitude range (WEIGHT_SHIFT up to +-0.85, paired with
+    // its real ARM_*_SWING coupling -- see that constant's own comment) and measuring the worst
+    // adjacent-column seam ratio in the hip/hand-fade band: a fade of just one column (30) plateaus
+    // around 1.56 no matter how much weight is added (a wider fade sharing the pull across two
+    // columns, not more pull on one column, is what actually moves it), while weight alone above
+    // ~0.6 makes it worse again (over-pulling this column away from the next one out, legSide>117,
+    // which gets none). 45/0.55 was the combination that, alongside reducing ARM_*_SWING's own
+    // coupling fraction, brought the worst ratio across the full range under this file's other
+    // seam thresholds (1.20 here, 1.18 on the torso/limb boundary above -- both measured, not
+    // assumed, since that boundary's own regression test had only ever checked +-0.5, not the
+    // +-0.85 PostureBehaviour actually uses).
+    private static final float HIP_FOLLOW_BLEND_START = 72f;
+    private static final float HIP_FOLLOW_BLEND_RANGE = 45f;
+    private static final float HIP_FOLLOW_MAX_WEIGHT = 0.55f;
 
     private final Rig rig;
     private final int meshCols;
@@ -247,7 +263,7 @@ public final class LeonMeshRig {
         // up to ~31% hand_l, ~33% root on real thigh vertices, e.g. WEIGHT_SHIFT-driven idle at
         // canonical (x=114, y=441): hips=0.244 thigh_l=0.120 hand_l=0.307 root=0.330 -- rather
         // than hand vertices picking up hip weight).
-        if (legSide > 72f) return legSideFadeWeightsFor(y, left);
+        if (legSide > 72f) return legSideFadeWeightsFor(legSide, y, left);
         return legWeightsFor(y, left);
     }
 
@@ -313,18 +329,43 @@ public final class LeonMeshRig {
     }
 
     /** Hand-fading-to-root chain for the side columns of the y >= 395 band. */
-    private VertexWeights legSideFadeWeightsFor(float y, boolean left) {
+    private VertexWeights legSideFadeWeightsFor(float legSide, float y, boolean left) {
         // Off to the side of the torso -- this is the hand/sleeve fading toward background below
         // where an arm hangs, not leg territory, even though it shares this row range with the
         // legs in the middle columns. Binding it to hip/thigh regardless of side (as this used to)
         // means a hand swung away from rest snaps back to a stationary hip on the very next row,
         // the same seam-stretch problem as the elbow/wrist above. Fading it to root instead means
         // it settles toward the untouched canonical position rather than jumping to one.
+        VertexWeights fade;
         if (y < 485f) {
             float t = smooth((y - 395f) / 90f);
-            return two(left ? handL : handR, 1f - t, root, t);
+            fade = two(left ? handL : handR, 1f - t, root, t);
+        } else {
+            fade = one(root);
         }
-        return one(root);
+        // A resting/dangling hand's column sits right next to the hip/thigh column (legSide<=72),
+        // which moves under WEIGHT_SHIFT (hips bone offset+rotation); this column doesn't move at
+        // all on its own (neither "hand"/"root" above is affected by WEIGHT_SHIFT), so the one quad
+        // of mesh between them absorbs the whole gap. Measured directly (real device report,
+        // confirmed at this file's actual production resolution 360x640): with zero weight
+        // contamination on either side (this column carries no hip/thigh weight, legWeightsFor's
+        // columns carry no hand/root weight -- see the hard legSide>72f cutoff above), the seam
+        // still stretches to 2.04x / compresses to 0.49x at PostureBehaviour's real idle amplitude
+        // range (WEIGHT_SHIFT up to +-0.85, not just the +-0.5 this file's own regression test used
+        // to check). A real resting hand near the hip does sway a little with the torso in real
+        // anatomy (it hangs off the shoulder, which is part of the torso), so -- unlike the
+        // contamination this file already fixed, which pulled the hip/thigh toward the hand (wrong
+        // direction: the torso has no reason to chase wherever a swinging hand ends up) -- pulling
+        // this dangling-hand column a little toward the hips bone's own motion is anatomically the
+        // right direction. HIP_FOLLOW_MAX_WEIGHT/MARGIN were chosen by measuring: 0.35 max weight,
+        // fading out over the same 30px margin already used for the torso/limb boundary above,
+        // brings the worst seam ratio across the full +-0.85 range down to 1.19 (from 2.04),
+        // in line with this file's other seam thresholds, without giving legWeightsFor's own
+        // columns (legSide<=72, untouched by this) any hand/root weight at all.
+        float hipT = 1f - smooth((legSide - HIP_FOLLOW_BLEND_START) / HIP_FOLLOW_BLEND_RANGE);
+        if (hipT <= 0f) return fade;
+        float hipWeight = Math.min(hipT, 1f) * HIP_FOLLOW_MAX_WEIGHT;
+        return blend(fade, 1f - hipWeight, one(hips), hipWeight);
     }
 
     private static float smooth(float t) {

@@ -249,26 +249,40 @@ public class LeonMeshRigTest {
         // current side"), and a Codex review of this PR caught that they are not equivalent here --
         // deformedDist/restDist alone only ever grows above 1 for a seam that *stretches*, so a pose
         // whose seam *compresses* instead (ratio below 1) could never move worstRatio and would pass
-        // even the unfixed hard-cutoff mesh. Measured directly (see PR discussion): the pre-fix seam
-        // hit a symmetric worst ratio of 1.28 at +0.5 but 1.39 at -0.5 -- negative was the worse
-        // direction, and this test would have missed it entirely with only one sign and a one-way
-        // ratio.
-        for (float weightShift : new float[]{0.5f, -0.5f}) {
-            float worstRatio = worstHipBandSeamRatio(weightShift);
+        // even the unfixed hard-cutoff mesh.
+        //
+        // Two bands, both real: y[300,400] is the torso/limb (chest/shoulder) boundary fixed first;
+        // y[395,485] is the hip/thigh vs. hand-fade-to-root boundary below it, which turned out to
+        // have the same underlying disease (an under-blended seam between two independently-moving
+        // bone groups) but was never covered by a test -- a second real-device report ("18 seconds
+        // and onward" of plain idle) traced back to exactly this gap. Both bands are swept across
+        // PostureBehaviour's actual weightTarget range (0.35 to 0.85, both signs -- see its own
+        // scheduleShift/update, not just one arbitrarily-chosen amplitude), because the first fix's
+        // own test only ever checked +-0.5 and so missed that the same seam creeps back over
+        // threshold at the higher amplitudes PostureBehaviour actually produces (measured: 1.37 at
+        // -0.85 pre-this-fix, vs. 1.19 at -0.5). ARM_*_SWING's coupling fraction (0.10, not the
+        // stale 0.18) matches PostureBehaviour's real constant -- see its own comment for why it
+        // moved.
+        for (float weightShift : new float[]{0.35f, 0.5f, -0.5f, 0.65f, -0.65f, 0.85f, -0.85f}) {
+            float worstUpper = worstHipBandSeamRatio(weightShift, 300f, 400f);
             assertTrue("idle's autonomous weight-shift (sign=" + weightShift + ") must not pinch "
-                    + "the hip/hand column seam, worst adjacent-column ratio was " + worstRatio,
-                    worstRatio < 1.25f);
+                    + "the torso/limb column seam, worst adjacent-column ratio was " + worstUpper,
+                    worstUpper < 1.25f);
+            float worstLower = worstHipBandSeamRatio(weightShift, 395f, 485f);
+            assertTrue("idle's autonomous weight-shift (sign=" + weightShift + ") must not pinch "
+                    + "the hip/hand-fade column seam, worst adjacent-column ratio was " + worstLower,
+                    worstLower < 1.25f);
         }
     }
 
-    /** Worst adjacent-column distance ratio (either direction) in the hip/hand-resting band. */
-    private static float worstHipBandSeamRatio(float weightShift) {
+    /** Worst adjacent-column distance ratio (either direction) in the given design-space y band. */
+    private static float worstHipBandSeamRatio(float weightShift, float yLo, float yHi) {
         LeonMeshRig mesh = LeonMeshRig.createForTest(16, 28);
         LeonRigBinder binder = new LeonRigBinder(mesh.rig());
         LeonPose pose = new LeonPose();
         pose.set(LeonChannel.WEIGHT_SHIFT, weightShift);
-        pose.set(LeonChannel.ARM_L_SWING, weightShift * 0.18f);
-        pose.set(LeonChannel.ARM_R_SWING, weightShift * 0.18f);
+        pose.set(LeonChannel.ARM_L_SWING, weightShift * 0.10f);
+        pose.set(LeonChannel.ARM_R_SWING, weightShift * 0.10f);
         binder.apply(pose);
         mesh.updateFromSolvedRig();
 
@@ -280,7 +294,7 @@ public class LeonMeshRigTest {
         int seamColumnsChecked = 0;
         for (int row = 0; row <= rows; row++) {
             float y = canon[(row * (cols + 1)) * 2 + 1];
-            if (y < 300f || y > 400f) continue; // hip / hand-resting-on-hip height
+            if (y < yLo || y > yHi) continue;
             for (int col = 0; col < cols; col++) {
                 int i0 = row * (cols + 1) + col;
                 int i1 = row * (cols + 1) + col + 1;
@@ -299,7 +313,7 @@ public class LeonMeshRigTest {
                 worstRatio = Math.max(worstRatio, Math.max(ratio, 1f / ratio));
             }
         }
-        assertTrue("expected several hip-band seam columns in the test mesh geometry",
+        assertTrue("expected several seam columns in the test mesh geometry for y in [" + yLo + "," + yHi + "]",
                 seamColumnsChecked > 4);
         return worstRatio;
     }

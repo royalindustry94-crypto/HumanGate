@@ -67,9 +67,16 @@ public final class PostureBehaviour implements LeonBehaviour {
         pose.add(LeonChannel.TORSO_LEAN_X, lean * weight);
         pose.add(LeonChannel.SHOULDER_L, shL * 0.17f * amount * weight);
         pose.add(LeonChannel.SHOULDER_R, shR * 0.17f * amount * weight);
-        // Arms hang from the shoulders, so they inherit part of the sway.
-        pose.add(LeonChannel.ARM_L_SWING, (weightValue * 0.18f + shL * 0.09f) * weight);
-        pose.add(LeonChannel.ARM_R_SWING, (weightValue * 0.18f + shR * 0.09f) * weight);
+        // Arms hang from the shoulders, so they inherit part of the sway. This fraction was 0.18
+        // until a real-device report of the hip visibly compressing against the resting hand traced
+        // back to LeonMeshRig's hip/hand-fade mesh seam: at 0.18, that seam (only one column of mesh
+        // resolution wide) stretches to over 2x at this behaviour's own real weightTarget amplitude
+        // range (0.35-0.85), regardless of how that seam's own bone weighting is blended -- the hand
+        // simply swings too far from the hip for one quad to absorb. 0.10, paired with
+        // LeonMeshRig's HIP_FOLLOW_* constants (see their own comment), keeps that seam under this
+        // file's other mesh-seam thresholds across the full range while still visibly swaying.
+        pose.add(LeonChannel.ARM_L_SWING, (weightValue * 0.10f + shL * 0.09f) * weight);
+        pose.add(LeonChannel.ARM_R_SWING, (weightValue * 0.10f + shR * 0.09f) * weight);
         pose.add(LeonChannel.NECKLACE_SWAY, -twistValue * 0.4f * weight);
     }
 
