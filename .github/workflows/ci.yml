@@ -395,6 +395,11 @@ jobs:
           assert "python -m app.db.runtime_role" in entrypoint
 
           watchdog = Path(".github/workflows/build-watchdog.yml").read_text()
+          assert 'cron: "*/10 * * * *"' in watchdog
+          assert "workflow_run:" in watchdog
+          assert 'workflows: ["Claude Code Lead"]' in watchdog
+          assert "types: [completed]" in watchdog
+          assert "issue_comment:" not in watchdog
           assert "failure|cancelled|timed_out|stale|startup_failure)" in watchdog
           assert "action_required)" in watchdog
           assert "stale|action_required)" not in watchdog
@@ -402,17 +407,51 @@ jobs:
           assert "dispatch \"${head_branch:-$default_branch}\"" not in watchdog
           assert "CI exhausted its single stale-run retry" in watchdog
           assert 'actions/runs/$run_id/rerun"' in watchdog
+          assert "Retrying Claude run $run_id once for exact unchanged head $head_sha" in watchdog
+          assert "no stale-SHA retry" in watchdog
+          assert "AUTOMATION_FAIL/BLOCKED" in watchdog
+          assert "run_attempt" in watchdog
+          assert "task_health_state=" in watchdog
+          assert "builder_running" in watchdog
+          assert "review_running" in watchdog
+          assert "waiting_authorized_handoff" in watchdog
+          assert "blocked_external" in watchdog
+          assert "complete" in watchdog
+          assert "@claude build" not in watchdog
+          assert "@claude continue" not in watchdog
+          assert "@claude remediate" not in watchdog
 
           assert "queued|in_progress|requested|waiting|pending)" not in watchdog
           assert "queued|in_progress|requested|pending)" in watchdog
           assert "waiting on a deployment-protection approval" in watchdog
 
-          assert "monitors only the latest repository CI run" in watchdog
-          assert "cannot restart stopped AI coding sessions" in watchdog
+          # Regression: PR #180 continuity incident must rerun once (exact head unchanged),
+          # and that state must not be healthy even with green CI.
+          def continuity_regression(run_attempt: int, pr_head_matches: bool, ci_green: bool, codex: str):
+              failed_claude = True
+              if failed_claude and pr_head_matches and run_attempt < 2:
+                  return {"action": "rerun_once", "health": "builder_running"}
+              if failed_claude and pr_head_matches and run_attempt >= 2:
+                  return {"action": "blocked_record", "health": "blocked_external"}
+              if ci_green and codex == "PASS":
+                  return {"action": "none", "health": "complete"}
+              return {"action": "none", "health": "review_running"}
+
+          regression = continuity_regression(
+              run_attempt=1,
+              pr_head_matches=True,
+              ci_green=True,
+              codex="CHANGES_REQUESTED",
+          )
+          assert regression["action"] == "rerun_once"
+          assert regression["health"] != "complete"
 
           protocol = Path(".github/AGENT_OPERATING_PROTOCOL.md").read_text()
-          assert "latest repository CI run only" in protocol
-          assert "cannot restart a stopped coding-agent session" in protocol
+          assert "runs every 10 minutes" in protocol
+          assert "reacts to completed `Claude Code Lead` runs" in protocol
+          assert "A failed/cancelled/timed-out Claude run tied to a PR head is rerun once only when the PR head SHA is unchanged." in protocol
+          assert "`AUTOMATION_FAIL/BLOCKED`" in protocol
+          assert "Green CI alone is never treated as healthy task completion." in protocol
 
           agent_guides = {
               "CLAUDE.md": Path("CLAUDE.md").read_text(),
