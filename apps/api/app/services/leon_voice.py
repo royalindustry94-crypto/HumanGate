@@ -222,7 +222,19 @@ async def generate_reply(user_text: str, *, history: list[dict[str, str]]) -> st
         if not isinstance(message, dict):
             raise LeonVoiceError("Leon's brain returned an unexpected response", stage="llm")
         content = message.get("content")
-        reply = content.strip() if isinstance(content, str) else ""
+        if isinstance(content, str):
+            reply = content.strip()
+        elif isinstance(content, list):
+            parts = [
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict)
+                and block.get("type") == "text"
+                and isinstance(block.get("text"), str)
+            ]
+            reply = "".join(parts).strip()
+        else:
+            reply = ""
         if not reply:
             raise LeonVoiceError("Leon couldn't think of a reply just now", stage="llm")
     except LeonVoiceError:
@@ -231,13 +243,15 @@ async def generate_reply(user_text: str, *, history: list[dict[str, str]]) -> st
 
     raw_usage = body.get("usage")
     usage: dict = raw_usage if isinstance(raw_usage, dict) else {}
-    input_tokens = usage.get("input_tokens", usage.get("prompt_tokens"))
-    output_tokens = usage.get("output_tokens", usage.get("completion_tokens"))
+    raw_input_tokens = usage.get("input_tokens", usage.get("prompt_tokens"))
+    raw_output_tokens = usage.get("output_tokens", usage.get("completion_tokens"))
+    input_tokens = raw_input_tokens if isinstance(raw_input_tokens, int) else 0
+    output_tokens = raw_output_tokens if isinstance(raw_output_tokens, int) else 0
     await leon_voice_spend.commit(
         reservation_id=reservation_id,
         actual_cost_usd=leon_voice_spend.llm_actual_cost_usd(
-            input_tokens=input_tokens if isinstance(input_tokens, int) else 0,
-            output_tokens=output_tokens if isinstance(output_tokens, int) else 0,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         ),
     )
     return reply

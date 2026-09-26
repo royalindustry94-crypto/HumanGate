@@ -117,9 +117,9 @@ public final class LeonPrefs {
 
     /** Base URL of the deployed voice backend (apps/api), e.g. https://your-app.vercel.app. */
     public String leonVoiceBaseUrl() {
+        if (!prefs.contains(KEY_VOICE_BASE_URL)) return DEFAULT_VOICE_BASE_URL;
         String configured = prefs.getString(KEY_VOICE_BASE_URL, "");
-        if (configured == null || configured.trim().isEmpty()) return DEFAULT_VOICE_BASE_URL;
-        return configured.trim();
+        return configured == null ? "" : configured.trim();
     }
 
     public void setLeonVoiceBaseUrl(String url) {
