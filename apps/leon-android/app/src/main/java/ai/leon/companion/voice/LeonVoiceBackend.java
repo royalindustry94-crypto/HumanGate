@@ -11,7 +11,8 @@ import java.util.List;
 
 /**
  * The real {@link LeonConversationController.Backend}: speech or text in, the backend's own
- * Whisper -> Claude -> OpenAI TTS turn out (apps/api/app/api/routes/leon_voice.py), played back
+ * OpenAI speech-to-text -> OpenAI chat reply -> OpenAI TTS turn out
+ * (apps/api/app/api/routes/leon_voice.py), played back
  * with amplitude-driven lip sync. Configuration (backend URL, app token) is read from
  * {@link LeonPrefs} on every turn, so a user editing it in Settings takes effect immediately.
  */
