@@ -723,7 +723,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
             showOverlay();
             return;
         }
-        if (characterView == null) {
+        if (!host.isAttachedToWindow() || characterView == null) {
             teardownOverlay();
             showOverlay();
             return;

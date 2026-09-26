@@ -15,6 +15,7 @@ venv/
 node_modules/
 dist/
 apps/web/dist/
+apps/leon-android/.gradle/
 
 # OS
 .DS_Store
