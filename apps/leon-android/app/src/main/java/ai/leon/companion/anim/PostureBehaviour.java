@@ -20,6 +20,28 @@ public final class PostureBehaviour implements LeonBehaviour {
     private final Spring1D weightSpring = new Spring1D(0f, 9f, 5.2f);
     private final Spring1D twistSpring = new Spring1D(0f, 11f, 5.6f);
 
+    // Scales the channels that drive LeonMeshRig's hip/hand-fade seam: WEIGHT_SHIFT, SHOULDER_L/R,
+    // both ARM_*_SWING terms, and -- caught by a Codex review of an earlier version of this fix,
+    // which only scaled the first three and still measured 8-17x replaying a real trajectory --
+    // TORSO_TWIST and TORSO_LEAN_X too. Those two don't move the hips bone at all, but they do move
+    // chest/spine (LeonRigBinder: chest.offsetX = twist*4f, spine.rotationDeg = leanX*SPINE_LEAN_DEG),
+    // and shoulders/arms/hands are chest's descendants while hips is their common ancestor higher up
+    // the chain -- so torso twist and lean swing the hand side of this seam exactly like the arm-swing
+    // channels do, just through a different bone. NECKLACE_SWAY is also scaled as an unavoidable side
+    // effect of scaling twistValue (it's cosmetic and unrelated to this seam, but derives from the same
+    // spring). Measured against real simulated PostureBehaviour trajectories (250 seeds, 120s each;
+    // see LeonMeshRigTest's own trajectory test) combined with IDLE's own always-on base pose
+    // (ELBOW_L/R=0.12, see LeonStateProfile): before this scale existed the seam reached up to 116x;
+    // with only WEIGHT_SHIFT/SHOULDER/ARM_SWING scaled (torso left at full amplitude) it still reached
+    // 16.8x; with all four scaled together the worst found across every seed was 6.478 (a static sweep
+    // of the same channels' extremes, which misses the spring/noise transients a real trajectory can
+    // produce, undershoots this at 6.076). That's the best amplitude alone can do -- IDLE's base elbow
+    // bend, on its own, with zero sway at all, already stretches this same seam to ~3.1x, a static
+    // floor this scale can't reach past no matter how low it goes. Closing the remaining gap needs
+    // either finer mesh resolution at that seam or reducing the base elbow bend itself, neither of
+    // which is an animation-amplitude change.
+    private static final float IDLE_SWAY_SCALE = 0.2f;
+
     private float amount = 1f;
     private float shiftIntervalMin = 7f;
     private float shiftIntervalMax = 16f;
@@ -50,14 +72,14 @@ public final class PostureBehaviour implements LeonBehaviour {
         if (timeToShift <= 0f) {
             // Always shift away from the current side, so weight actually travels.
             float side = weightTarget >= 0f ? -1f : 1f;
-            weightTarget = side * (0.35f + random.nextFloat() * 0.5f);
-            twistTarget = (random.nextFloat() * 2f - 1f) * 0.3f;
+            weightTarget = side * (0.35f + random.nextFloat() * 0.5f) * IDLE_SWAY_SCALE;
+            twistTarget = (random.nextFloat() * 2f - 1f) * 0.3f * IDLE_SWAY_SCALE;
             scheduleShift();
         }
 
         float weightValue = weightSpring.update(weightTarget * amount, dt);
         float twistValue = twistSpring.update(twistTarget * amount, dt);
-        float lean = leanNoise.update(dt) * 0.3f * amount;
+        float lean = leanNoise.update(dt) * 0.3f * IDLE_SWAY_SCALE * amount;
         float shL = shoulderNoiseL.update(dt);
         float shR = shoulderNoiseR.update(dt);
 
@@ -65,11 +87,13 @@ public final class PostureBehaviour implements LeonBehaviour {
         pose.add(LeonChannel.WEIGHT_SHIFT, weightValue * weight);
         pose.add(LeonChannel.TORSO_TWIST, twistValue * weight);
         pose.add(LeonChannel.TORSO_LEAN_X, lean * weight);
-        pose.add(LeonChannel.SHOULDER_L, shL * 0.17f * amount * weight);
-        pose.add(LeonChannel.SHOULDER_R, shR * 0.17f * amount * weight);
-        // Arms hang from the shoulders, so they inherit part of the sway.
-        pose.add(LeonChannel.ARM_L_SWING, (weightValue * 0.18f + shL * 0.09f) * weight);
-        pose.add(LeonChannel.ARM_R_SWING, (weightValue * 0.18f + shR * 0.09f) * weight);
+        pose.add(LeonChannel.SHOULDER_L, shL * 0.17f * IDLE_SWAY_SCALE * amount * weight);
+        pose.add(LeonChannel.SHOULDER_R, shR * 0.17f * IDLE_SWAY_SCALE * amount * weight);
+        // Arms hang from the shoulders, so they inherit part of the sway (see IDLE_SWAY_SCALE's own
+        // comment for why this and the shoulder lines above are scaled down -- LeonMeshRig's
+        // hip/hand-fade mesh seam can't otherwise absorb how far the hand swings from the hip).
+        pose.add(LeonChannel.ARM_L_SWING, (weightValue * 0.10f + shL * 0.09f * IDLE_SWAY_SCALE) * weight);
+        pose.add(LeonChannel.ARM_R_SWING, (weightValue * 0.10f + shR * 0.09f * IDLE_SWAY_SCALE) * weight);
         pose.add(LeonChannel.NECKLACE_SWAY, -twistValue * 0.4f * weight);
     }
 
