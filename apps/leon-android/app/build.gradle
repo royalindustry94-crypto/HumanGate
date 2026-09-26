@@ -2,7 +2,18 @@ plugins {
     id 'com.android.application'
 }
 
-def leonVersionCode = (project.findProperty('leonVersionCode') ?: '3') as int
+// versionCode must only ever increase within one signing key, or Android refuses the update as a
+// downgrade. CI passes its workflow run number. A release build must be given one explicitly
+// (see the release check below). Plain local debug builds fall back to 1, so they never install
+// over a CI build by accident.
+def leonVersionCodeProperty = project.findProperty('leonVersionCode')
+def leonVersionCode = (leonVersionCodeProperty ?: '1') as int
+
+// Release signing comes only from the environment, never from the repository. A release key
+// that is lost or leaked cannot be replaced without every user uninstalling, so it lives in a
+// secret store, and the build refuses to produce a release APK without it rather than silently
+// emitting an unsigned one.
+def leonReleaseKeystore = System.getenv('LEON_RELEASE_KEYSTORE')
 def generatedLeonAssets = layout.buildDirectory.dir("generated/leonAssets")
 
 android {
@@ -14,7 +25,7 @@ android {
         minSdk 26
         targetSdk 35
         versionCode leonVersionCode
-        versionName '0.3.0'
+        versionName "0.3.${leonVersionCode}"
     }
 
     // Test builds use a dedicated, public debug-only key committed with the project.
@@ -27,6 +38,14 @@ android {
             keyAlias 'leon-debug'
             keyPassword 'leon-debug-only'
         }
+        if (leonReleaseKeystore) {
+            release {
+                storeFile file(leonReleaseKeystore)
+                storePassword System.getenv('LEON_RELEASE_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('LEON_RELEASE_KEY_ALIAS')
+                keyPassword System.getenv('LEON_RELEASE_KEY_PASSWORD')
+            }
+        }
     }
 
     buildTypes {
@@ -35,6 +54,9 @@ android {
         }
         release {
             minifyEnabled false
+            if (leonReleaseKeystore) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 
@@ -82,3 +104,24 @@ dependencies {
     testImplementation 'junit:junit:4.13.2'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 }
+
+// Fail closed: packaging a release APK without the release key, or without an explicit
+// versionCode, is an error, not an unsigned or downgrading APK. Debug builds are unaffected.
+gradle.taskGraph.whenReady { graph ->
+    def packagingRelease = graph.allTasks.any { task ->
+        task.project == project && task.name ==~ /(assemble|bundle|package)Release/
+    }
+    if (!packagingRelease) return
+    def missing = []
+    if (!leonReleaseKeystore) missing << 'LEON_RELEASE_KEYSTORE'
+    ['LEON_RELEASE_KEYSTORE_PASSWORD', 'LEON_RELEASE_KEY_ALIAS', 'LEON_RELEASE_KEY_PASSWORD'].each {
+        if (!System.getenv(it)) missing << it
+    }
+    if (!leonVersionCodeProperty) missing << '-PleonVersionCode'
+    if (!missing.isEmpty()) {
+        throw new GradleException("Leon release build refused, missing: " + missing.join(', ')
+                + ". Release APKs must be signed with the release key and carry an explicit, "
+                + "increasing versionCode.")
+    }
+}
+
