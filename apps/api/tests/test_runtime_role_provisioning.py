@@ -53,6 +53,20 @@ def test_parse_runtime_credentials_accepts_rotated_secret():
     assert ROLE_NAME_RE.fullmatch(user)
 
 
+def test_parse_runtime_credentials_maps_supabase_pooler_username():
+    """Supabase pooler form `<role>.<project-ref>` provisions the plain role."""
+    user, password = parse_runtime_credentials(
+        "postgresql://"
+        + "app_runtime.vagfnbcnvtojljggxvxr"
+        + ":"
+        + "rotated-runtime-secret"
+        + "@aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres"
+    )
+    assert user == CANONICAL_RUNTIME_ROLE
+    assert password == "rotated-runtime-secret"
+    assert ROLE_NAME_RE.fullmatch(user)
+
+
 async def test_provision_runtime_role_rejects_non_canonical_name_before_connect():
     async def _should_not_connect(*_args, **_kwargs):
         raise AssertionError("must not open a database connection for a non-canonical role")
