@@ -270,30 +270,6 @@ public class LeonAnimationControllerTest {
     }
 
     @Test
-    public void onlyIdleEverWandersOffOnItsOwn() {
-        states.request(LeonState.SPEAKING);
-        // Longer than IDLE's shortest auto-walk interval, so if walking ever leaked into another
-        // state this would catch it rather than just being too short to notice.
-        advance(60f);
-        assertFalse("Leon must not wander while speaking", controller.isWalking());
-    }
-
-    @Test
-    public void touchingLeonCancelsAWalkAlreadyUnderway() {
-        states.request(LeonState.IDLE);
-        boolean walked = false;
-        for (int i = 0; i < 60 * 115 && !walked; i++) {
-            controller.update(FRAME);
-            walked = controller.isWalking();
-        }
-        assertTrue("an idle Leon must eventually start wandering on its own", walked);
-
-        controller.onTouched(0.5f, 0f);
-        advance(2f);
-        assertFalse("grabbing Leon must stop a walk in progress", controller.isWalking());
-    }
-
-    @Test
     public void theFormFactorScaleShrinksTheRigRootOnly() {
         controller.setFormFactorScale(0.5f);
         advance(0.2f);

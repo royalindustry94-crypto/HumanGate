@@ -50,14 +50,6 @@ public final class LeonRigBinder {
     private static final float TORSO_TWIST_SQUASH = 0.05f;
     private static final float WEIGHT_SHIFT_X = 8f;
     private static final float WEIGHT_SHIFT_DEG = 2.2f;
-    // Viewed strictly from the front (the only view a single fixed photo can give), a thigh that
-    // *rotates* the way a side view's forward stride would reads as a lateral kick, not a step --
-    // there is no foreshortening to sell "forward." A believable front-facing gait leans much more on
-    // the knee lifting (which does read correctly from the front) and a vertical hip bob, with only a
-    // small thigh rotation to keep the knee lift looking connected to the hip instead of floating.
-    private static final float THIGH_SWING_DEG = 9f;
-    private static final float SHIN_SWING_DEG = 16f;
-    private static final float WALK_BOB_LIFT = 3.2f;
     private static final float ARM_SWING_DEG = 26f;
     private static final float ELBOW_DEG = 105f;
     private static final float HAND_RAISE_DEG = 30f;
@@ -99,8 +91,6 @@ public final class LeonRigBinder {
     private final Bone handR;
     private final Bone thighL;
     private final Bone thighR;
-    private final Bone shinL;
-    private final Bone shinR;
 
     private final RigPart torso;
     private final RigPart lidL;
@@ -143,8 +133,6 @@ public final class LeonRigBinder {
         handR = requireBone(LeonRig.Bones.HAND_R);
         thighL = requireBone(LeonRig.Bones.THIGH_L);
         thighR = requireBone(LeonRig.Bones.THIGH_R);
-        shinL = requireBone(LeonRig.Bones.SHIN_L);
-        shinR = requireBone(LeonRig.Bones.SHIN_R);
 
         torso = requirePart(LeonRig.Parts.TORSO);
         lidL = requirePart(LeonRig.Parts.LID_L);
@@ -222,21 +210,9 @@ public final class LeonRigBinder {
         float weight = clampSigned(pose.get(LeonChannel.WEIGHT_SHIFT));
         hips.offsetX = weight * WEIGHT_SHIFT_X;
         hips.rotationDeg = weight * WEIGHT_SHIFT_DEG;
-        // Legs counter the hip swing so the feet stay planted while idle. Walking adds its own
-        // swing on top additively, rather than overwriting this, so a walk that starts mid-idle
-        // does not visibly snap the legs to a different baseline.
-        float thighSwingL = clampSigned(pose.get(LeonChannel.THIGH_L_SWING));
-        float thighSwingR = clampSigned(pose.get(LeonChannel.THIGH_R_SWING));
-        thighL.rotationDeg = -weight * WEIGHT_SHIFT_DEG * 1.4f + thighSwingL * THIGH_SWING_DEG;
-        thighR.rotationDeg = -weight * WEIGHT_SHIFT_DEG * 1.4f + thighSwingR * THIGH_SWING_DEG;
-
-        // The knee only bends forward, and only on the leg currently lifting (the walk behaviour
-        // shapes this curve; the binder just applies it), so a straight standing leg is 0.
-        shinL.rotationDeg = -Mathx.clamp01(pose.get(LeonChannel.SHIN_L_SWING)) * SHIN_SWING_DEG;
-        shinR.rotationDeg = -Mathx.clamp01(pose.get(LeonChannel.SHIN_R_SWING)) * SHIN_SWING_DEG;
-
-        float bob = Mathx.clamp01(pose.get(LeonChannel.WALK_BOB));
-        hips.offsetY -= bob * WALK_BOB_LIFT;
+        // Legs counter the hip swing so the feet stay planted while idle.
+        thighL.rotationDeg = -weight * WEIGHT_SHIFT_DEG * 1.4f;
+        thighR.rotationDeg = -weight * WEIGHT_SHIFT_DEG * 1.4f;
 
         // ---- shoulders (independent, plus a breath-driven lift) ----
         // Counter-scaled for the same reason as the neck: shoulders are chest's children too, and
