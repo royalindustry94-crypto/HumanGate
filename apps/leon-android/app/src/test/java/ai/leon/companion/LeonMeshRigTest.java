@@ -193,17 +193,26 @@ public class LeonMeshRigTest {
         int cols = mesh.meshCols();
         int rows = mesh.meshRows();
         java.util.List<Integer> handVertices = new java.util.ArrayList<>();
+        // x0 > 294, not the old > 264: LeonMeshRig now blends the torso/limb column boundary itself
+        // (fixing hips visibly pinching against a resting hand at idle -- see LeonMeshRig's
+        // COLUMN_BLEND_* constants), so columns within that blend margin (x0 up to design-centre 192
+        // + COLUMN_BLEND_END 102 = 294) are now intentionally partly hip/spine-bound too, not pure
+        // hand. This test's premise (hand-only motion must move these vertices as one rigid piece)
+        // only holds for the columns still purely hand-bound, i.e. strictly beyond that boundary.
         for (int col = 0; col <= cols; col++) {
             float x0 = canon[col * 2];
-            if (x0 <= 264f || x0 > 384f) continue;
+            if (x0 <= 294f || x0 > 384f) continue;
             for (int row = 0; row <= rows; row++) {
                 int i = row * (cols + 1) + col;
                 float y0 = canon[i * 2 + 1];
                 if (y0 >= 375f && y0 < 395f) handVertices.add(i);
             }
         }
+        // Exactly 4, not >4: of this mesh's 5 columns past the new pure-hand boundary (x0 > 294),
+        // one (x0=398.7) is off the 384-wide texture and already excluded by the x0 > 384 check
+        // above, same as every other seam test in this class excludes off-canvas columns.
         assertTrue("expected several hand vertices in the test mesh geometry",
-                handVertices.size() > 4);
+                handVertices.size() >= 4);
 
         float worstRatio = 1f;
         for (int a = 0; a < handVertices.size(); a++) {
@@ -220,5 +229,78 @@ public class LeonMeshRigTest {
         }
         assertTrue("a small idle elbow bend must not warp the hand's shape, worst pairwise "
                 + "distance ratio was " + worstRatio, worstRatio < 1.05f);
+    }
+
+    @Test
+    public void idleWeightShiftDoesNotPinchTheHipAgainstTheRestingHand() {
+        // Real-device report: at plain IDLE, with no gesture and no touch, the hip visibly
+        // compressed right where the hand rests against it. Unlike every other seam bug this file
+        // already covers (all triggered by an explicit large-ish gesture channel), this one needs
+        // no gesture at all -- PostureBehaviour's autonomous idle weight-shift alone reproduces it,
+        // because it drives WEIGHT_SHIFT (a translation/rotation of the hips bone) AND independently
+        // feeds a fraction of the same signal into ARM_*_SWING ("arms hang from the shoulders, so
+        // they inherit part of the sway"), a rotation around the shoulder. The two bones never move
+        // in lockstep, so the column boundary between the hip-bound centre columns and the
+        // hand-bound side columns (right at hand-resting-on-hip height) used to be a hard,
+        // completely unblended cutoff -- every other seam in this class blends smoothly, this one
+        // didn't. This measures adjacent-COLUMN (not adjacent-row) stretch, since this seam runs
+        // vertically alongside the hip, not across a horizontal joint like the others above.
+        // Both signs: PostureBehaviour's weightTarget alternates ("always shift away from the
+        // current side"), and a Codex review of this PR caught that they are not equivalent here --
+        // deformedDist/restDist alone only ever grows above 1 for a seam that *stretches*, so a pose
+        // whose seam *compresses* instead (ratio below 1) could never move worstRatio and would pass
+        // even the unfixed hard-cutoff mesh. Measured directly (see PR discussion): the pre-fix seam
+        // hit a symmetric worst ratio of 1.28 at +0.5 but 1.39 at -0.5 -- negative was the worse
+        // direction, and this test would have missed it entirely with only one sign and a one-way
+        // ratio.
+        for (float weightShift : new float[]{0.5f, -0.5f}) {
+            float worstRatio = worstHipBandSeamRatio(weightShift);
+            assertTrue("idle's autonomous weight-shift (sign=" + weightShift + ") must not pinch "
+                    + "the hip/hand column seam, worst adjacent-column ratio was " + worstRatio,
+                    worstRatio < 1.25f);
+        }
+    }
+
+    /** Worst adjacent-column distance ratio (either direction) in the hip/hand-resting band. */
+    private static float worstHipBandSeamRatio(float weightShift) {
+        LeonMeshRig mesh = LeonMeshRig.createForTest(16, 28);
+        LeonRigBinder binder = new LeonRigBinder(mesh.rig());
+        LeonPose pose = new LeonPose();
+        pose.set(LeonChannel.WEIGHT_SHIFT, weightShift);
+        pose.set(LeonChannel.ARM_L_SWING, weightShift * 0.18f);
+        pose.set(LeonChannel.ARM_R_SWING, weightShift * 0.18f);
+        binder.apply(pose);
+        mesh.updateFromSolvedRig();
+
+        float[] canon = mesh.canonicalVertices();
+        float[] deformed = mesh.deformedVertices();
+        int cols = mesh.meshCols();
+        int rows = mesh.meshRows();
+        float worstRatio = 1f;
+        int seamColumnsChecked = 0;
+        for (int row = 0; row <= rows; row++) {
+            float y = canon[(row * (cols + 1)) * 2 + 1];
+            if (y < 300f || y > 400f) continue; // hip / hand-resting-on-hip height
+            for (int col = 0; col < cols; col++) {
+                int i0 = row * (cols + 1) + col;
+                int i1 = row * (cols + 1) + col + 1;
+                float x0 = canon[i0 * 2];
+                float x1 = canon[i1 * 2];
+                if (x1 < 0f || x0 > 384f) continue; // off the texture entirely; never rendered
+                float restDist = (float) Math.hypot(
+                        canon[i1 * 2] - canon[i0 * 2], canon[i1 * 2 + 1] - canon[i0 * 2 + 1]);
+                if (restDist < 1f) continue;
+                seamColumnsChecked++;
+                float deformedDist = (float) Math.hypot(
+                        deformed[i1 * 2] - deformed[i0 * 2], deformed[i1 * 2 + 1] - deformed[i0 * 2 + 1]);
+                // max(ratio, 1/ratio): a pinch is either the seam stretching OR compressing, and
+                // deformedDist/restDist alone only ever detects the former.
+                float ratio = deformedDist / restDist;
+                worstRatio = Math.max(worstRatio, Math.max(ratio, 1f / ratio));
+            }
+        }
+        assertTrue("expected several hip-band seam columns in the test mesh geometry",
+                seamColumnsChecked > 4);
+        return worstRatio;
     }
 }
