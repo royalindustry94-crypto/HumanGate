@@ -157,7 +157,8 @@ final class LeonVoiceApiClient {
         }
 
         String suffix = requestId.isEmpty() ? "" : " Request " + requestId + ".";
-        if (response.code() == 502 && !message.isEmpty()) {
+        // 502 is a provider failure; 500 is the backend's own, and both name the failing stage.
+        if ((response.code() == 502 || response.code() == 500) && !message.isEmpty()) {
             String where = stage.isEmpty() ? "" : " [" + stage + "]";
             return message + where + suffix;
         }

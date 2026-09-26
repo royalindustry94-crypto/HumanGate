@@ -9,13 +9,17 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
+import struct
 
 import httpx
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
+from app.main import app
 from app.services import leon_voice as lv
 from app.services import leon_voice_spend
 
@@ -417,3 +421,83 @@ async def test_an_upstream_failure_becomes_a_safe_502(monkeypatch, client):
     detail = response.json()["detail"]
     assert detail["error_code"] == "voice_upstream_failure"
     assert detail["stage"] in {"stt", "llm", "tts"}
+
+
+def _wav_16k_mono(samples: int = 1600) -> bytes:
+    """A real canonical WAV, the shape LeonVoiceRecorder produces (16 kHz, mono, PCM 16-bit)."""
+    data = b"\x10\x00" * samples
+    fmt = struct.pack("<HHIIHH", 1, 1, 16000, 32000, 2, 16)
+    return (
+        b"RIFF"
+        + struct.pack("<I", 36 + len(data))
+        + b"WAVE"
+        + b"fmt "
+        + struct.pack("<I", len(fmt))
+        + fmt
+        + b"data"
+        + struct.pack("<I", len(data))
+        + data
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_failure_is_an_explicit_500_naming_its_stage(monkeypatch):
+    # Reproduced before the fix: a database error inside the spend reservation (for example a
+    # deployment missing migration 0059) escaped to the global handler as a bare
+    # {"detail": "internal server error"}, which the phone could only show as "code 500".
+    async def broken_reserve(**_):
+        raise ProgrammingError(
+            "SELECT * FROM spend_caps WHERE workspace_id = $1",
+            {},
+            Exception('relation "spend_caps" does not exist'),
+        )
+
+    monkeypatch.setattr(leon_voice_spend, "reserve", broken_reserve)
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/leon/voice-turn", headers=_auth_headers(), data={"text": "hi"}
+        )
+
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert detail["error_code"] == "voice_internal_error"
+    assert detail["stage"] == "voice_turn"
+    assert detail["error_type"] == "ProgrammingError"
+    assert detail["request_id"] == response.headers["x-request-id"]
+    assert detail["received"]["has_text"] is True
+    # The exception's own message can carry SQL, hostnames or provider text: never returned.
+    assert "spend_caps" not in response.text
+    assert "relation" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_the_received_audio_shape_is_logged_without_its_content(monkeypatch, client, caplog):
+    _install_transport(monkeypatch, _happy_path_handler)
+    wav = _wav_16k_mono()
+    caplog.set_level(logging.INFO, logger="app.api.routes.leon_voice")
+
+    response = await client.post(
+        "/leon/voice-turn",
+        headers=_auth_headers(),
+        data={"history": json.dumps([{"role": "user", "content": "my private words"}])},
+        files={"audio": ("speech.wav", wav, "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    records = [r for r in caplog.records if r.getMessage() == "leon_voice_turn_received"]
+    assert len(records) == 1
+    record = records[0].__dict__
+    assert record["request_content_type"] == "multipart/form-data"
+    assert record["audio_part_filename"] == "speech.wav"
+    assert record["audio_part_content_type"] == "audio/wav"
+    assert record["audio_container"] == "wav"
+    assert record["audio_bytes"] == len(wav)
+    assert record["audio_magic_hex"] == wav[:12].hex()
+    assert record["wav_sample_rate_hz"] == 16000
+    assert record["wav_channels"] == 1
+    assert record["wav_bits_per_sample"] == 16
+    logged = repr(record)
+    assert _APP_TOKEN not in logged
+    assert "my private words" not in logged
+    assert wav[12:40].hex() not in logged

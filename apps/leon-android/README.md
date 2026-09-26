@@ -48,10 +48,19 @@ centre, and the token is kept in `LeonSecureTokenStore`.
 
 The server side is `apps/api/app/api/routes/leon_voice.py`: Whisper for speech
 to text, an Anthropic model for the reply, OpenAI for speech. It needs
-`LEON_VOICE_APP_TOKEN`, `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`, and is
+`LEON_VOICE_APP_TOKEN` plus the provider keys, which `apps/api/app/core/config.py` reads from the
+deployment's existing variable names: `anthkey` (Anthropic) and `ANTHTOPIC_APO_KEY` (which holds
+the **OpenAI** key despite its name). It is
 spend-capped by `LEON_VOICE_DAILY_SPEND_CAP_USD` and
 `LEON_VOICE_MONTHLY_SPEND_CAP_USD` (fail-closed). `GET /leon/voice-status`
 reports whether the server is configured, without making any paid call.
+
+Every turn logs `leon_voice_turn_received` with the shape of what arrived: content types, part
+filename, byte count, the first 12 bytes in hex, the detected container and, for WAV, channels,
+sample rate and bit depth. It never logs the token, the typed text, the history or the audio past
+those 12 bytes. Any unexpected server error returns a 500 whose `detail` names the `stage`, the
+`error_type` and the `request_id`, and includes that same shape as `received`. The phone shows the
+message and stage, and the full traceback stays in the server log under the same request id.
 
 ## Build and test
 
