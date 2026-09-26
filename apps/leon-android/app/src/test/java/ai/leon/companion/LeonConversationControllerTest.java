@@ -77,6 +77,74 @@ public class LeonConversationControllerTest {
     }
 
     @Test
+    public void aBackendDrivesTheFullConversationArcFromRecordedAudioToo() {
+        conversation.setBackend(new LeonConversationController.Backend() {
+            @Override
+            public void submitTurn(String userText, LeonConversationController.TurnCallback callback) {
+                throw new AssertionError("audio input must not go through the text path");
+            }
+
+            @Override
+            public void submitAudioTurn(byte[] audioWav,
+                    LeonConversationController.TurnCallback callback) {
+                callback.onSpeakingStarted("heard: " + audioWav.length + " bytes");
+                callback.onSpeakingFinished();
+            }
+
+            @Override
+            public void cancel() {
+            }
+        });
+
+        assertTrue(conversation.submitAudio(new byte[]{1, 2, 3}));
+        assertEquals(LeonState.IDLE, states.state());
+        assertEquals("heard: 3 bytes", conversation.lastReply());
+    }
+
+    @Test
+    public void submitAudioWithoutABackendFailsHonestlyLikeSubmit() {
+        assertFalse(conversation.submitAudio(new byte[]{1}));
+        assertEquals(LeonConversationController.Status.NO_BACKEND, conversation.status());
+    }
+
+    @Test
+    public void aBackendThatDoesNotImplementAudioTurnsFailsThatTurnCleanly() {
+        // The default submitAudioTurn on Backend exists so a text-only backend does not have to
+        // implement it just to remain valid; a caller that tries voice input against one must still
+        // land back in a normal idle state with an honest message, not silently do nothing.
+        conversation.setBackend(new LeonConversationController.Backend() {
+            @Override
+            public void submitTurn(String userText, LeonConversationController.TurnCallback callback) {
+            }
+
+            @Override
+            public void cancel() {
+            }
+        });
+
+        assertTrue(conversation.submitAudio(new byte[]{1}));
+        assertEquals(LeonState.IDLE, states.state());
+    }
+
+    @Test
+    public void reportFailureReturnsToIdleWithTheMessage() {
+        final String[] reported = new String[1];
+        conversation.setListener(new LeonConversationController.Listener() {
+            @Override
+            public void onConversationStatusChanged(LeonConversationController.Status status,
+                                                    String detail) {
+                if (detail != null) reported[0] = detail;
+            }
+        });
+        conversation.beginListening();
+
+        conversation.reportFailure("the microphone could not be opened");
+
+        assertEquals(LeonState.IDLE, states.state());
+        assertEquals("the microphone could not be opened", reported[0]);
+    }
+
+    @Test
     public void aFailedTurnReturnsLeonToIdleWithAMessage() {
         final String[] reported = new String[1];
         conversation.setListener(new LeonConversationController.Listener() {

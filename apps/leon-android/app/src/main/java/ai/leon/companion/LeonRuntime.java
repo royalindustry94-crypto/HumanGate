@@ -9,6 +9,7 @@ import ai.leon.companion.state.LeonConversationController;
 import ai.leon.companion.state.LeonState;
 import ai.leon.companion.state.LeonStateController;
 import ai.leon.companion.voice.LeonSpeechController;
+import ai.leon.companion.voice.LeonVoiceBackend;
 
 /**
  * Process-wide singleton holding the one thing the overlay and the control centre must agree on:
@@ -27,6 +28,7 @@ public final class LeonRuntime {
     private final LeonStateController stateController = new LeonStateController();
     private final LeonVisemeBus visemeBus = new LeonVisemeBus();
     private final LeonConversationController conversation;
+    private final LeonVoiceBackend voiceBackend;
     private final LeonPrefs prefs;
     private final Context appContext;
     private LeonSpeechController speech;
@@ -35,6 +37,8 @@ public final class LeonRuntime {
         appContext = context.getApplicationContext();
         prefs = new LeonPrefs(appContext);
         conversation = new LeonConversationController(stateController, visemeBus);
+        voiceBackend = new LeonVoiceBackend(conversation, prefs, visemeBus);
+        conversation.setBackend(voiceBackend);
         stateController.adoptPersisted(prefs.state(), prefs.restoreState());
         stateController.addListener(new LeonStateController.Listener() {
             @Override
@@ -68,6 +72,12 @@ public final class LeonRuntime {
 
     public LeonConversationController conversation() {
         return conversation;
+    }
+
+    /** The concrete voice backend, for the mic push-to-talk control that {@link #conversation()}'s
+     *  generic {@link LeonConversationController.Backend} interface does not expose. */
+    public LeonVoiceBackend voiceBackend() {
+        return voiceBackend;
     }
 
     public LeonPrefs prefs() {

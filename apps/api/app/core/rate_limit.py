@@ -14,6 +14,7 @@ another concurrent request.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable
@@ -30,6 +31,8 @@ from starlette.types import ASGIApp
 
 from app.core.audit import audit
 from app.db.session import RuntimeSessionLocal
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -299,11 +302,28 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         limiter = self._auth_limiter if is_auth_path else self._global_limiter
         tier = "auth" if is_auth_path else "global"
 
-        result = limiter.check(f"{tier}:{ip}")
-        if isawaitable(result):
-            allowed, retry_after = await result
-        else:
-            allowed, retry_after = result
+        try:
+            result = limiter.check(f"{tier}:{ip}")
+            if isawaitable(result):
+                allowed, retry_after = await result
+            else:
+                allowed, retry_after = result
+        except Exception:
+            # The limiter is a security control, so a broken database/credential/migration
+            # must fail CLOSED. Returning a controlled 503 is materially better than leaking
+            # an implementation traceback as a generic 500 and makes the failure diagnosable.
+            logger.exception(
+                "rate_limit_backend_unavailable",
+                extra={"request_path": path, "rate_limit_tier": tier},
+            )
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": "service temporarily unavailable",
+                    "error_code": "rate_limit_backend_unavailable",
+                },
+                headers={"Retry-After": "5"},
+            )
         if not allowed:
             audit(
                 request,
