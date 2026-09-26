@@ -10,6 +10,11 @@ import ai.leon.companion.anim.LeonPose;
 import ai.leon.companion.anim.LeonRigBinder;
 import ai.leon.companion.anim.PostureBehaviour;
 import ai.leon.companion.render.LeonMeshRig;
+import ai.leon.companion.rig.Bone;
+import ai.leon.companion.rig.LeonRig;
+import ai.leon.companion.state.LeonState;
+import ai.leon.companion.state.LeonStateController;
+import ai.leon.companion.anim.LeonAnimationController;
 
 import org.junit.Test;
 
@@ -219,5 +224,80 @@ public class LeonMeshRigTest {
         }
         assertTrue("a small idle elbow bend warped the hand by " + worst + " (cols=" + cols + ")",
                 worst < 1.01f);
+    }
+
+    @Test
+    public void armJointPivotsSitOnThePhotographedArm() throws Exception {
+        // The elbow and wrist pivots used to be (70, 324) and (70, 424), inherited from the old
+        // drawn figure: the elbow pivot sat on the cuff and the wrist pivot among the fingers. Each
+        // joint must now be a visible arm pixel at the photo's own joint, on both sides.
+        LeonTextureMask mask = LeonTextureMask.load();
+        LeonMeshRig mesh = productionMesh();
+        String[] joints = {LeonRig.Bones.ARM_L, LeonRig.Bones.ARM_R, LeonRig.Bones.FOREARM_L,
+                LeonRig.Bones.FOREARM_R, LeonRig.Bones.HAND_L, LeonRig.Bones.HAND_R};
+        for (String name : joints) {
+            Bone bone = mesh.rig().findBone(name);
+            float x = bone.world().mapX(0f, 0f);
+            float y = bone.world().mapY(0f, 0f);
+            assertTrue(name + " pivot (" + (x - 192f) + ", " + y + ") is not on a visible pixel",
+                    mask.opaqueAtDesign(x, y));
+            // Below the armpit, being visible is not enough: it must be the arm, not the torso.
+            if (y > 268f) {
+                assertTrue(name + " pivot (" + (x - 192f) + ", " + y + ") is inside the torso",
+                        Math.abs(x - 192f) > LeonMeshRig.bodyEdgeHalfWidth(y));
+            }
+        }
+        Bone elbow = mesh.rig().findBone(LeonRig.Bones.FOREARM_R);
+        Bone wrist = mesh.rig().findBone(LeonRig.Bones.HAND_R);
+        assertEquals(LeonRig.ELBOW_X, elbow.world().mapX(0f, 0f) - 192f, 0.01f);
+        assertEquals(LeonRig.ELBOW_Y, elbow.world().mapY(0f, 0f), 0.01f);
+        assertEquals(LeonRig.WRIST_X, wrist.world().mapX(0f, 0f) - 192f, 0.01f);
+        assertEquals(LeonRig.WRIST_Y, wrist.world().mapY(0f, 0f), 0.01f);
+    }
+
+    @Test
+    public void idleElbowBendOnlyCompressesTheInnerElbow() throws Exception {
+        // IDLE always bends both elbows 12%. With the pivot on the cuff this deformed visible
+        // sleeve pixels by 1.55x. What remains is the inner crook of the elbow compressing, which
+        // is real anatomy: a 12.6 degree bend across the 30-unit blend band, 25 units from the
+        // pivot, predicts ~1.37x at the band's steepest row.
+        LeonTextureMask mask = LeonTextureMask.load();
+        LeonMeshRig mesh = posed("ELBOW_L", "0.12", "ELBOW_R", "0.12");
+        float upperArm = mask.worstOpaqueEdgeRatio(mesh, 205f, 268f);
+        float elbow = mask.worstOpaqueEdgeRatio(mesh, 268f, 340f);
+        assertTrue("idle elbow bend deformed the upper arm by " + upperArm, upperArm < 1.06f);
+        assertTrue("idle elbow bend deformed the elbow by " + elbow, elbow < 1.4f);
+    }
+
+    @Test
+    public void raisingTheHandRotatesItAboutTheWrist() throws Exception {
+        // With the wrist pivot among the fingers, a hand raise swung the cuff and wrist about a
+        // point 70 units below them (1.41x at HAND_R_RAISE=0.3).
+        LeonTextureMask mask = LeonTextureMask.load();
+        LeonMeshRig mesh = posed("HAND_R_RAISE", "0.3");
+        float wrist = mask.worstOpaqueEdgeRatio(mesh, 340f, 452f);
+        assertTrue("a hand raise deformed the wrist by " + wrist, wrist < 1.15f);
+    }
+
+    @Test
+    public void expressiveStatesKeepVisibleDistortionBounded() throws Exception {
+        // Replays real controller trajectories. HAPPY combines a shoulder raise, arm swing, elbow
+        // bend and hand raise; with the legacy shoulder/elbow/wrist pivots it crushed the shoulder
+        // top to 3.2x. What remains (~2.1x) is the inner elbow at full flexion.
+        LeonTextureMask mask = LeonTextureMask.load();
+        for (LeonState state : new LeonState[]{LeonState.IDLE, LeonState.HAPPY, LeonState.THINKING}) {
+            LeonMeshRig mesh = productionMesh();
+            LeonStateController states = new LeonStateController();
+            LeonAnimationController controller = new LeonAnimationController(mesh.rig(), states, 11L);
+            if (state != LeonState.IDLE) states.request(state);
+            float worst = 1f;
+            for (int f = 0; f < 60 * 40; f++) {
+                controller.update(1f / 60f);
+                if (f % 6 != 0) continue;
+                mesh.updateFromSolvedRig();
+                worst = Math.max(worst, mask.worstOpaqueEdgeRatio(mesh, 0f, 768f));
+            }
+            assertTrue(state + " deformed visible pixels by " + worst, worst < 2.2f);
+        }
     }
 }

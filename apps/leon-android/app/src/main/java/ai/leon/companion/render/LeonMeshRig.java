@@ -312,14 +312,14 @@ public final class LeonMeshRig {
             float t = smooth((y - 205f) / 30f);
             return two(chest, 1f - t, left ? armL : armR, t);
         }
-        if (y < 270f) return one(left ? armL : armR);
-        if (y < 300f) {
-            float t = smooth((y - 270f) / 30f);
+        if (y < LeonRig.ELBOW_Y - 15f) return one(left ? armL : armR);
+        if (y < LeonRig.ELBOW_Y + 15f) {
+            float t = smooth((y - (LeonRig.ELBOW_Y - 15f)) / 30f);
             return two(left ? armL : armR, 1f - t, left ? forearmL : forearmR, t);
         }
-        if (y < 345f) return one(left ? forearmL : forearmR);
-        if (y < 375f) {
-            float t = smooth((y - 345f) / 30f);
+        if (y < LeonRig.WRIST_Y - 15f) return one(left ? forearmL : forearmR);
+        if (y < LeonRig.WRIST_Y + 15f) {
+            float t = smooth((y - (LeonRig.WRIST_Y - 15f)) / 30f);
             return two(left ? forearmL : forearmR, 1f - t, left ? handL : handR, t);
         }
         return one(left ? handL : handR);
