@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ (API 31+) replacement for leon_backup_rules.xml; separately excludes the
+  Keystore-encrypted app-token file from both cloud backup and device-to-device transfer.
+  See leon_backup_rules.xml for why this is defense in depth rather than the only protection.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="leon_secure.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="leon_secure.xml" />
+    </device-transfer>
+</data-extraction-rules>

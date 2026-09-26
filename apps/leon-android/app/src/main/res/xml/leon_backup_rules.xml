@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Pre-Android-12 (API < 31) Auto Backup rules. Everything else Leon persists (overlay position,
+  enabled/minimised state, the voice backend URL) is harmless to restore onto a new device; only
+  the Keystore-encrypted app-token file (LeonSecureTokenStore.FILE = "leon_secure") is excluded,
+  as defense in depth on top of that file's ciphertext being useless without the
+  non-exportable Keystore key that produced it (see LeonSecureTokenStore).
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="leon_secure.xml" />
+</full-backup-content>

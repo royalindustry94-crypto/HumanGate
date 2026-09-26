@@ -166,6 +166,43 @@ class Settings(BaseSettings):
     deployment_ci_status: str | None = Field(default=None)
     deployment_ci_url: str | None = Field(default=None)
 
+    # --- Leon voice conversation (Anthropic + OpenAI) ---
+    # Optional: unset means the /leon/voice-turn route reports unavailable
+    # rather than failing at startup, since not every deployment runs the
+    # Leon Android companion's voice backend. Validation aliases match the
+    # operator's actual Vercel env var names for this project (`anthkey`,
+    # `ANTHTOPIC_APO_KEY` — the latter holds the OpenAI key despite the
+    # name; do not rename here without updating the Vercel dashboard too).
+    anthropic_api_key: str | None = Field(default=None, validation_alias="anthkey")
+    openai_api_key: str | None = Field(default=None, validation_alias="ANTHTOPIC_APO_KEY")
+    leon_anthropic_model: str = Field(default="claude-sonnet-5")
+    leon_openai_tts_voice: str = Field(default="alloy")
+    # Shared secret the Android app presents as a bearer token. The companion
+    # is a single-user overlay with no account system of its own, so this
+    # gates the route the same way METRICS_SCRAPER_TOKEN gates /health/ready's
+    # sensitive detail -- a fixed secret checked in constant time -- rather
+    # than requiring a full Supabase/local sign-up-and-login flow that has no
+    # other purpose in this app.
+    leon_voice_app_token: str | None = Field(default=None)
+
+    # Fail-closed budget for the voice route's cost-bearing provider calls
+    # (STT/LLM/TTS). Deliberately much smaller than default_daily/monthly_
+    # spend_cap_usd above -- those size the whole multi-tenant product;
+    # this bounds one person's companion app so a leaked/misused app token
+    # cannot run an unbounded bill.
+    leon_voice_daily_spend_cap_usd: float = Field(default=2.0)
+    leon_voice_monthly_spend_cap_usd: float = Field(default=20.0)
+    # Per-unit provider pricing used only to size spend reservations/commits
+    # for the voice route. These are estimates the operator should confirm
+    # against each provider's current published pricing -- getting one of
+    # them slightly wrong does not defeat the cap (it still fails closed at
+    # the configured dollar ceiling either way), it only makes the ceiling
+    # measure usage a bit loosely.
+    leon_stt_cost_usd_per_minute: float = Field(default=0.006)
+    leon_llm_input_cost_usd_per_1k_tokens: float = Field(default=0.003)
+    leon_llm_output_cost_usd_per_1k_tokens: float = Field(default=0.015)
+    leon_tts_cost_usd_per_1k_chars: float = Field(default=0.015)
+
     # --- GitHub live status (Operations Dashboard V2) ---
     # Optional. When unset, GitHub widgets report unavailable (never fake).
     # Prefer GITHUB_TOKEN from Actions; GITHUB_API_TOKEN is an alternate name.
