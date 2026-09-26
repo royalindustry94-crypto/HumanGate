@@ -35,7 +35,6 @@ import ai.leon.companion.LeonRuntime;
 import ai.leon.companion.MainActivity;
 import ai.leon.companion.R;
 import ai.leon.companion.anim.LeonAnimationController;
-import ai.leon.companion.anim.WalkBehaviour;
 import ai.leon.companion.render.LeonCharacterView;
 import ai.leon.companion.render.ProductionLeonTexture;
 import ai.leon.companion.rig.LeonRig;
@@ -79,9 +78,6 @@ public final class LeonOverlayService extends Service implements LeonStateContro
     private static final int EXPANDED_HEIGHT_DP = 264;
     private static final int MINIMISED_WIDTH_DP = 62;
     private static final int MINIMISED_HEIGHT_DP = 124;
-    /** A slow amble, matched to the leg cadence in {@code WalkBehaviour} -- fast enough to read as
-     *  walking, slow enough not to look like he's sliding across the glass. */
-    private static final float WALK_SPEED_DP_PER_SECOND = 46f;
 
     /** Set while a service instance holds a live overlay, for the control centre's status line. */
     private static volatile boolean overlayLive;
@@ -111,8 +107,6 @@ public final class LeonOverlayService extends Service implements LeonStateContro
     private float dragDownY;
     private int touchSlop;
     private String blockedReason;
-    private boolean wasWalking;
-    private float walkPositionRemainderPx;
 
     /** True while an overlay view is attached to the window manager. */
     public static boolean isOverlayLive() {
@@ -221,9 +215,6 @@ public final class LeonOverlayService extends Service implements LeonStateContro
 
         characterView = new LeonCharacterView(this, rig, animation, texture);
         characterView.renderer().setShowRigDebug(prefs.isRigDebugEnabled());
-        walkPositionRemainderPx = 0f;
-        wasWalking = false;
-        characterView.setFrameListener(this::onAnimationFrame);
 
         host = new FrameLayout(this);
         // No card, no rounded rectangle, no background: Leon stands on the user's own screen.
@@ -413,36 +404,6 @@ public final class LeonOverlayService extends Service implements LeonStateContro
             }
         });
         settleAnimator.start();
-    }
-
-    /**
-     * Called every animated frame by {@link LeonCharacterView}. Translates the overlay window while
-     * {@link WalkBehaviour} reports a walk in progress; does nothing the rest of the time, which is
-     * the overwhelming majority of frames. A drag always wins -- the moment the user grabs Leon this
-     * simply stops moving him, and {@link LeonAnimationController#onTouched} has already cancelled
-     * the walk behind the scenes so the legs settle out too.
-     */
-    private void onAnimationFrame(float dtSeconds) {
-        if (dragging || host == null || params == null || windowManager == null) return;
-
-        float travel = animation.walkTravelFraction();
-        if (travel == 0f) {
-            if (wasWalking) {
-                wasWalking = false;
-                walkPositionRemainderPx = 0f;
-                savePosition();
-            }
-            return;
-        }
-        wasWalking = true;
-
-        // Accumulate sub-pixel motion so a slow amble still visibly advances instead of rounding to
-        // zero every frame on a low-density screen.
-        walkPositionRemainderPx += travel * dp(WALK_SPEED_DP_PER_SECOND) * dtSeconds;
-        int dx = (int) walkPositionRemainderPx;
-        if (dx == 0) return;
-        walkPositionRemainderPx -= dx;
-        moveTo(params.x + dx, params.y);
     }
 
     private void moveTo(int x, int y) {

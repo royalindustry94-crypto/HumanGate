@@ -120,14 +120,12 @@ jobs:
             ../app/build/reports/leon-preview/emulator-speaking.png \
             ../app/build/reports/leon-preview/emulator-chin.png \
             ../app/build/reports/leon-preview/emulator-head-left.png \
-            ../app/build/reports/leon-preview/emulator-walk-right.png \
             ../app/build/reports/leon-preview/emulator-overlay.png \
             --min-height-fraction 0.55 \
             --require-change ../app/build/reports/leon-preview/emulator-idle.png ../app/build/reports/leon-preview/emulator-thinking.png 150 \
             --require-change ../app/build/reports/leon-preview/emulator-idle.png ../app/build/reports/leon-preview/emulator-speaking.png 100 \
             --require-change ../app/build/reports/leon-preview/emulator-idle.png ../app/build/reports/leon-preview/emulator-chin.png 150 \
-            --require-change ../app/build/reports/leon-preview/emulator-idle.png ../app/build/reports/leon-preview/emulator-head-left.png 100 \
-            --require-change ../app/build/reports/leon-preview/emulator-idle.png ../app/build/reports/leon-preview/emulator-walk-right.png 150
+            --require-change ../app/build/reports/leon-preview/emulator-idle.png ../app/build/reports/leon-preview/emulator-head-left.png 100
 
       - name: Upload emulator screenshots
         if: always()

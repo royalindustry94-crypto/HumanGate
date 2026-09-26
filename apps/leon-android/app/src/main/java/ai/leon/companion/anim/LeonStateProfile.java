@@ -51,11 +51,6 @@ public final class LeonStateProfile {
     public float nodMin = 5f;
     public float nodMax = 12f;
 
-    public float walkWeight = 1f;
-    public float walkAuto;
-    public float walkMin = 45f;
-    public float walkMax = 100f;
-
     /** {@code out = lerp(a, b, t)} across the base pose and every tuning field. */
     public static void lerp(LeonStateProfile a, LeonStateProfile b, float t, LeonStateProfile out) {
         float k = Mathx.clamp01(t);
@@ -91,10 +86,6 @@ public final class LeonStateProfile {
         out.nodAuto = Mathx.lerp(a.nodAuto, b.nodAuto, k);
         out.nodMin = Mathx.lerp(a.nodMin, b.nodMin, k);
         out.nodMax = Mathx.lerp(a.nodMax, b.nodMax, k);
-        out.walkWeight = Mathx.lerp(a.walkWeight, b.walkWeight, k);
-        out.walkAuto = Mathx.lerp(a.walkAuto, b.walkAuto, k);
-        out.walkMin = Mathx.lerp(a.walkMin, b.walkMin, k);
-        out.walkMax = Mathx.lerp(a.walkMax, b.walkMax, k);
     }
 
     public LeonStateProfile copyFrom(LeonStateProfile other) {
@@ -108,10 +99,6 @@ public final class LeonStateProfile {
         LeonPose pose = p.basePose;
         switch (state) {
             case IDLE:
-                // Only IDLE wanders -- Leon should stay put and attentive in every other state.
-                p.walkAuto = 1f;
-                p.walkMin = 18f;
-                p.walkMax = 35f;
                 pose.set(LeonChannel.AURA, 0.18f);
                 pose.set(LeonChannel.EXPR_NEUTRAL, 1f);
                 pose.set(LeonChannel.ELBOW_L, 0.12f);
