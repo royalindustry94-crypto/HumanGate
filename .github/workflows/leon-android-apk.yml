@@ -127,6 +127,20 @@ jobs:
             --require-change ../app/build/reports/leon-preview/emulator-idle.png ../app/build/reports/leon-preview/emulator-chin.png 150 \
             --require-change ../app/build/reports/leon-preview/emulator-idle.png ../app/build/reports/leon-preview/emulator-head-left.png 100
 
+      - name: Publish Leon lock/unlock device checklist
+        run: |
+          {
+            echo "## Leon lock/unlock device checklist"
+            echo
+            echo "Run this on a real device before sign-off:"
+            echo "1. enable Leon"
+            echo "2. move him to a non-default position"
+            echo "3. lock the device"
+            echo "4. wait"
+            echo "5. unlock the device"
+            echo "6. verify Leon is visible automatically in the same position"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload emulator screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

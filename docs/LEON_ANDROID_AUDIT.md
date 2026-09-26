@@ -154,5 +154,11 @@ renderer are replaced.
   the shipped art is the product owner's call, not an engineering default.
 - **Nothing in this change has been run on a physical device by the author** —
   there is no device or emulator in the build environment. The device
-  acceptance checklist is in the pull request and must be walked through on
-  real hardware before the milestone is signed off.
+  acceptance checklist must be walked through on real hardware before the
+  milestone is signed off:
+  1. enable Leon;
+  2. move him to a non-default position;
+  3. lock the device;
+  4. wait;
+  5. unlock the device;
+  6. verify Leon is visible automatically in the same position.
