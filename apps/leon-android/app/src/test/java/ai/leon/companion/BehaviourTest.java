@@ -141,9 +141,14 @@ public class BehaviourTest {
         boolean sawBothSides = false;
         boolean sawPositive = false;
         boolean sawNegative = false;
+        // PostureBehaviour's own IDLE_SWAY_SCALE (0.2) shrank weightTarget's raw 0.35-0.85 draw down
+        // to 0.07-0.17, so 0.1 is no longer a safe margin below the guaranteed minimum -- it used to
+        // pass on every draw, now it depends on which extreme this fixed seed happens to land on
+        // (measured as low as 0.071 in this exact 30s window). 0.03 stays well under the smallest
+        // possible target (0.07) so this keeps testing "moved to both sides", not "got lucky".
         for (float v : extremes) {
-            if (v > 0.1f) sawPositive = true;
-            if (v < -0.1f) sawNegative = true;
+            if (v > 0.03f) sawPositive = true;
+            if (v < -0.03f) sawNegative = true;
         }
         sawBothSides = sawPositive && sawNegative;
         assertTrue("weight must travel to both sides, extremes " + extremes, sawBothSides);
