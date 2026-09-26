@@ -260,6 +260,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
                 windowManager.addView(host, params);
                 overlayLive = true;
                 blockedReason = null;
+                startAlwaysListeningIfEnabled();
             } catch (Exception e) {
                 // Nothing to work around here — report it and leave the user in control.
                 Log.e(TAG, "Window manager refused Leon's overlay", e);
@@ -317,12 +318,34 @@ public final class LeonOverlayService extends Service implements LeonStateContro
         savePosition();
     }
 
+    /**
+     * Turns on hands-free listening (see {@link ai.leon.companion.voice.LeonVoiceBackend
+     * #setAlwaysListening}) if the user opted in, whenever the overlay actually becomes visible.
+     * Never on its own initiative otherwise -- see {@link #stopAlwaysListening}.
+     */
+    private void startAlwaysListeningIfEnabled() {
+        if (!prefs.isAlwaysListeningEnabled()) return;
+        if (!runtime.voiceBackend().setAlwaysListening(true)) {
+            Log.w(TAG, "Hands-free listening could not start (mic unavailable)");
+        }
+    }
+
+    /**
+     * Releases the mic Leon may have opened for hands-free listening. Called whenever the overlay
+     * stops being visible (torn down, or the screen turns off) -- there is nothing on screen to
+     * listen for at that point, whatever the user's saved preference says.
+     */
+    private void stopAlwaysListening() {
+        runtime.voiceBackend().setAlwaysListening(false);
+    }
+
     private void teardownOverlay() {
         if (settleAnimator != null) {
             settleAnimator.cancel();
             settleAnimator = null;
         }
         dismissQuickControls();
+        stopAlwaysListening();
         overlayLive = false;
         overlayInitializing = false;
         if (host != null && windowManager != null) {
@@ -613,9 +636,11 @@ public final class LeonOverlayService extends Service implements LeonStateContro
             public void onReceive(Context context, Intent intent) {
                 String action = intent.getAction();
                 if (Intent.ACTION_SCREEN_OFF.equals(action)) {
-                    // Nothing is visible, so stop rendering entirely rather than drawing to nobody.
+                    // Nothing is visible, so stop rendering entirely rather than drawing to nobody,
+                    // and stop listening -- there is nothing on screen for the user to be talking to.
                     dismissQuickControls();
                     if (characterView != null) characterView.setPaused(true);
+                    stopAlwaysListening();
                     return;
                 }
                 if (Intent.ACTION_SCREEN_ON.equals(action) || Intent.ACTION_USER_PRESENT.equals(action)) {
@@ -745,6 +770,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
             // A blink on unlock reads as Leon waking up with the screen.
             animation.triggerBlink();
         }
+        startAlwaysListeningIfEnabled();
     }
 
     private boolean isScreenInteractive() {
