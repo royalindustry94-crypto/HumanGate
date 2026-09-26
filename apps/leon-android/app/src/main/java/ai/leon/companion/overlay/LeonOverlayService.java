@@ -8,6 +8,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.app.KeyguardManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -20,6 +21,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.GestureDetector;
@@ -146,19 +148,25 @@ public final class LeonOverlayService extends Service implements LeonStateContro
         registerScreenReceiver();
         runtime.states().addListener(this);
 
+        if (!prefs.isEnabled()) {
+            stopSelf();
+            return;
+        }
         if (!Settings.canDrawOverlays(this)) {
             blockedReason = "Display over other apps is not granted.";
             updateNotification();
             return;
         }
+        long now = System.currentTimeMillis();
         long hiddenUntil = prefs.hiddenUntilMillis();
-        if (hiddenUntil > System.currentTimeMillis()) {
-            scheduleUnhide(hiddenUntil - System.currentTimeMillis());
+        if (LeonOverlayRestorePolicy.isTemporarilyHidden(hiddenUntil, now)) {
+            scheduleUnhide(hiddenUntil - now);
             updateNotification();
             return;
         }
         prefs.setHiddenUntilMillis(0L);
-        showOverlay();
+        restoreOverlayIfEligible(now);
+        updateNotification();
     }
 
     @Override
@@ -187,15 +195,17 @@ public final class LeonOverlayService extends Service implements LeonStateContro
         // A sticky restart delivers a null intent. Only an explicit start means the user wants Leon
         // running; a restart must not re-enable him after he was stopped.
         if (intent != null) prefs.setEnabled(true);
+        if (!prefs.isEnabled()) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         if (ACTION_SHOW.equals(action)) {
             prefs.setHiddenUntilMillis(0L);
             handler.removeCallbacks(unhide);
         }
         if (Settings.canDrawOverlays(this)) {
             blockedReason = null;
-            if (host == null && prefs.hiddenUntilMillis() <= System.currentTimeMillis()) {
-                showOverlay();
-            }
+            restoreOverlayIfEligible(System.currentTimeMillis());
         } else {
             blockedReason = "Display over other apps is not granted.";
         }
@@ -572,7 +582,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
         @Override
         public void run() {
             prefs.setHiddenUntilMillis(0L);
-            if (Settings.canDrawOverlays(LeonOverlayService.this) && host == null) showOverlay();
+            restoreOverlayIfEligible(System.currentTimeMillis());
             updateNotification();
         }
     };
@@ -602,23 +612,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
                     return;
                 }
                 if (Intent.ACTION_SCREEN_ON.equals(action) || Intent.ACTION_USER_PRESENT.equals(action)) {
-                    if (!prefs.isEnabled()) return;
-                    if (prefs.hiddenUntilMillis() > System.currentTimeMillis()) return;
-                    if (host == null) {
-                        if (Settings.canDrawOverlays(LeonOverlayService.this)) showOverlay();
-                    } else {
-                        host.setVisibility(View.VISIBLE);
-                        if (characterView != null) {
-                            characterView.setPaused(false);
-                            if (animation != null) {
-                                // Restart the behaviour timers so intervals that elapsed with the
-                                // screen off do not all fire at once on the first visible frame.
-                                animation.resetBehaviours();
-                                // A blink on unlock reads as Leon waking up with the screen.
-                                animation.triggerBlink();
-                            }
-                        }
-                    }
+                    restoreOverlayIfEligible(System.currentTimeMillis());
                 }
             }
         };
@@ -712,6 +706,43 @@ public final class LeonOverlayService extends Service implements LeonStateContro
     private void updateNotification() {
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm != null) nm.notify(NOTIFICATION_ID, buildNotification());
+    }
+
+    private void restoreOverlayIfEligible(long nowMillis) {
+        if (!LeonOverlayRestorePolicy.shouldRestoreOverlay(
+                prefs.isEnabled(),
+                Settings.canDrawOverlays(this),
+                isScreenInteractive(),
+                isKeyguardLocked(),
+                prefs.hiddenUntilMillis(),
+                nowMillis)) {
+            return;
+        }
+        blockedReason = null;
+        if (host == null) {
+            showOverlay();
+            return;
+        }
+        host.setVisibility(View.VISIBLE);
+        if (characterView == null) return;
+        characterView.setPaused(false);
+        if (animation != null) {
+            // Restart the behaviour timers so intervals that elapsed with the
+            // screen off do not all fire at once on the first visible frame.
+            animation.resetBehaviours();
+            // A blink on unlock reads as Leon waking up with the screen.
+            animation.triggerBlink();
+        }
+    }
+
+    private boolean isScreenInteractive() {
+        PowerManager power = getSystemService(PowerManager.class);
+        return power == null || power.isInteractive();
+    }
+
+    private boolean isKeyguardLocked() {
+        KeyguardManager keyguard = getSystemService(KeyguardManager.class);
+        return keyguard != null && keyguard.isKeyguardLocked();
     }
 
     // ------------------------------------------------------------------ lifecycle
