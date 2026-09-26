@@ -99,3 +99,66 @@ outside the hip edge. `LeonMeshRig` bound skin by hard-coded `x` thresholds on a
   hand. So any per-vertex binding had to mis-bind either the hip or the hand. The
   earlier fixes changed weights and reduced animation amplitude. Neither can
   work at that resolution.
+
+## 7. Hip fix: what changed and how it was verified
+
+The fix is on `claude/leon-avatar-audit-79aywc` (commit `41d0c1e`).
+
+- The skinning boundary now follows the measured transparent gap between body
+  and arms (`LeonMeshRig.BODY_EDGE_*`). A test checks it against the generated
+  texture on every half design row from y=274 to y=446.
+- The production grid goes from 16x28 to 48x84 (one cell ≈ 8.6 design units).
+- `PostureBehaviour.IDLE_SWAY_SCALE = 0.2` is removed. It shrank idle sway to
+  hide the defect, and idle now runs at its original amplitude.
+- New metric: the length change of every mesh edge that runs through visible
+  pixels. The old tests measured vertex ratios that included the transparent
+  gap. They tolerated 7x and never detected the hip squeeze.
+
+| Case (visible pixels, worst edge ratio) | Before | After |
+|---|---|---|
+| Idle trajectory, hips/thighs (5 seeds) | 4.25 (15.6 in one pose) | < 1.05 |
+| `WEIGHT_SHIFT` ±1, hips | 3.75 | < 1.1 |
+| Arm swing, drag on hip/thigh | 5.5–7.0 | < 1.02 |
+| Idle + walk 120 s, hips | — | 1.63 |
+| Idle + walk 120 s, whole body | 162x+ (vertex metric, PR #188) | 3.3 |
+
+Mutation check: when the old `> 72` leg rule is restored, 6 of the 11 mesh
+tests fail.
+
+**Not verified:** a Gradle build, lint and the emulator matrix. `dl.google.com`
+is blocked in this sandbox, so all tests ran through `javac` + JUnit on the
+Android-free sources. CI run `36243088450` on `41d0c1e` is the first real build.
+No test has run on a real device.
+
+**Known residual:** at y≈424 the thumb comes within about 3 design units of the
+hip. That is narrower than one mesh cell, so one cell per side spans both the
+thumb and the hip. It smears by less than one cell width under large hand
+gestures.
+
+## 8. Open defects found and not yet fixed
+
+1. **Wrist and elbow pivots do not match the photo.** This is the systemic
+   cause of the wrist/hand-folding reports. `LeonRig` puts the elbow at design
+   (±70, 324) and the wrist at (±70, 424). Those positions came from the old
+   procedural figure. In the photo the elbow is at about (±103, 285) and the
+   wrist at about (±112, 355). The mesh's blend bands (270–300, 345–375) match
+   the photo. The bones rotate about points 40–70 units away from those bands.
+   A 12% idle elbow bend deforms visible upper-arm pixels by 1.55x, and
+   `HAND_R_RAISE=0.3` deforms the wrist by 1.41x. The earlier rotation clamps in
+   `LeonRigBinder` treat the symptom. The fix is to move the `FOREARM_*` and
+   `HAND_*` bone origins to the photo's joints, then re-derive those clamps.
+2. **Walking.** PR #188 (another active session) removes walking. On this
+   branch walking measures 3.3x at worst on visible pixels, and most of that
+   comes from item 1. The Founder has to choose: remove walking, or fix item 1
+   and keep it.
+3. **Upgrade path.** Nothing has changed yet: `release` still has no
+   `signingConfig`, and the local `versionCode` still defaults to 3. See §5.
+4. **Dead code** (§1). The layered-art render path is still in the tree:
+   about 1,700 lines across `LeonRenderer`, `LeonAssetRepository`,
+   `ProceduralLeonArt`, `AssetDirArtProvider`, `PhotoLayerArtProvider` and
+   `LeonArtProvider`. The `README` still describes procedural art as current.
+5. **Branding.** The source photo shows the Adidas trefoil and three stripes.
+   The PR #165 handoff said no brand logo ships. Whether this can ship is a
+   legal decision for the Founder.
+6. **Phase 4** (overlay lifecycle, touch pass-through, frame pacing, memory)
+   has not been audited yet.
