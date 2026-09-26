@@ -11,6 +11,8 @@ final class SourceContracts {
     static String file(String relative) throws Exception {
         File[] candidates = {
                 new File(relative),
+                new File("../" + relative),
+                new File("../../" + relative),
                 new File("apps/leon-android/" + relative),
                 new File("apps/leon-android/app/" + relative)
         };
