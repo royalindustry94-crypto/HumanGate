@@ -5,6 +5,8 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Rect;
 
+import ai.leon.companion.asset.PhotoAlignment;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -22,12 +24,41 @@ public final class ProductionLeonTexture implements AutoCloseable {
     private static final String MANIFEST_PATH = "leon/production/manifest.json";
 
     private final Bitmap bitmap;
+    private final Bitmap bodyLayer;
+    private final Bitmap armLayer;
     private final Manifest manifest;
     private boolean closed;
 
     private ProductionLeonTexture(Bitmap bitmap, Manifest manifest) {
         this.bitmap = bitmap;
         this.manifest = manifest;
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        int[] pixels = new int[width * height];
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+        int[] alpha = new int[pixels.length];
+        for (int i = 0; i < pixels.length; i++) alpha[i] = pixels[i] >>> 24;
+        PhotoAlignment alignment =
+                PhotoAlignment.fromLandmarks(manifest.crownY, manifest.soleY, manifest.centreX);
+        boolean[] arm = LeonLayerMask.armTexels(alpha, width, height, alignment);
+        this.bodyLayer = layerOf(pixels, width, height, arm, alignment, LeonMeshRig.Layer.BODY);
+        this.armLayer = layerOf(pixels, width, height, arm, alignment, LeonMeshRig.Layer.ARMS);
+    }
+
+    /**
+     * A copy of the texture keeping only the texels {@link LeonLayerMask} assigns to {@code layer};
+     * the rest is fully transparent. Done once at load, so the two meshes never share a triangle
+     * across the gap between arms and hips.
+     */
+    private static Bitmap layerOf(int[] source, int width, int height, boolean[] arm,
+                                  PhotoAlignment alignment, LeonMeshRig.Layer layer) {
+        int[] pixels = source.clone();
+        for (int t = 0; t < pixels.length; t++) {
+            if (!LeonLayerMask.covers(layer, arm, t, width, alignment)) pixels[t] = 0;
+        }
+        Bitmap out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        out.setPixels(pixels, 0, width, 0, 0, width, height);
+        return out;
     }
 
     public static ProductionLeonTexture load(Context context) {
@@ -69,6 +100,18 @@ public final class ProductionLeonTexture implements AutoCloseable {
         return bitmap;
     }
 
+    /** Torso, head, shoulders, hips and legs: everything the arm layer does not hold. */
+    public Bitmap bodyLayer() {
+        ensureOpen();
+        return bodyLayer;
+    }
+
+    /** The hanging arms and hands below the armpit, drawn over the body layer. */
+    public Bitmap armLayer() {
+        ensureOpen();
+        return armLayer;
+    }
+
     public Manifest manifest() {
         ensureOpen();
         return manifest;
@@ -93,6 +136,8 @@ public final class ProductionLeonTexture implements AutoCloseable {
     public void close() {
         closed = true;
         if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+        if (bodyLayer != null && !bodyLayer.isRecycled()) bodyLayer.recycle();
+        if (armLayer != null && !armLayer.isRecycled()) armLayer.recycle();
     }
 
     private void ensureOpen() {

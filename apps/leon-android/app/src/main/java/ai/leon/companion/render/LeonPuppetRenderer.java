@@ -1,5 +1,6 @@
 package ai.leon.companion.render;
 
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
@@ -12,14 +13,16 @@ import ai.leon.companion.rig.Rig;
 /**
  * Production renderer for Leon's single continuous full-body texture.
  *
- * <p>The renderer never resolves per-part artwork. The solved skeleton drives a weighted mesh and
- * Android deforms the one real Leon bitmap with {@link Canvas#drawBitmapMesh}. That keeps the rest
- * pose continuous and prevents detached facial pieces, duplicated jewellery and body seams.
+ * <p>The renderer never resolves per-part artwork. The solved skeleton drives two weighted meshes
+ * over the one real Leon photo, split into a body layer and an arm layer (see
+ * {@link LeonMeshRig.Layer}), and Android deforms each with {@link Canvas#drawBitmapMesh}. The rest
+ * pose is pixel-identical to the photo, and no triangle ever joins a hand to a hip.
  */
 public final class LeonPuppetRenderer {
     private final Rig rig;
     private final ProductionLeonTexture texture;
     private final LeonMeshRig mesh;
+    private final LeonMeshRig armMesh;
 
     private final Matrix viewMatrix = new Matrix();
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
@@ -34,7 +37,8 @@ public final class LeonPuppetRenderer {
         }
         this.rig = rig;
         this.texture = texture;
-        this.mesh = LeonMeshRig.create(rig, texture.manifest());
+        this.mesh = LeonMeshRig.create(rig, texture.manifest(), LeonMeshRig.Layer.BODY);
+        this.armMesh = LeonMeshRig.create(rig, texture.manifest(), LeonMeshRig.Layer.ARMS);
 
         debugBonePaint.setStyle(Paint.Style.STROKE);
         debugBonePaint.setStrokeWidth(2f);
@@ -67,20 +71,20 @@ public final class LeonPuppetRenderer {
 
     public void draw(Canvas canvas) {
         mesh.updateFromSolvedRig();
+        armMesh.updateFromSolvedRig();
 
         int save = canvas.save();
         canvas.concat(viewMatrix);
-        canvas.drawBitmapMesh(
-                texture.bitmap(),
-                mesh.meshCols(),
-                mesh.meshRows(),
-                mesh.deformedVertices(),
-                0,
-                null,
-                0,
-                paint);
+        // Body first, arms on top: a hand swinging inwards passes in front of the hip.
+        drawLayer(canvas, texture.bodyLayer(), mesh);
+        drawLayer(canvas, texture.armLayer(), armMesh);
         if (showRigDebug) drawSkeleton(canvas);
         canvas.restoreToCount(save);
+    }
+
+    private void drawLayer(Canvas canvas, Bitmap layer, LeonMeshRig layerMesh) {
+        canvas.drawBitmapMesh(layer, layerMesh.meshCols(), layerMesh.meshRows(),
+                layerMesh.deformedVertices(), 0, null, 0, paint);
     }
 
     private void drawSkeleton(Canvas canvas) {

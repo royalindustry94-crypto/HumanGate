@@ -1,5 +1,7 @@
 package ai.leon.companion;
 
+import ai.leon.companion.asset.PhotoAlignment;
+import ai.leon.companion.render.LeonLayerMask;
 import ai.leon.companion.render.LeonMeshRig;
 
 import java.io.ByteArrayOutputStream;
@@ -29,10 +31,34 @@ final class LeonTextureMask {
     /** Alpha channel only, row-major. */
     private final byte[] alpha;
 
+    private final PhotoAlignment alignment = PhotoAlignment.fromLandmarks(20f, 619f, 180f);
+    /** The production layer split, computed by the same code the renderer runs. */
+    final boolean[] arm;
+
     private LeonTextureMask(int width, int height, byte[] alpha) {
         this.width = width;
         this.height = height;
         this.alpha = alpha;
+        int[] a = new int[alpha.length];
+        for (int i = 0; i < a.length; i++) a[i] = alpha[i] & 0xff;
+        this.arm = LeonLayerMask.armTexels(a, width, height, alignment);
+    }
+
+    /** Texel under design point (x, y), or -1 off the texture. */
+    int texelAt(float x, float y) {
+        int px = (int) Math.floor(ORIGIN_X + x * SCALE);
+        int py = (int) Math.floor(ORIGIN_Y + y * SCALE);
+        if (px < 0 || py < 0 || px >= width || py >= height) return -1;
+        return py * width + px;
+    }
+
+    boolean anyAlpha(int t) {
+        return alpha[t] != 0;
+    }
+
+    boolean layerDraws(LeonMeshRig.Layer layer, float x, float y) {
+        int t = texelAt(x, y);
+        return t >= 0 && LeonLayerMask.covers(layer, arm, t, width, alignment);
     }
 
     static LeonTextureMask load() throws IOException {
@@ -55,23 +81,25 @@ final class LeonTextureMask {
         return (alpha[py * width + px] & 0xff) >= 128;
     }
 
-    /** Fraction of opaque samples along the rest-pose segment between two canonical vertices. */
-    float opacityAlong(float[] canon, int i0, int i1) {
+    /**
+     * Fraction of samples along the rest-pose segment between two canonical vertices that are
+     * visible pixels drawn by {@code layer}.
+     */
+    float opacityAlong(float[] canon, int i0, int i1, LeonMeshRig.Layer layer) {
         int on = 0;
         for (int s = 0; s <= 8; s++) {
             float t = s / 8f;
             float x = canon[i0 * 2] + t * (canon[i1 * 2] - canon[i0 * 2]);
             float y = canon[i0 * 2 + 1] + t * (canon[i1 * 2 + 1] - canon[i0 * 2 + 1]);
-            if (opaqueAtDesign(x, y)) on++;
+            if (opaqueAtDesign(x, y) && layerDraws(layer, x, y)) on++;
         }
         return on / 9f;
     }
 
     /**
-     * Worst stretch-or-compression ratio over every mesh edge (horizontal and vertical) that runs
-     * mostly through visible pixels, skipping only edges that straddle the body/arm boundary: those
-     * connect two independently moving parts, so their length change is the gap between the parts
-     * opening or closing, not a deformation of either.
+     * Worst stretch-or-compression ratio over every mesh edge (horizontal and vertical) of this
+     * layer that runs mostly through pixels the layer actually draws. No edge is exempt: an earlier
+     * version skipped edges crossing the body/arm boundary, which hid hands tearing across the hip.
      */
     float worstOpaqueEdgeRatio(LeonMeshRig mesh, float yLo, float yHi) {
         float[] canon = mesh.canonicalVertices();
@@ -79,7 +107,6 @@ final class LeonTextureMask {
         int cols = mesh.meshCols();
         int rows = mesh.meshRows();
         float worst = 1f;
-        int checked = 0;
         for (int row = 0; row <= rows; row++) {
             for (int col = 0; col <= cols; col++) {
                 int i0 = row * (cols + 1) + col;
@@ -89,27 +116,15 @@ final class LeonTextureMask {
                     int i1 = dir == 0 ? i0 + 1 : i0 + cols + 1;
                     float y = Math.min(canon[i0 * 2 + 1], canon[i1 * 2 + 1]);
                     if (y < yLo || y > yHi) continue;
-                    if (straddlesBodyEdge(canon, i0, i1)) continue;
-                    if (opacityAlong(canon, i0, i1) < 0.5f) continue;
+                    if (opacityAlong(canon, i0, i1, mesh.layer()) < 0.5f) continue;
                     float rest = distance(canon, i0, i1);
                     float now = distance(deformed, i0, i1);
                     float ratio = now / rest;
                     worst = Math.max(worst, Math.max(ratio, 1f / ratio));
-                    checked++;
                 }
             }
         }
-        if (checked < 20) throw new AssertionError("too few opaque edges in [" + yLo + "," + yHi + "]");
         return worst;
-    }
-
-    static boolean straddlesBodyEdge(float[] canon, int i0, int i1) {
-        float y0 = canon[i0 * 2 + 1];
-        float y1 = canon[i1 * 2 + 1];
-        if (Math.max(y0, y1) < 262f || Math.min(y0, y1) > 446f) return false;
-        boolean in0 = Math.abs(canon[i0 * 2] - 192f) <= LeonMeshRig.bodyEdgeHalfWidth(y0);
-        boolean in1 = Math.abs(canon[i1 * 2] - 192f) <= LeonMeshRig.bodyEdgeHalfWidth(y1);
-        return in0 != in1;
     }
 
     private static float distance(float[] v, int i0, int i1) {

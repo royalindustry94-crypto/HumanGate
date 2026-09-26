@@ -65,14 +65,29 @@ public final class LeonMeshRig {
     private static final float ARMPIT_Y = 262f;
     private static final float GAP_OPEN_Y = 274f;
     /**
-     * The hands end at y~446. Everything beyond the body edge down to here is the hand. Below it
-     * there is nothing but transparent space beside the legs, which is bound to the leg chain. The
-     * hand-to-leg switch therefore happens in a fully transparent row, so a raised hand never drags
-     * a visible sliver of itself toward the thigh.
+     * Leon is drawn as two meshes over the same texture, body first and arms on top, and no
+     * triangle connects them. Below the armpit the hanging arms are separated from the torso and
+     * hips by a transparent gap only 3-12 design units wide, narrower than a mesh cell. In a single
+     * mesh the cells spanning that gap tie arm vertices to hip vertices, so any arm motion (even
+     * IDLE's 12% elbow bend swings the hand ~20 units inwards) either dragged and squeezed the
+     * outer hip and thigh or, bound the other way, tore the hand into slivers across the hip.
+     * With two layers each visible pixel follows only its own bones: hips and legs never move with
+     * a hand, and a hand swinging over the hip simply passes in front of it.
+     *
+     * Above SHARED_SKIN_END_Y both layers use the same blended skinning (the sleeve is one piece of
+     * cloth with the shoulder), so the cut through the sleeve at ARM_LAYER_TOP_Y is seamless. The
+     * arm layer starts ARM_LAYER_OVERLAP units above the cut so filtering at the cut never leaves a
+     * half-transparent line; both layers draw those pixels at identical positions.
      */
-    private static final float HAND_CLEAR_Y = 462f;
+    public enum Layer { BODY, ARMS }
+
+    public static final float ARM_LAYER_TOP_Y = 283f;
+    public static final float ARM_LAYER_OVERLAP = 2f;
+    /** One mesh cell below the cut, so no cell holding cut-line pixels changes binding. */
+    private static final float SHARED_SKIN_END_Y = 292f;
 
     private final Rig rig;
+    private final Layer layer;
     private final int meshCols;
     private final int meshRows;
     private final float[] canonicalVertices;
@@ -98,12 +113,14 @@ public final class LeonMeshRig {
     private final Binding shinR;
     private final Binding footR;
 
-    private LeonMeshRig(Rig rig, int cols, int rows,
+    private LeonMeshRig(Rig rig, Layer layer, int cols, int rows,
                         int sourceWidth, int sourceHeight,
                         float crownY, float soleY, float centreX) {
         if (rig == null) throw new IllegalArgumentException("rig required");
+        if (layer == null) throw new IllegalArgumentException("layer required");
         if (cols <= 0 || rows <= 0) throw new IllegalArgumentException("mesh size must be positive");
         this.rig = rig;
+        this.layer = layer;
         this.meshCols = cols;
         this.meshRows = rows;
 
@@ -152,9 +169,9 @@ public final class LeonMeshRig {
         }
     }
 
-    public static LeonMeshRig create(Rig rig, ProductionLeonTexture.Manifest manifest) {
+    public static LeonMeshRig create(Rig rig, ProductionLeonTexture.Manifest manifest, Layer layer) {
         if (manifest == null) throw new IllegalArgumentException("manifest required");
-        return new LeonMeshRig(rig, manifest.meshCols, manifest.meshRows,
+        return new LeonMeshRig(rig, layer, manifest.meshCols, manifest.meshRows,
                 manifest.sourceWidth, manifest.sourceHeight,
                 manifest.crownY, manifest.soleY, manifest.centreX);
     }
@@ -173,9 +190,18 @@ public final class LeonMeshRig {
      * authored in this 360x640 canvas space (soleY=619 sits near the bottom of a 640-tall canvas).
      */
     public static LeonMeshRig createForTest(int cols, int rows) {
-        return new LeonMeshRig(LeonRig.build(), cols, rows,
-                360, 640, 20f, 619f, 180f);
+        return createForTest(LeonRig.build(), cols, rows, Layer.BODY);
     }
+
+    /** Same production geometry for one layer; pass the same rig to both layers to pose them together. */
+    public static LeonMeshRig createForTest(Rig rig, int cols, int rows, Layer layer) {
+        return new LeonMeshRig(rig, layer, cols, rows, 360, 640, 20f, 619f, 180f);
+    }
+
+    public Layer layer() {
+        return layer;
+    }
+
 
     /** Exposed for tests that need to drive a pose through {@code LeonRigBinder} on this exact rig. */
     public Rig rig() {
@@ -253,21 +279,21 @@ public final class LeonMeshRig {
 
         float side = Math.abs(x - DESIGN_CENTRE_X);
         boolean left = x < DESIGN_CENTRE_X;
-        if (y < 395f) {
-            float edge = bodyEdgeHalfWidth(y);
-            float half = y <= ARMPIT_Y ? SHOULDER_BLEND_HALF_WIDTH
-                    : y >= GAP_OPEN_Y ? GAP_BLEND_HALF_WIDTH
-                    : SHOULDER_BLEND_HALF_WIDTH + (GAP_BLEND_HALF_WIDTH - SHOULDER_BLEND_HALF_WIDTH)
-                            * ((y - ARMPIT_Y) / (GAP_OPEN_Y - ARMPIT_Y));
-            if (side <= edge - half) return centerWeightsFor(y);
-            VertexWeights limb = sideWeightsFor(y, left);
-            if (side >= edge + half) return limb;
-            float t = smooth((side - (edge - half)) / (2f * half));
-            return blend(centerWeightsFor(y), 1f - t, limb, t);
+        if (y >= SHARED_SKIN_END_Y) {
+            // Below the armpit each layer follows only its own chain, wherever the vertex is.
+            if (layer == Layer.ARMS) return sideWeightsFor(y, left);
+            return y < 395f ? centerWeightsFor(y) : legWeightsFor(y, left);
         }
-
-        if (y < HAND_CLEAR_Y && side > bodyEdgeHalfWidth(y)) return one(left ? handL : handR);
-        return legWeightsFor(y, left);
+        float edge = bodyEdgeHalfWidth(y);
+        float half = y <= ARMPIT_Y ? SHOULDER_BLEND_HALF_WIDTH
+                : y >= GAP_OPEN_Y ? GAP_BLEND_HALF_WIDTH
+                : SHOULDER_BLEND_HALF_WIDTH + (GAP_BLEND_HALF_WIDTH - SHOULDER_BLEND_HALF_WIDTH)
+                        * ((y - ARMPIT_Y) / (GAP_OPEN_Y - ARMPIT_Y));
+        if (side <= edge - half) return centerWeightsFor(y);
+        VertexWeights limb = sideWeightsFor(y, left);
+        if (side >= edge + half) return limb;
+        float t = smooth((side - (edge - half)) / (2f * half));
+        return blend(centerWeightsFor(y), 1f - t, limb, t);
     }
 
     /** Body/arm boundary half-width at design row y (see BODY_EDGE_*). */
