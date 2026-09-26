@@ -501,3 +501,15 @@ async def test_the_received_audio_shape_is_logged_without_its_content(monkeypatc
     assert _APP_TOKEN not in logged
     assert "my private words" not in logged
     assert wav[12:40].hex() not in logged
+
+
+def test_the_system_prompt_carries_leons_persona_without_looking_like_a_transcript():
+    prompt = lv.LEON_SYSTEM_PROMPT
+    assert "Leon Rico" in prompt
+    assert "hustler" in prompt.lower()
+    assert "app" in prompt.lower()
+    assert "positive" in prompt.lower() and "encouraging" in prompt.lower()
+    # The style is described, not spelled out phonetically -- a caricature written into the
+    # prompt would show up in every reply. No literal broken-English respelling anywhere.
+    for word in ("dat", "gon'", "finna", "yo momma"):
+        assert word not in prompt.lower()

@@ -21,6 +21,7 @@ public final class LeonPrefs {
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_HIDDEN_UNTIL = "hidden_until";
     private static final String KEY_RIG_DEBUG = "rig_debug";
+    private static final String KEY_ALWAYS_LISTENING = "always_listening";
     private static final String KEY_VOICE_BASE_URL = "voice_base_url";
     // Legacy plaintext key, kept only so an existing install can be migrated once into
     // LeonSecureTokenStore's Keystore-encrypted, backup-excluded storage -- see
@@ -111,6 +112,20 @@ public final class LeonPrefs {
 
     public void setRigDebugEnabled(boolean enabled) {
         prefs.edit().putBoolean(KEY_RIG_DEBUG, enabled).apply();
+    }
+
+    /**
+     * Whether Leon should listen for speech on his own, without a hold-to-talk press, whenever he
+     * is on screen. Off by default: it opens the mic continuously while the overlay is showing,
+     * which is a real battery and privacy cost the user should turn on deliberately rather than
+     * discover after the fact.
+     */
+    public boolean isAlwaysListeningEnabled() {
+        return prefs.getBoolean(KEY_ALWAYS_LISTENING, false);
+    }
+
+    public void setAlwaysListeningEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_ALWAYS_LISTENING, enabled).apply();
     }
 
     /** Base URL of the deployed voice backend (apps/api), e.g. https://your-app.vercel.app. */
