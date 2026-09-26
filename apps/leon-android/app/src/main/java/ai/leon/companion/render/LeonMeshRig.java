@@ -17,32 +17,36 @@ import ai.leon.companion.rig.Rig;
  */
 public final class LeonMeshRig {
     private static final float DESIGN_CENTRE_X = LeonRig.DESIGN_W * 0.5f;
-    // Column-direction blend margin around the side>72 torso/limb boundary (see weightsFor). The
-    // mesh's column pitch here is ~26 design units (16 columns across the ~415-unit design width),
-    // so a symmetric 30px margin blends across a little more than one column on each side -- a
-    // narrower 20px margin measurably reduced the hip/hand pinch this fixes but did not remove it
-    // (worst adjacent-column stretch ratio 1.20 vs 30px's 1.16, against the unblended original's
-    // 1.28), the same trade-off already tuned for the row-direction joint blends elsewhere in this
-    // file (see sideWeightsFor's own 30px-margin comment).
-    private static final float COLUMN_BLEND_MARGIN = 30f;
+    // Column-direction blend margin around the side>72 torso/limb boundary (see weightsFor).
+    // COLUMN_BLEND_START must stay >= 0 -- a margin past 72 makes it negative, which would make the
+    // "side <= COLUMN_BLEND_START" pure-center case unreachable and let the exact chest centerline
+    // itself pick up arm-bone weight, the same kind of false attachment this file's other fixes
+    // exist to avoid. 72 is therefore the largest valid margin (COLUMN_BLEND_START == 0: the
+    // centerline is still exactly 0% limb-bound, but nothing beyond it is ever purely center-bound
+    // either). It has to be this wide: PostureBehaviour's idle sway isn't just WEIGHT_SHIFT's own
+    // hip motion -- its independent shoulder noise (SHOULDER_L/R, and the same noise's separate
+    // contribution to ARM_*_SWING) stretches this seam on its own, and a Codex review of an earlier,
+    // narrower-margin version of this fix caught that a sweep covering only WEIGHT_SHIFT (not
+    // shoulder noise too) had measured a false-clean result. Swept together with HIP_FOLLOW_* below
+    // against PostureBehaviour's real range (WEIGHT_SHIFT to +-0.85, shoulder noise to +-1 in every
+    // sign combination, since both vary independently and the worst case is when they align):
+    // worst ratio here is 1.23, measured, not assumed.
+    private static final float COLUMN_BLEND_MARGIN = 72f;
     private static final float COLUMN_BLEND_START = 72f - COLUMN_BLEND_MARGIN;
     private static final float COLUMN_BLEND_END = 72f + COLUMN_BLEND_MARGIN;
     // See legSideFadeWeightsFor: a small, distance-decaying pull toward the hips bone for the
-    // dangling-hand columns closest to the torso. Chosen by sweeping both constants together
-    // against PostureBehaviour's real idle amplitude range (WEIGHT_SHIFT up to +-0.85, paired with
-    // its real ARM_*_SWING coupling -- see that constant's own comment) and measuring the worst
-    // adjacent-column seam ratio in the hip/hand-fade band: a fade of just one column (30) plateaus
-    // around 1.56 no matter how much weight is added (a wider fade sharing the pull across two
-    // columns, not more pull on one column, is what actually moves it), while weight alone above
-    // ~0.6 makes it worse again (over-pulling this column away from the next one out, legSide>117,
-    // which gets none). 45/0.55 was the combination that, alongside reducing ARM_*_SWING's own
-    // coupling fraction, brought the worst ratio across the full range under this file's other
-    // seam thresholds (1.20 here, 1.18 on the torso/limb boundary above -- both measured, not
-    // assumed, since that boundary's own regression test had only ever checked +-0.5, not the
-    // +-0.85 PostureBehaviour actually uses).
+    // dangling-hand columns closest to the torso -- anchoring them partly to the torso's own sway
+    // reduces how far they diverge from the immediately-adjacent hip/thigh column, whatever is
+    // making the hand move (WEIGHT_SHIFT-coupled arm swing or independent shoulder noise, see
+    // COLUMN_BLEND_MARGIN's own comment for why both matter). HIP_FOLLOW_MAX_WEIGHT is deliberately
+    // 1.0, not higher: the blend fraction is min(hipT,1)*MAX_WEIGHT, so anything above 1.0 would let
+    // the closest column's own weight exceed 1 and go net-negative on the hand/root side of its
+    // blend -- an extrapolation past the two positions being blended, not an interpolation between
+    // them. Swept together with COLUMN_BLEND_MARGIN against the same full real range described
+    // there: worst ratio here is 1.23, measured.
     private static final float HIP_FOLLOW_BLEND_START = 72f;
-    private static final float HIP_FOLLOW_BLEND_RANGE = 45f;
-    private static final float HIP_FOLLOW_MAX_WEIGHT = 0.55f;
+    private static final float HIP_FOLLOW_BLEND_RANGE = 150f;
+    private static final float HIP_FOLLOW_MAX_WEIGHT = 1.0f;
 
     private final Rig rig;
     private final int meshCols;
