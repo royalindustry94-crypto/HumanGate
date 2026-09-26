@@ -12,8 +12,9 @@ public class SourceContractsTest {
     @Test
     public void fileWalksUpwardToRepositoryRootMarkers() throws Exception {
         Path repoRoot = Files.createTempDirectory("source-contracts-repo");
+        Files.createDirectories(repoRoot.resolve(".git"));
         Files.createDirectories(repoRoot.resolve(".github/workflows"));
-        Files.createDirectories(repoRoot.resolve("apps/leon-android"));
+        Files.createDirectories(repoRoot.resolve("apps/leon-android/app"));
         Path target = repoRoot.resolve("docs/LEON_ANDROID_AUDIT.md");
         Files.createDirectories(target.getParent());
         Files.write(target, "lock/unlock checklist".getBytes(StandardCharsets.UTF_8));
@@ -29,8 +30,9 @@ public class SourceContractsTest {
     @Test
     public void fileFailureIncludesUserDirAndAttemptedPaths() throws Exception {
         Path repoRoot = Files.createTempDirectory("source-contracts-missing");
+        Files.createDirectories(repoRoot.resolve(".git"));
         Files.createDirectories(repoRoot.resolve(".github"));
-        Files.createDirectories(repoRoot.resolve("apps/leon-android"));
+        Files.createDirectories(repoRoot.resolve("apps/leon-android/app"));
         Path workingDir = repoRoot.resolve(
                 "apps/leon-android/app/build/generated/tmp/unit/test/debug/out/classes/java/test");
         Files.createDirectories(workingDir);

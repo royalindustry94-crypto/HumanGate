@@ -83,7 +83,8 @@ final class SourceContracts {
     }
 
     private static boolean looksLikeRepositoryRoot(File directory) {
-        return new File(directory, ".github").isDirectory()
-                && new File(directory, "apps/leon-android").isDirectory();
+        return new File(directory, ".git").exists()
+                || (new File(directory, ".github").isDirectory()
+                && new File(directory, "apps/leon-android/app").isDirectory());
     }
 }
