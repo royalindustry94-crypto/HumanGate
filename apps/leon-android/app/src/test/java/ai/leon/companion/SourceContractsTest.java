@@ -18,7 +18,8 @@ public class SourceContractsTest {
         Files.createDirectories(target.getParent());
         Files.write(target, "lock/unlock checklist".getBytes(StandardCharsets.UTF_8));
 
-        Path workingDir = repoRoot.resolve("apps/leon-android/app/build/tmp/testDebugUnitTest");
+        Path workingDir = repoRoot.resolve(
+                "apps/leon-android/app/build/generated/tmp/unit/test/debug/out/classes/java/test");
         Files.createDirectories(workingDir);
 
         assertEquals("lock/unlock checklist",
@@ -30,7 +31,8 @@ public class SourceContractsTest {
         Path repoRoot = Files.createTempDirectory("source-contracts-missing");
         Files.createDirectories(repoRoot.resolve(".github"));
         Files.createDirectories(repoRoot.resolve("apps/leon-android"));
-        Path workingDir = repoRoot.resolve("apps/leon-android/app/build/tmp/testDebugUnitTest");
+        Path workingDir = repoRoot.resolve(
+                "apps/leon-android/app/build/generated/tmp/unit/test/debug/out/classes/java/test");
         Files.createDirectories(workingDir);
 
         try {

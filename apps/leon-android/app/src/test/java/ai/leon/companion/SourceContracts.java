@@ -9,8 +9,6 @@ import java.util.List;
 import java.util.Set;
 
 final class SourceContracts {
-    private static final int REPO_ROOT_SEARCH_DEPTH = 8;
-
     private SourceContracts() {
     }
 
@@ -32,7 +30,7 @@ final class SourceContracts {
         addCandidate(candidates, new File(startDirectory, "apps/leon-android/app/" + relative));
 
         File current = startDirectory.getAbsoluteFile();
-        for (int depth = 0; current != null && depth <= REPO_ROOT_SEARCH_DEPTH; depth++) {
+        while (current != null) {
             addCandidate(candidates, new File(current, relative));
             if (looksLikeRepositoryRoot(current)) {
                 break;
