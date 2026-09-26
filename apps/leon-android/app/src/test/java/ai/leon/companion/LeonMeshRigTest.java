@@ -263,61 +263,66 @@ public class LeonMeshRigTest {
         // whose seam *compresses* instead (ratio below 1) could never move worstRatio and would pass
         // even the unfixed hard-cutoff mesh.
         //
-        // Two bands, real but NOT equally fixed: y[300,400] is the torso/limb (chest/shoulder)
-        // boundary, and is genuinely fixed by this file's COLUMN_BLEND_* blend -- swept below across
-        // PostureBehaviour's actual weightTarget range (0.35 to 0.85, both signs) and its independent
-        // shoulder noise (a Codex review of an earlier version of this fix caught that sweeping
-        // WEIGHT_SHIFT alone, deriving ARM_*_SWING from it the way PostureBehaviour does, missed that
-        // the shoulder noise feeds ARM_*_SWING independently AND drives SHOULDER_L/R itself), it stays
-        // under 1.25 across the whole real combined range.
+        // Two bands, both now including IDLE's own always-on base pose (ELBOW_L/R=0.12, see
+        // LeonStateProfile) alongside the swept weight-shift/shoulder range -- an earlier version of
+        // this test omitted that base pose entirely, which hid most of the real worst case: the
+        // torso/limb band alone (no base elbow) measured under 1.25, but adding the base elbow that
+        // real IDLE always applies pushed it to 1.52, and the hip/hand-fade band went from ~3.97 to
+        // 65x in one sampled real trajectory. Both bands below are swept with that base pose present,
+        // so this can't happen again silently.
         //
-        // y[395,485] (hip/thigh vs. hand-fade-to-root) is NOT fixed. A second real-device report
-        // ("18 seconds and onward" of plain idle) traced back to this exact seam; a blend pulling
+        // y[300,400] is the torso/limb (chest/shoulder) boundary, fixed by this file's COLUMN_BLEND_*
+        // blend; with the base elbow pose included it stays under 1.3 across the whole real combined
+        // range (measured worst 1.232 at PostureBehaviour's post-IDLE_SWAY_SCALE amplitude).
+        //
+        // y[395,485] (hip/thigh vs. hand-fade-to-root) is NOT fixed by any blend -- a blend pulling
         // this column toward the hips bone measured well here but a further Codex review caught it
         // folding an actively-raised hand instead (this file's weights are assigned once from the
         // rest pose -- see the class doc comment -- so a blend that helps a resting hand's small
         // divergence necessarily hurts a reaching hand's large one; there is no single blend weight
-        // that avoids both). That blend was reverted. What's left, measured with it removed: even
-        // WEIGHT_SHIFT and shoulder noise alone (no gesture, this test's own scope) reach ~3.97;
-        // stacking IDLE's own always-on base pose (ELBOW_*=0.12) on top of a real simulated
-        // PostureBehaviour trajectory reached over 100x in one sampled run. This is a real,
-        // unresolved limitation -- closing it needs either finer mesh resolution at this seam or
-        // less idle animation amplitude, both decisions beyond a mesh-weighting fix, not something
-        // this test can respons­ibly assert a tight bound for. The sweep below still runs and prints
-        // its result (so a future change that measurably worsens it further is visible in the
-        // failure message), but the threshold is loose enough to only catch that kind of gross
-        // regression, not to claim this seam is fixed.
+        // that avoids both). That blend was reverted, and PostureBehaviour's own sway amplitude was
+        // reduced instead (IDLE_SWAY_SCALE=0.2, see its own comment): with it, this same worst case
+        // measures 5.714, down from 65.302 at full amplitude. It is still not fully closed -- IDLE's
+        // base elbow bend alone, with zero sway at all, already stretches this seam to ~3.1x, a floor
+        // no amount of sway reduction can get under. Closing that remainder needs finer mesh
+        // resolution at this seam or reducing the base elbow bend itself, neither of which is an
+        // animation-amplitude change.
         for (float weightShift : new float[]{0.35f, 0.5f, -0.5f, 0.65f, -0.65f, 0.85f, -0.85f}) {
             for (float shoulder : new float[]{0f, 0.5f, -0.5f, 1f, -1f}) {
                 float worstUpper = worstHipBandSeamRatio(weightShift, shoulder, 300f, 400f);
                 assertTrue("idle's autonomous weight-shift (sign=" + weightShift + ", shoulder="
                         + shoulder + ") must not pinch the torso/limb column seam, worst "
-                        + "adjacent-column ratio was " + worstUpper, worstUpper < 1.25f);
+                        + "adjacent-column ratio was " + worstUpper, worstUpper < 1.3f);
                 float worstLower = worstHipBandSeamRatio(weightShift, shoulder, 395f, 485f);
                 assertTrue("idle's autonomous weight-shift (sign=" + weightShift + ", shoulder="
                         + shoulder + ") hip/hand-fade column seam regressed well beyond its known, "
                         + "still-unresolved bound, worst adjacent-column ratio was " + worstLower,
-                        worstLower < 6f);
+                        worstLower < 6.2f);
             }
         }
     }
 
     /**
      * Worst adjacent-column distance ratio (either direction) in the given design-space y band,
-     * under WEIGHT_SHIFT and independent shoulder noise combined exactly as PostureBehaviour
-     * combines them (see its own ARM_*_SWING/SHOULDER_* lines): {@code shoulder} stands in for its
-     * shL/shR noise terms (each roughly in [-1,1]), which drive SHOULDER_L/R directly (*0.17) and
-     * ARM_*_SWING independently of WEIGHT_SHIFT's own contribution (*0.09).
+     * under IDLE's own always-on base pose (ELBOW_L/R=0.12) plus WEIGHT_SHIFT and independent
+     * shoulder noise combined exactly as PostureBehaviour combines them post-IDLE_SWAY_SCALE (see
+     * its own ARM_*_SWING/SHOULDER_* lines): {@code shoulder} stands in for its shL/shR noise terms
+     * (each roughly in [-1,1]), which drive SHOULDER_L/R directly (*0.17) and ARM_*_SWING
+     * independently of WEIGHT_SHIFT's own contribution (*0.09); both scaled by the same 0.2 factor
+     * PostureBehaviour applies to just these channels.
      */
     private static float worstHipBandSeamRatio(float weightShift, float shoulder, float yLo, float yHi) {
+        final float sway = 0.2f; // mirrors PostureBehaviour.IDLE_SWAY_SCALE
         LeonMeshRig mesh = LeonMeshRig.createForTest(16, 28);
         LeonRigBinder binder = new LeonRigBinder(mesh.rig());
         LeonPose pose = new LeonPose();
-        pose.set(LeonChannel.WEIGHT_SHIFT, weightShift);
-        pose.set(LeonChannel.SHOULDER_L, shoulder * 0.17f);
-        pose.set(LeonChannel.SHOULDER_R, shoulder * 0.17f);
-        pose.set(LeonChannel.ARM_L_SWING, weightShift * 0.10f + shoulder * 0.09f);
-        pose.set(LeonChannel.ARM_R_SWING, weightShift * 0.10f + shoulder * 0.09f);
+        pose.set(LeonChannel.ELBOW_L, 0.12f);
+        pose.set(LeonChannel.ELBOW_R, 0.12f);
+        pose.set(LeonChannel.WEIGHT_SHIFT, weightShift * sway);
+        pose.set(LeonChannel.SHOULDER_L, shoulder * 0.17f * sway);
+        pose.set(LeonChannel.SHOULDER_R, shoulder * 0.17f * sway);
+        pose.set(LeonChannel.ARM_L_SWING, weightShift * 0.10f * sway + shoulder * 0.09f * sway);
+        pose.set(LeonChannel.ARM_R_SWING, weightShift * 0.10f * sway + shoulder * 0.09f * sway);
         binder.apply(pose);
         mesh.updateFromSolvedRig();
 

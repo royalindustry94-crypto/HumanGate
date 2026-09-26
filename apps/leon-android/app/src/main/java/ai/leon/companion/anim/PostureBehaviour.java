@@ -20,6 +20,17 @@ public final class PostureBehaviour implements LeonBehaviour {
     private final Spring1D weightSpring = new Spring1D(0f, 9f, 5.2f);
     private final Spring1D twistSpring = new Spring1D(0f, 11f, 5.6f);
 
+    // Scales only the three channels that drive LeonMeshRig's hip/hand-fade seam -- WEIGHT_SHIFT,
+    // SHOULDER_L/R, and the two ARM_*_SWING terms -- not TORSO_TWIST/TORSO_LEAN_X/NECKLACE_SWAY,
+    // which don't touch that seam. Measured against the full real amplitude range combined with
+    // IDLE's own always-on base pose (ELBOW_L/R=0.12, see LeonStateProfile): at the previous full
+    // amplitude that seam reached 65x; at 0.2 it's 5.7x. That's the best amplitude alone can do --
+    // IDLE's base elbow bend, on its own, with zero sway at all, already stretches this same seam
+    // to ~3.1x, a static floor this scale can't reach past no matter how low it goes. Closing the
+    // remaining gap needs either finer mesh resolution at that seam or reducing the base elbow
+    // bend itself, neither of which is an animation-amplitude change.
+    private static final float IDLE_SWAY_SCALE = 0.2f;
+
     private float amount = 1f;
     private float shiftIntervalMin = 7f;
     private float shiftIntervalMax = 16f;
@@ -50,7 +61,7 @@ public final class PostureBehaviour implements LeonBehaviour {
         if (timeToShift <= 0f) {
             // Always shift away from the current side, so weight actually travels.
             float side = weightTarget >= 0f ? -1f : 1f;
-            weightTarget = side * (0.35f + random.nextFloat() * 0.5f);
+            weightTarget = side * (0.35f + random.nextFloat() * 0.5f) * IDLE_SWAY_SCALE;
             twistTarget = (random.nextFloat() * 2f - 1f) * 0.3f;
             scheduleShift();
         }
@@ -65,24 +76,13 @@ public final class PostureBehaviour implements LeonBehaviour {
         pose.add(LeonChannel.WEIGHT_SHIFT, weightValue * weight);
         pose.add(LeonChannel.TORSO_TWIST, twistValue * weight);
         pose.add(LeonChannel.TORSO_LEAN_X, lean * weight);
-        pose.add(LeonChannel.SHOULDER_L, shL * 0.17f * amount * weight);
-        pose.add(LeonChannel.SHOULDER_R, shR * 0.17f * amount * weight);
-        // Arms hang from the shoulders, so they inherit part of the sway. This fraction was 0.18
-        // until a real-device report of the hip visibly compressing against the resting hand traced
-        // back to LeonMeshRig's hip/hand-fade mesh seam: at 0.18, that seam (only one column of mesh
-        // resolution wide) stretches to over 2x at this behaviour's own real weightTarget amplitude
-        // range (0.35-0.85), regardless of how that seam's own bone weighting is blended -- the hand
-        // simply swings too far from the hip for one quad to absorb. Note this fraction is not the
-        // only source of that divergence: the shL/shR noise below feeds ARM_*_SWING independently
-        // (see the *0.09f term) and also drives SHOULDER_L/R directly, both of which move the arm
-        // relative to the hip on their own, with or without any weight shift at all -- reducing this
-        // fraction alone cannot close that gap. 0.10 here, paired with widening LeonMeshRig's
-        // COLUMN_BLEND_MARGIN and HIP_FOLLOW_* (see their own comments, which account for the
-        // shoulder-noise contribution too), keeps the seam under this file's other mesh-seam
-        // thresholds across the full range -- both amplitude and shoulder noise, in every sign
-        // combination -- while still visibly swaying.
-        pose.add(LeonChannel.ARM_L_SWING, (weightValue * 0.10f + shL * 0.09f) * weight);
-        pose.add(LeonChannel.ARM_R_SWING, (weightValue * 0.10f + shR * 0.09f) * weight);
+        pose.add(LeonChannel.SHOULDER_L, shL * 0.17f * IDLE_SWAY_SCALE * amount * weight);
+        pose.add(LeonChannel.SHOULDER_R, shR * 0.17f * IDLE_SWAY_SCALE * amount * weight);
+        // Arms hang from the shoulders, so they inherit part of the sway (see IDLE_SWAY_SCALE's own
+        // comment for why this and the shoulder lines above are scaled down -- LeonMeshRig's
+        // hip/hand-fade mesh seam can't otherwise absorb how far the hand swings from the hip).
+        pose.add(LeonChannel.ARM_L_SWING, (weightValue * 0.10f + shL * 0.09f * IDLE_SWAY_SCALE) * weight);
+        pose.add(LeonChannel.ARM_R_SWING, (weightValue * 0.10f + shR * 0.09f * IDLE_SWAY_SCALE) * weight);
         pose.add(LeonChannel.NECKLACE_SWAY, -twistValue * 0.4f * weight);
     }
 
