@@ -35,20 +35,30 @@ proves it.
 
 ## 3. Backend
 
-**None on `main`.** The manifest has no `android.permission.INTERNET`, so the
-app cannot open a network socket. `state/LeonConversationController` reports
-`NO_BACKEND` and holds no HTTP code. `apps/api` / `apps/worker` contain no Leon
-routes. A `/leon/voice-turn` endpoint is referenced only by an unmerged branch
-(`claude/leon-voice-conversation`, see #90 CLAIM 2026-09-24). That branch is not
-part of this build.
+*Updated after `main` moved to `5125df7`.* At `d6bcb4d` there was no backend:
+no `INTERNET` permission and `NO_BACKEND`. PR #180 has since merged one:
+
+- `POST /leon/voice-turn` and `GET /leon/voice-status` in
+  `apps/api/app/api/routes/leon_voice.py`, with the logic in
+  `app/services/leon_voice.py`. The routes are gated by a shared bearer token
+  (`LEON_VOICE_APP_TOKEN`).
+- Spend is capped and fails closed: each provider call reserves against the
+  Leon system workspace's cap (`app/services/leon_voice_spend.py`, migration
+  `0059`).
+- The Android manifest now requests `INTERNET` and `RECORD_AUDIO`.
 
 ## 4. Voice provider
 
-**Android on-device `android.speech.tts.TextToSpeech`**
-(`voice/LeonSpeechController`). It uses whatever TTS engine is on the phone
-(`<queries>` for `TTS_SERVICE` in the manifest). It needs no API key, auth or
-network. Lip-sync uses a synthetic viseme generator that runs during `SPEAKING`.
-It is not driven by the audio's phonemes.
+- Speech to text: OpenAI Whisper (`/v1/audio/transcriptions`).
+- Reply: an Anthropic model (`leon_anthropic_model`).
+- Speech: OpenAI TTS (`/v1/audio/speech`).
+- Keys are read from the deployment's existing variable names, `anthkey` and
+  `ANTHTOPIC_APO_KEY`. The second one holds the **OpenAI** key
+  (`app/core/config.py`).
+- Wire format, from `LeonVoiceRecorder` and `LeonVoiceApiClient`:
+  `multipart/form-data`, with part `audio` (`speech.wav`, `audio/wav`, 16 kHz
+  mono 16-bit PCM in a RIFF container) and an optional `history` JSON part.
+- On-device `TextToSpeech` (`voice/LeonSpeechController`) is still present.
 
 ## 5. Why builds could not upgrade in place
 
@@ -135,30 +145,53 @@ hip. That is narrower than one mesh cell, so one cell per side spans both the
 thumb and the hip. It smears by less than one cell width under large hand
 gestures.
 
-## 8. Open defects found and not yet fixed
+## 8. Follow-up work (2026-09-26, second pass)
 
-1. **Wrist and elbow pivots do not match the photo.** This is the systemic
-   cause of the wrist/hand-folding reports. `LeonRig` puts the elbow at design
-   (±70, 324) and the wrist at (±70, 424). Those positions came from the old
-   procedural figure. In the photo the elbow is at about (±103, 285) and the
-   wrist at about (±112, 355). The mesh's blend bands (270–300, 345–375) match
-   the photo. The bones rotate about points 40–70 units away from those bands.
-   A 12% idle elbow bend deforms visible upper-arm pixels by 1.55x, and
-   `HAND_R_RAISE=0.3` deforms the wrist by 1.41x. The earlier rotation clamps in
-   `LeonRigBinder` treat the symptom. The fix is to move the `FOREARM_*` and
-   `HAND_*` bone origins to the photo's joints, then re-derive those clamps.
-2. **Walking.** PR #188 (another active session) removes walking. On this
-   branch walking measures 3.3x at worst on visible pixels, and most of that
-   comes from item 1. The Founder has to choose: remove walking, or fix item 1
-   and keep it.
-3. **Upgrade path.** Nothing has changed yet: `release` still has no
-   `signingConfig`, and the local `versionCode` still defaults to 3. See §5.
-4. **Dead code** (§1). The layered-art render path is still in the tree:
-   about 1,700 lines across `LeonRenderer`, `LeonAssetRepository`,
-   `ProceduralLeonArt`, `AssetDirArtProvider`, `PhotoLayerArtProvider` and
-   `LeonArtProvider`. The `README` still describes procedural art as current.
-5. **Branding.** The source photo shows the Adidas trefoil and three stripes.
-   The PR #165 handoff said no brand logo ships. Whether this can ship is a
-   legal decision for the Founder.
-6. **Phase 4** (overlay lifecycle, touch pass-through, frame pacing, memory)
-   has not been audited yet.
+Every item below was measured on visible pixels of the production texture.
+Each comes with regression tests that fail when the old behaviour is restored.
+
+1. **Arm joint pivots: fixed** (`17b193d`). They now sit on the photo's
+   joints: shoulder x 95, elbow (±103, 285), wrist (±112, 355), all defined as
+   constants in `LeonRig`. The mesh's elbow and wrist blend bands are centred
+   on the same rows. Results:
+
+   | Case | Before | After |
+   |---|---|---|
+   | 12% idle elbow bend | 1.55x | 1.36x |
+   | Hand raise, wrist | 1.41x | 1.11x |
+   | HAPPY trajectory | 3.21x | 2.10x |
+   | Idle trajectory | 2.35x | 1.83x |
+   | Walk trajectory | 2.38x | 1.83x |
+
+   The remaining ~1.36x (idle) and ~2.1x (full flexion) are the inner crook of
+   the elbow compressing. That is real anatomy: a 12.6° bend over the 30-unit
+   blend band predicts 1.37x. The rotation clamps in `LeonRigBinder` have not
+   been revisited yet.
+2. **Dead code: removed** (`45fbaf4`). That covers seven classes, the unused
+   `leon-front.webp` that shipped in the APK, and the stale docs
+   (`docs/leon-preview`, `LEON_CHARACTER_ASSET_SPEC.md`). The README was
+   rewritten to match the code.
+3. **Release signing: fail closed** (`1485080`). Before this change there was
+   no release pipeline and `assembleRelease` produced an unsigned APK. Now:
+   - The release key comes only from `LEON_RELEASE_*` environment variables.
+   - A release build without that key or without `-PleonVersionCode` stops
+     with an error.
+   - `versionName` is now `0.3.<versionCode>`.
+
+   Still open: storing a release key in CI secrets and adding a release job.
+   That is a Founder decision about keys and repository secrets. A
+   release-signed APK cannot upgrade a debug-signed one, so switching channels
+   needs one uninstall.
+4. **Voice 500s: explicit** (`02a6c1c`). Reproduced first: a database error in
+   the spend reservation returned a bare `internal server error`. Now:
+   - Every turn logs the payload's shape (never its content).
+   - Unexpected errors return a 500 that names the stage, the error type and
+     the request id.
+   - The phone shows the stage for a 500.
+5. **Not rendered:** blinks and lip-sync. The mesh binds the whole head to one
+   bone, and the jaw, eye, lid and mouth parts are never drawn.
+6. **Still open:**
+   - Walking vs PR #188: needs a Founder decision.
+   - Adidas branding in the source photo.
+   - Phase 4 (overlay lifecycle, touch pass-through, profiling the 48x84 mesh
+     on a device).
