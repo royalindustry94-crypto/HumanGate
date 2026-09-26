@@ -723,8 +723,12 @@ public final class LeonOverlayService extends Service implements LeonStateContro
             showOverlay();
             return;
         }
+        if (characterView == null) {
+            teardownOverlay();
+            showOverlay();
+            return;
+        }
         host.setVisibility(View.VISIBLE);
-        if (characterView == null) return;
         characterView.setPaused(false);
         if (animation != null) {
             // Restart the behaviour timers so intervals that elapsed with the

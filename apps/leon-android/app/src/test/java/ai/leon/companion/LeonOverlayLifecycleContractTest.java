@@ -35,7 +35,9 @@ public class LeonOverlayLifecycleContractTest {
     public void unlockPathCanResumeOrRecreateTheOverlayHost() throws Exception {
         String overlay = SourceContracts.source("ai/leon/companion/overlay/LeonOverlayService.java");
 
-        assertTrue(overlay.contains("if (host == null) {\n            showOverlay();\n            return;\n        }\n        host.setVisibility(View.VISIBLE);"));
+        assertTrue(overlay.contains("if (host == null) {\n            showOverlay();\n            return;\n        }"));
+        assertTrue(overlay.contains("if (characterView == null) {\n            teardownOverlay();\n            showOverlay();\n            return;\n        }"));
+        assertTrue(overlay.contains("host.setVisibility(View.VISIBLE);"));
         assertTrue(overlay.contains("animation.resetBehaviours();"));
         assertTrue(overlay.contains("animation.triggerBlink();"));
     }
