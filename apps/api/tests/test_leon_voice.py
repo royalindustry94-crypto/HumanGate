@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 
 import httpx
 import pytest
@@ -59,6 +60,32 @@ def _happy_path_handler(request: httpx.Request) -> httpx.Response:
             json={"content": [{"type": "text", "text": "hey there"}]},
         )
     raise AssertionError(f"unexpected request: {request.url}")
+
+
+def _wav_bytes(payload: bytes = b"\x00\x00") -> bytes:
+    data_size = len(payload)
+    sample_rate = 8000
+    byte_rate = sample_rate * 2
+    block_align = 2
+    bits_per_sample = 16
+    return b"".join(
+        [
+            b"RIFF",
+            (36 + data_size).to_bytes(4, "little"),
+            b"WAVE",
+            b"fmt ",
+            (16).to_bytes(4, "little"),
+            (1).to_bytes(2, "little"),
+            (1).to_bytes(2, "little"),
+            sample_rate.to_bytes(4, "little"),
+            byte_rate.to_bytes(4, "little"),
+            block_align.to_bytes(2, "little"),
+            bits_per_sample.to_bytes(2, "little"),
+            b"data",
+            data_size.to_bytes(4, "little"),
+            payload,
+        ]
+    )
 
 
 @pytest.mark.asyncio
@@ -114,6 +141,26 @@ async def test_rejects_audio_over_the_size_bound(client):
     assert response.status_code == 413
 
 
+class _ChunkedRawAudio:
+    def __init__(self, total_bytes: int, chunk_size: int):
+        self.remaining = total_bytes
+        self.chunk_size = chunk_size
+        self.total_sent = 0
+        self.chunks_sent = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self.remaining <= 0:
+            raise StopAsyncIteration
+        take = min(self.chunk_size, self.remaining)
+        self.remaining -= take
+        self.total_sent += take
+        self.chunks_sent += 1
+        return b"0" * take
+
+
 class _UnboundedStream:
     """An UploadFile-like stream that fails the test if asked to read past
     the caller's own hard bound -- proves the route never materializes an
@@ -150,6 +197,21 @@ async def test_oversized_audio_is_never_fully_materialized(monkeypatch):
 
     assert exc_info.value.status_code == 413
     assert huge.total_read <= lv.MAX_AUDIO_BYTES + 1
+
+
+@pytest.mark.asyncio
+async def test_chunked_raw_audio_is_rejected_without_consuming_the_full_stream():
+    from fastapi import HTTPException
+
+    from app.api.routes.leon_voice import _read_stream_bounded
+
+    chunk_size = 4096
+    huge = _ChunkedRawAudio(total_bytes=lv.MAX_AUDIO_BYTES * 10, chunk_size=chunk_size)
+    with pytest.raises(HTTPException) as exc_info:
+        await _read_stream_bounded(huge)
+
+    assert exc_info.value.status_code == 413
+    assert huge.total_sent <= lv.MAX_AUDIO_BYTES + chunk_size
 
 
 @pytest.mark.asyncio
@@ -255,6 +317,59 @@ async def test_an_audio_turn_is_transcribed_before_replying(monkeypatch, client)
 
 
 @pytest.mark.asyncio
+async def test_android_style_multipart_wav_request_succeeds(monkeypatch, client):
+    _install_transport(monkeypatch, _happy_path_handler)
+
+    response = await client.post(
+        "/leon/voice-turn",
+        headers=_auth_headers(),
+        files={"audio": ("speech.wav", _wav_bytes(), "audio/wav")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user_text"] == "hello leon"
+
+
+@pytest.mark.asyncio
+async def test_raw_audio_wav_request_succeeds(monkeypatch, client):
+    _install_transport(monkeypatch, _happy_path_handler)
+
+    response = await client.post(
+        "/leon/voice-turn",
+        headers={**_auth_headers(), "Content-Type": "audio/wav"},
+        content=_wav_bytes(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user_text"] == "hello leon"
+
+
+@pytest.mark.asyncio
+async def test_raw_octet_stream_with_supported_container_succeeds(monkeypatch, client):
+    _install_transport(monkeypatch, _happy_path_handler)
+
+    response = await client.post(
+        "/leon/voice-turn",
+        headers={**_auth_headers(), "Content-Type": "application/octet-stream"},
+        content=b"fLaC\x00\x00\x00\x22pretend-flac",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user_text"] == "hello leon"
+
+
+@pytest.mark.asyncio
+async def test_oversized_raw_audio_returns_413(client):
+    response = await client.post(
+        "/leon/voice-turn",
+        headers={**_auth_headers(), "Content-Type": "audio/mpeg"},
+        content=b"0" * (lv.MAX_AUDIO_BYTES + 1),
+    )
+
+    assert response.status_code == 413
+
+
+@pytest.mark.asyncio
 async def test_conversation_history_is_forwarded_to_the_llm(monkeypatch, client):
     captured: dict[str, object] = {}
 
@@ -293,6 +408,39 @@ async def test_malformed_history_is_rejected(client):
         data={"text": "hi", "history": "not-json"},
     )
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_malformed_multipart_is_handled_by_the_route(client):
+    response = await client.post(
+        "/leon/voice-turn",
+        headers={
+            **_auth_headers(),
+            "Content-Type": "multipart/form-data",
+        },
+        content=b"not-a-valid-multipart-body",
+    )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["stage"] == "request_parsing"
+    assert detail["error_code"] == "invalid_multipart"
+    assert detail["request_id"] == response.headers["X-Request-ID"]
+
+
+@pytest.mark.asyncio
+async def test_invalid_raw_wav_is_rejected_as_unsupported_audio(client):
+    response = await client.post(
+        "/leon/voice-turn",
+        headers={**_auth_headers(), "Content-Type": "audio/wav"},
+        content=b"\x00\x01not-a-real-wav",
+    )
+
+    assert response.status_code == 415
+    detail = response.json()["detail"]
+    assert detail["stage"] == "request_parsing"
+    assert detail["error_code"] == "unsupported_audio_format"
+    assert detail["request_id"] == response.headers["X-Request-ID"]
 
 
 @pytest.fixture
@@ -417,3 +565,29 @@ async def test_an_upstream_failure_becomes_a_safe_502(monkeypatch, client):
     detail = response.json()["detail"]
     assert detail["error_code"] == "voice_upstream_failure"
     assert detail["stage"] in {"stt", "llm", "tts"}
+
+
+@pytest.mark.asyncio
+async def test_unexpected_internal_error_returns_structured_500_and_logs_traceback(
+    monkeypatch, client, caplog
+):
+    async def boom(**kwargs):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr("app.api.routes.leon_voice.run_voice_turn", boom)
+
+    with caplog.at_level(logging.ERROR, logger="app.api.routes.leon_voice"):
+        response = await client.post(
+            "/leon/voice-turn", headers=_auth_headers(), data={"text": "hi leon"}
+        )
+
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert detail["stage"] == "voice_turn"
+    assert detail["error_code"] == "voice_internal_error"
+    assert detail["error_type"] == "RuntimeError"
+    assert detail["request_id"] == response.headers["X-Request-ID"]
+    assert any(
+        record.message == "leon_voice_turn_internal_error" and record.exc_info
+        for record in caplog.records
+    )
