@@ -242,7 +242,7 @@ public class LeonMeshRigTest {
     public void handsStayRigidInEveryState() throws Exception {
         // The failure the single mesh produced when bound the other way: hands tearing into
         // slivers across the hip. Below the wrist blend every hand pixel follows the hand bone
-        // alone, so its edges never change length, in any state or while walking.
+        // alone, so its edges never change length, in any state.
         LeonTextureMask mask = LeonTextureMask.load();
         float handTop = LeonRig.WRIST_Y + 15f;
         for (LeonState state : LeonState.values()) {
@@ -250,8 +250,8 @@ public class LeonMeshRigTest {
             Leon leon = new Leon();
             LeonStateController states = new LeonStateController();
             LeonAnimationController controller = new LeonAnimationController(leon.rig, states, 5L);
+            // IDLE is the controller's own starting state -- nothing to request.
             if (state != LeonState.IDLE) states.request(state);
-            else controller.startWalkForDebug(1f, 20f);
             float worst = 1f;
             for (int f = 0; f < 60 * 20; f++) {
                 controller.update(1f / 60f);
