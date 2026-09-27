@@ -74,6 +74,10 @@ public final class MainActivity extends Activity
     private ScrollView scroll;
     private boolean visualTestHost;
     private boolean recording;
+    // Set only while waiting on the RECORD_AUDIO permission dialog triggered by the always-listening
+    // toggle, so the result handler knows to retry it (unlike push-to-talk's touch-down, a tap on
+    // this toggle has no gesture to lose by the time the dialog is answered).
+    private boolean pendingAlwaysListeningPermission;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -527,6 +531,7 @@ public final class MainActivity extends Activity
         if (turningOn
                 && checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                         != PackageManager.PERMISSION_GRANTED) {
+            pendingAlwaysListeningPermission = true;
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, RECORD_AUDIO_REQUEST);
             return;
         }
@@ -550,12 +555,24 @@ public final class MainActivity extends Activity
             int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode != RECORD_AUDIO_REQUEST) return;
+        boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+        if (pendingAlwaysListeningPermission) {
+            // Unlike push-to-talk, this toggle has no touch gesture to lose while the system
+            // dialog is up, so it is safe (and expected) to just finish what the tap started.
+            pendingAlwaysListeningPermission = false;
+            if (granted) {
+                toggleAlwaysListening();
+            } else {
+                toast("Leon needs the microphone permission to listen on his own");
+            }
+            return;
+        }
         // Deliberately does not auto-start recording here: the touch-down that triggered this
         // permission request is long since over by the time the system dialog is answered (the
         // dialog is its own window, so no matching ACTION_UP will ever arrive at the mic button for
         // that gesture), which would otherwise leave a recording running with no way to stop it
         // short of the 30s safety ceiling. Ask the user to press again instead.
-        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+        if (granted) {
             toast("Microphone ready -- hold the mic button to talk");
         } else {
             toast("Leon needs the microphone permission to hear you");
