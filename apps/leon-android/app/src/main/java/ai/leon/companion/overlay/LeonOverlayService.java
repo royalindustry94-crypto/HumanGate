@@ -1,5 +1,6 @@
 package ai.leon.companion.overlay;
 
+import android.Manifest;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
@@ -13,6 +14,8 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
+import android.content.pm.ServiceInfo;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
@@ -145,7 +148,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
 
         createNotificationChannel();
-        startForeground(NOTIFICATION_ID, buildNotification());
+        startForegroundCompat();
         registerScreenReceiver();
         runtime.states().addListener(this);
 
@@ -325,6 +328,9 @@ public final class LeonOverlayService extends Service implements LeonStateContro
      */
     private void startAlwaysListeningIfEnabled() {
         if (!prefs.isAlwaysListeningEnabled()) return;
+        // Re-assert the foreground notification so it claims the microphone type if RECORD_AUDIO
+        // has been granted since the service last started it (see startForegroundCompat).
+        startForegroundCompat();
         if (!runtime.voiceBackend().setAlwaysListening(true)) {
             Log.w(TAG, "Hands-free listening could not start (mic unavailable)");
         }
@@ -692,6 +698,35 @@ public final class LeonOverlayService extends Service implements LeonStateContro
         channel.setShowBadge(false);
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm != null) nm.createNotificationChannel(channel);
+    }
+
+    /**
+     * Starts (or re-asserts) the foreground notification, declaring the {@code microphone}
+     * foreground-service type only when {@code RECORD_AUDIO} is already granted.
+     *
+     * <p>Android 14+ requires that permission to already be held at the moment a foreground
+     * service claims the microphone type, or {@link #startForeground} throws a
+     * {@code SecurityException} that crashes the service -- and with it, since this call runs
+     * unconditionally from {@link #onCreate}, the very first launch of the overlay on any device
+     * that hasn't yet granted the mic permission (a fresh install, most commonly). The manifest
+     * still declares {@code specialUse|microphone} (a foreground service is allowed to declare a
+     * type it isn't using at every instant), but only offer {@code microphone} here once it's
+     * actually safe to. {@link #startForeground} can be called again later to add it once the
+     * permission is granted -- see the call in {@link #startAlwaysListeningIfEnabled}.
+     */
+    private void startForegroundCompat() {
+        Notification notification = buildNotification();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification);
+            return;
+        }
+        int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
+        boolean micGranted = checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED;
+        if (micGranted) {
+            type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
+        }
+        startForeground(NOTIFICATION_ID, notification, type);
     }
 
     private Notification buildNotification() {
