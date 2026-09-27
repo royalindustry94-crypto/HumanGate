@@ -3,6 +3,8 @@ package ai.leon.companion;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import ai.leon.companion.render.LeonMeshRig;
+
 import org.junit.Test;
 
 import java.io.File;
@@ -39,8 +41,8 @@ public class ProductionAssetContractTest {
         String json = manifest();
         assertEquals(360, (int) number(json, "source_width"));
         assertEquals(640, (int) number(json, "source_height"));
-        assertEquals(16, (int) number(json, "mesh_cols"));
-        assertEquals(28, (int) number(json, "mesh_rows"));
+        assertEquals(LeonMeshRig.PRODUCTION_COLS, (int) number(json, "mesh_cols"));
+        assertEquals(LeonMeshRig.PRODUCTION_ROWS, (int) number(json, "mesh_rows"));
         assertEquals(20f, (float) number(json, "crown_y"), 0.01f);
         assertEquals(619f, (float) number(json, "sole_y"), 0.01f);
         assertEquals(180f, (float) number(json, "centre_x"), 0.01f);

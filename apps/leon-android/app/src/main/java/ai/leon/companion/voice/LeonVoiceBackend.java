@@ -27,9 +27,11 @@ public final class LeonVoiceBackend implements LeonConversationController.Backen
     private final LeonVoiceApiClient api = new LeonVoiceApiClient();
     private final LeonVoicePlayer player;
     private final LeonVoiceRecorder recorder = new LeonVoiceRecorder();
+    private final LeonVoiceActivityRecorder activityRecorder = new LeonVoiceActivityRecorder();
     private final Deque<LeonVoiceApiClient.HistoryTurn> history = new ArrayDeque<>();
 
     private int turnId;
+    private boolean alwaysListening;
 
     /**
      * @param conversation the controller this backend is (or is about to be) attached to. Held so
@@ -66,10 +68,12 @@ public final class LeonVoiceBackend implements LeonConversationController.Backen
      * ready this hands it to {@link LeonConversationController#submitAudio} itself, so no further
      * action is needed here beyond eventually calling {@link #finishListening()}.
      *
-     * @return false if the mic could not be opened (see {@link LeonVoiceRecorder#start}); the
-     *         caller should tell the user and not expect any further callback.
+     * @return false if the mic could not be opened (see {@link LeonVoiceRecorder#start}), or if
+     *         hands-free listening (see {@link #setAlwaysListening}) already owns the microphone;
+     *         the caller should tell the user and not expect any further callback.
      */
     public boolean startListening() {
+        if (alwaysListening) return false; // one mic, one owner at a time
         return recorder.start(new LeonVoiceRecorder.Listener() {
             @Override
             public void onRecorded(byte[] wavBytes) {
@@ -88,11 +92,71 @@ public final class LeonVoiceBackend implements LeonConversationController.Backen
         recorder.stop();
     }
 
+    /**
+     * Turns hands-free listening on or off: while on, Leon listens continuously (see
+     * {@link LeonVoiceActivityRecorder}) and starts a turn on his own whenever he hears speech, no
+     * button needed. A new utterance is only ever accepted while the conversation is
+     * {@link LeonConversationController.Status#IDLE} -- never while Leon is thinking or speaking a
+     * reply, so his own voice coming back through the speaker can't retrigger him.
+     *
+     * <p>Mutually exclusive with push-to-talk: enabling this while a manual recording happens to be
+     * in progress is not expected (the UI should disable the push-to-talk control while this is on)
+     * and is not specially handled beyond {@link #startListening} refusing to start one afterwards.
+     *
+     * @return false if turning it on failed to open the mic; the caller should tell the user. Turning
+     *         it off always succeeds.
+     */
+    public boolean setAlwaysListening(boolean enabled) {
+        if (enabled == alwaysListening) return true;
+        if (!enabled) {
+            alwaysListening = false;
+            activityRecorder.stop();
+            return true;
+        }
+        alwaysListening = activityRecorder.start(
+                new LeonVoiceActivityRecorder.ArmGate() {
+                    @Override
+                    public boolean isArmed() {
+                        return conversation.status() == LeonConversationController.Status.IDLE;
+                    }
+                },
+                new LeonVoiceActivityRecorder.Listener() {
+                    @Override
+                    public void onSpeechStarted() {
+                        conversation.beginListening();
+                    }
+
+                    @Override
+                    public void onSpeechCaptured(byte[] wavBytes) {
+                        conversation.submitAudio(wavBytes);
+                    }
+
+                    @Override
+                    public void onSpeechRejected() {
+                        // A blip crossed the threshold briefly -- back to idle, nothing to send.
+                        conversation.cancel();
+                    }
+
+                    @Override
+                    public void onFailed(String message) {
+                        alwaysListening = false;
+                        conversation.reportFailure(message);
+                    }
+                });
+        return alwaysListening;
+    }
+
+    public boolean isAlwaysListening() {
+        return alwaysListening;
+    }
+
     @Override
     public void cancel() {
         ++turnId; // Invalidates any in-flight ResultHandler for the old turn.
         recorder.stop();
         player.stop();
+        // Hands-free listening is a standing mode, not part of one turn -- cancelling a turn does
+        // not turn it off, it just goes back to waiting for the next utterance.
     }
 
     private List<LeonVoiceApiClient.HistoryTurn> historySnapshot() {

@@ -612,3 +612,13 @@ async def test_unexpected_internal_error_returns_structured_500_and_logs_traceba
         record.message == "leon_voice_turn_internal_error" and record.exc_info
         for record in caplog.records
     )
+
+
+def test_the_system_prompt_carries_leons_persona_without_looking_like_a_transcript():
+    prompt = lv.LEON_SYSTEM_PROMPT
+    assert "Leon Rico" in prompt
+    assert "hustler" in prompt.lower()
+    assert "app" in prompt.lower()
+    assert "positive" in prompt.lower() and "encouraging" in prompt.lower()
+    for word in ("dat", "gon'", "finna", "yo momma"):
+        assert word not in prompt.lower()

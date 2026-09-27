@@ -33,8 +33,29 @@ public final class LeonRig {
     private static final float NECK_Y = 178f;    // base of the skull
     private static final float HEAD_Y = 112f;    // head centre; art spans 44..180
 
-    /** Shoulder joints sit wide enough that the sleeves clear the torso's half-width of 78. */
-    private static final float SHOULDER_X = 70f;
+    /**
+     * Shoulder joint: the upper arm's centre line on the production photo. This was 70, from the
+     * old drawn figure, which rotated the arm about a point inside the torso and crushed the
+     * armpit and shoulder top (worst visible edge 3.2x in HAPPY, 2.35x in idle sway; 2.1x and 1.83x
+     * with the joint here).
+     */
+    private static final float SHOULDER_X = 95f;
+    /** Top of the upper-arm bone: shoulder joint (CHEST_Y - 4) plus the arm bone's 10-unit drop. */
+    private static final float ARM_Y = CHEST_Y + 6f;
+
+    /*
+     * Elbow and wrist pivots, measured on the production photo (distance from the centre line, and
+     * design y). The arms hang angled slightly outwards, so each joint sits further out than the
+     * shoulder. These used to be (70, 324) and (70, 424), inherited from the old drawn figure: the
+     * elbow pivot sat on the cuff and the wrist pivot among the fingers, so bending either joint
+     * rotated skin about a point 40-70 units from the joint the mesh blends across, folding the
+     * sleeve and the wrist (a 12% idle elbow bend deformed visible pixels by 1.55x). LeonMeshRig's
+     * elbow and wrist blend bands are centred on these same rows.
+     */
+    public static final float ELBOW_X = 103f;
+    public static final float ELBOW_Y = 285f;
+    public static final float WRIST_X = 112f;
+    public static final float WRIST_Y = 355f;
 
     private LeonRig() {}
 
@@ -64,13 +85,13 @@ public final class LeonRig {
         // of the body so each reads as a limb.
         b.bone(Bones.SHOULDER_L, Bones.CHEST, -SHOULDER_X, -4f);
         b.bone(Bones.ARM_L, Bones.SHOULDER_L, 0f, 10f);
-        b.bone(Bones.FOREARM_L, Bones.ARM_L, 0f, 112f);
-        b.bone(Bones.HAND_L, Bones.FOREARM_L, 0f, 100f);
+        b.bone(Bones.FOREARM_L, Bones.ARM_L, -(ELBOW_X - SHOULDER_X), ELBOW_Y - ARM_Y);
+        b.bone(Bones.HAND_L, Bones.FOREARM_L, -(WRIST_X - ELBOW_X), WRIST_Y - ELBOW_Y);
 
         b.bone(Bones.SHOULDER_R, Bones.CHEST, SHOULDER_X, -4f);
         b.bone(Bones.ARM_R, Bones.SHOULDER_R, 0f, 10f);
-        b.bone(Bones.FOREARM_R, Bones.ARM_R, 0f, 112f);
-        b.bone(Bones.HAND_R, Bones.FOREARM_R, 0f, 100f);
+        b.bone(Bones.FOREARM_R, Bones.ARM_R, ELBOW_X - SHOULDER_X, ELBOW_Y - ARM_Y);
+        b.bone(Bones.HAND_R, Bones.FOREARM_R, WRIST_X - ELBOW_X, WRIST_Y - ELBOW_Y);
 
         // Legs.
         b.bone(Bones.THIGH_L, Bones.HIPS, -36f, 8f);
@@ -84,10 +105,7 @@ public final class LeonRig {
         // Presentation-only state ring. Never carries character animation.
         b.part(Parts.AURA, Art.AURA, Bones.CHEST, 0f, 110f, 320f, 320f, 0.5f, 0.5f, 0f, 0, null);
 
-        // Photo-mode continuity layer. PhotoLayerArtProvider fills ONLY source pixels that fall
-        // outside the independently animated major-part rectangles, so the rest pose reconstructs
-        // the whole photographed character without turning Leon back into one flat moving image.
-        // It is bound to ROOT so it follows minimised scaling but not breathing/head/limb motion.
+        // Bound to ROOT so it follows minimised scaling but not breathing/head/limb motion.
         b.part(Parts.PHOTO_BACKFILL, Art.PHOTO_BACKFILL, Bones.ROOT,
                 -CENTRE_X, -GROUND_Y, DESIGN_W, DESIGN_H, 0f, 0f, 0f, 4, null);
 
@@ -157,7 +175,7 @@ public final class LeonRig {
         mouth(b, Parts.MOUTH_FROWN, Art.MOUTH_FROWN);
 
         // Sunglasses lenses are deliberately translucent so the blink underneath still reads on a
-        // phone-sized overlay. See LeonPalette.LENS.
+        // phone-sized overlay.
         b.part(Parts.SUNGLASSES, Art.SUNGLASSES, Bones.HEAD, 0f, -2f, 124f, 44f, 0.5f, 0.5f, 0f, 50, null);
         b.part(Parts.EARRING, Art.EARRING, Bones.HEAD, -55f, 22f, 12f, 20f, 0.5f, 0.2f, 0f, 51, null);
 

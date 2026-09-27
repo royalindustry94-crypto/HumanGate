@@ -69,6 +69,7 @@ public final class MainActivity extends Activity
     private Button minimiseButton;
     private Button rigDebugButton;
     private Button micButton;
+    private Button alwaysListeningButton;
     private View settingsSection;
     private ScrollView scroll;
     private boolean visualTestHost;
@@ -227,6 +228,17 @@ public final class MainActivity extends Activity
             }
         });
         root.addView(micButton, withBottom(8));
+
+        alwaysListeningButton = button("");
+        alwaysListeningButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                toggleAlwaysListening();
+            }
+        });
+        root.addView(alwaysListeningButton, withBottom(4));
+        root.addView(caption("When on, Leon listens on his own -- no button -- whenever he's on "
+                + "screen. Uses the mic continuously while he's showing."), withBottom(8));
 
         Button speak = button("Speak");
         speak.setOnClickListener(new View.OnClickListener() {
@@ -509,6 +521,30 @@ public final class MainActivity extends Activity
         if (!recording) toast("Could not start the microphone");
     }
 
+    /** Flips hands-free listening on/off, asking for the mic permission first if needed. */
+    private void toggleAlwaysListening() {
+        boolean turningOn = !runtime.voiceBackend().isAlwaysListening();
+        if (turningOn
+                && checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                        != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, RECORD_AUDIO_REQUEST);
+            return;
+        }
+        boolean ok = runtime.voiceBackend().setAlwaysListening(turningOn);
+        if (turningOn && !ok) toast("Could not start the microphone");
+        prefs.setAlwaysListeningEnabled(ok && turningOn);
+        refreshAlwaysListeningButton();
+    }
+
+    private void refreshAlwaysListeningButton() {
+        if (alwaysListeningButton == null) return;
+        boolean on = runtime.voiceBackend().isAlwaysListening();
+        alwaysListeningButton.setText(on
+                ? "🎙️  Always listening: On (tap to stop)"
+                : "🎙️  Always listening: Off (tap to start)");
+        if (micButton != null) micButton.setEnabled(!on);
+    }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions,
             int[] grantResults) {
@@ -531,6 +567,7 @@ public final class MainActivity extends Activity
     private void refresh() {
         boolean canOverlay = Settings.canDrawOverlays(this);
         boolean enabled = prefs.isEnabled();
+        refreshAlwaysListeningButton();
 
         permissionStatus.setText(canOverlay
                 ? "✓ Display over other apps granted"
