@@ -259,21 +259,27 @@ public final class LeonOverlayService extends Service implements LeonStateContro
             gestureDetector = new GestureDetector(this, new GestureListener());
             host.setOnTouchListener(new OverlayTouchListener());
 
-            try {
-                windowManager.addView(host, params);
-                overlayLive = true;
-                blockedReason = null;
-                startAlwaysListeningIfEnabled();
-            } catch (Exception e) {
-                // Nothing to work around here — report it and leave the user in control.
-                Log.e(TAG, "Window manager refused Leon's overlay", e);
-                blockedReason = "Android refused the overlay window on this device.";
-                teardownOverlay();
-            }
+            windowManager.addView(host, params);
+            overlayLive = true;
+            blockedReason = null;
+            startAlwaysListeningIfEnabled();
+        } catch (Throwable e) {
+            // Nothing here is worth crashing the whole process over -- the overlay is one feature
+            // of the app, not the app itself. Report it and leave the user in control, whether the
+            // failure came from asset/rig construction (before any window exists) or from the
+            // window manager refusing the overlay window itself.
+            Log.e(TAG, "Could not show Leon's overlay", e);
+            blockedReason = "Leon could not start: " + shortMessage(e);
+            teardownOverlay();
         } finally {
             overlayInitializing = false;
             updateNotification();
         }
+    }
+
+    private static String shortMessage(Throwable e) {
+        String message = e.getMessage();
+        return message != null ? message : e.getClass().getSimpleName();
     }
 
     private void applySavedPosition(int width, int height) {
