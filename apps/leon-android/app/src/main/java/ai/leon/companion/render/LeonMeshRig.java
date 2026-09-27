@@ -16,40 +16,78 @@ import ai.leon.companion.rig.Rig;
  * allowing independent head/torso/arm/leg motion without cutting Leon into sprites.
  */
 public final class LeonMeshRig {
+    /**
+     * Production grid (tools/build_leon_production.py writes it into manifest.json). One cell is
+     * ~8.6 x 8.8 design units, fine enough that a vertex column lands in, or within a few units of,
+     * the transparent gap between the hips and the hanging hands. At the old 16x28 (25.8 units a
+     * cell) the outer hip and the hand shared one cell, so no binding could keep both intact.
+     */
+    public static final int PRODUCTION_COLS = 48;
+    public static final int PRODUCTION_ROWS = 84;
+
     private static final float DESIGN_CENTRE_X = LeonRig.DESIGN_W * 0.5f;
-    // Column-direction blend margin around the side>72 torso/limb boundary (see weightsFor).
-    // COLUMN_BLEND_START must stay >= 0 -- a margin past 72 makes it negative, which would make the
-    // "side <= COLUMN_BLEND_START" pure-center case unreachable and let the exact chest centerline
-    // itself pick up arm-bone weight, the same kind of false attachment this file's other fixes
-    // exist to avoid. 72 is therefore the largest valid margin (COLUMN_BLEND_START == 0: the
-    // centerline is still exactly 0% limb-bound, but nothing beyond it is ever purely center-bound
-    // either). It has to be this wide: PostureBehaviour's idle sway isn't just WEIGHT_SHIFT's own
-    // hip motion -- its independent shoulder noise (SHOULDER_L/R, and the same noise's separate
-    // contribution to ARM_*_SWING) stretches this seam on its own, and a Codex review of an earlier,
-    // narrower-margin version of this fix caught that a sweep covering only WEIGHT_SHIFT (not
-    // shoulder noise too) had measured a false-clean result. Swept together with HIP_FOLLOW_* below
-    // against PostureBehaviour's real range (WEIGHT_SHIFT to +-0.85, shoulder noise to +-1 in every
-    // sign combination, since both vary independently and the worst case is when they align):
-    // worst ratio here is 1.23, measured, not assumed.
-    private static final float COLUMN_BLEND_MARGIN = 72f;
-    private static final float COLUMN_BLEND_START = 72f - COLUMN_BLEND_MARGIN;
-    private static final float COLUMN_BLEND_END = 72f + COLUMN_BLEND_MARGIN;
-    // A "pull the dangling-hand column toward hips" blend (HIP_FOLLOW_*) was tried here and
-    // reverted. It measured well against WEIGHT_SHIFT + shoulder noise alone, but a Codex review
-    // caught that it pins the hand-fade column toward a near-static hip regardless of how far the
-    // hand has actually swung -- fine for the small excursions of idle sway, but a real fold
-    // (measured 3.5x compression) once an actual gesture (e.g. CHIN: HAND_R_RAISE/ELBOW_R=0.95)
-    // moves the hand far from rest, because this file's weights are computed once from the
-    // canonical rest pose (see the class doc comment) and can't tell "resting" from "reaching"
-    // apart at the point they're assigned. A blend that helps a small divergence and hurts a large
-    // one isn't a fix, so it's gone -- see PostureBehaviour's own coupling-fraction comment for
-    // what was kept instead. The hip/hand-fade seam under idle's own base pose (ELBOW_*=0.12)
-    // stacked with independent shoulder noise and WEIGHT_SHIFT near their real extremes together
-    // is still not fully closed by anything in this file; that needs either a coarser-than-this
-    // seam's mesh resolution increase or reduced animation amplitude, both product decisions
-    // beyond a mesh-weighting fix.
+
+    /*
+     * Skin is bound by anatomy, not by a fixed x threshold. BODY_EDGE_* is, per design row, the
+     * half-width (distance from the centre line) of the boundary between Leon's body (torso, hips,
+     * legs) and his hanging arms/hands. From y=268 down it sits in the middle of the transparent gap
+     * measured on the production texture's alpha. LeonMeshRigTest#bodyEdgeLiesInTheMeasuredGap
+     * re-measures it against the generated texture, so replacement art that moves the gap fails a
+     * test instead of silently mis-binding.
+     *
+     * The rule this replaces bound everything beyond |x - centre| > 72 below y=395 to hand->root.
+     * The pelvis and thighs reach +-80..93 there, so the outer strip of each hip followed the hand
+     * and the static root while the inner strip followed HIPS. Idle weight shift then squeezed one
+     * hip to ~0.35x its width (measured at plain IDLE). It also blended arm weight into the torso
+     * from the centre line outwards, putting ~29% forearm/hand weight inside the belly.
+     */
+    // Gap midpoints measured every 3 design rows (both sides, the narrower gap wins), plus the
+    // rows where the thumb nearly touches the hip (y 427-432, gap ~3 units).
+    private static final float[] BODY_EDGE_Y = {
+            268f, 271f, 274f, 277f, 280f, 283f, 286f, 289f, 292f, 295f, 298f, 301f, 304f, 307f,
+            310f, 313f, 316f, 319f, 322f, 325f, 328f, 331f, 334f, 337f, 340f, 343f, 346f, 349f,
+            352f, 355f, 358f, 361f, 364f, 367f, 370f, 373f, 376f, 379f, 382f, 385f, 388f, 391f,
+            394f, 397f, 400f, 403f, 406f, 409f, 412f, 415f, 418f, 421f, 424f, 427f, 430f, 431f,
+            432f, 433f, 436f, 439f, 442f, 445f, 446f};
+    private static final float[] BODY_EDGE_HALF_WIDTH = {
+            70f, 70.75f, 71.25f, 70.25f, 69.5f, 70.75f, 72.5f, 74f, 73.5f, 73.5f, 74.25f, 75.5f,
+            76f, 77f, 76.5f, 77f, 77f, 77.5f, 78.25f, 80f, 80.5f, 81.5f, 81.5f, 81.75f, 83.5f,
+            83.5f, 83.5f, 82.25f, 83.5f, 84.5f, 85f, 85.75f, 87f, 88.5f, 88.5f, 89.75f, 90.75f,
+            90.25f, 91f, 92.5f, 92f, 91f, 89f, 88.5f, 88f, 86.75f, 86.75f, 86.75f, 87f, 86.25f,
+            86.5f, 86.5f, 85.75f, 84.5f, 84.5f, 85f, 85f, 93.25f, 93f, 92f, 91f, 90.5f, 90.25f};
+    /**
+     * Above the armpit the sleeve and the torso are one continuous piece of cloth, so the seam is
+     * blended over a wide margin. Below it a transparent gap separates body from arm, and the blend
+     * is kept narrower than that gap so neither side drags the other's pixels.
+     */
+    private static final float SHOULDER_BLEND_HALF_WIDTH = 16f;
+    private static final float GAP_BLEND_HALF_WIDTH = 2.5f;
+    private static final float ARMPIT_Y = 262f;
+    private static final float GAP_OPEN_Y = 274f;
+    /**
+     * Leon is drawn as two meshes over the same texture, body first and arms on top, and no
+     * triangle connects them. Below the armpit the hanging arms are separated from the torso and
+     * hips by a transparent gap only 3-12 design units wide, narrower than a mesh cell. In a single
+     * mesh the cells spanning that gap tie arm vertices to hip vertices, so any arm motion (even
+     * IDLE's 12% elbow bend swings the hand ~20 units inwards) either dragged and squeezed the
+     * outer hip and thigh or, bound the other way, tore the hand into slivers across the hip.
+     * With two layers each visible pixel follows only its own bones: hips and legs never move with
+     * a hand, and a hand swinging over the hip simply passes in front of it.
+     *
+     * Above SHARED_SKIN_END_Y both layers use the same blended skinning (the sleeve is one piece of
+     * cloth with the shoulder), so the cut through the sleeve at ARM_LAYER_TOP_Y is seamless. The
+     * arm layer starts ARM_LAYER_OVERLAP units above the cut so filtering at the cut never leaves a
+     * half-transparent line; both layers draw those pixels at identical positions.
+     */
+    public enum Layer { BODY, ARMS }
+
+    public static final float ARM_LAYER_TOP_Y = 283f;
+    public static final float ARM_LAYER_OVERLAP = 2f;
+    /** One mesh cell below the cut, so no cell holding cut-line pixels changes binding. */
+    private static final float SHARED_SKIN_END_Y = 292f;
 
     private final Rig rig;
+    private final Layer layer;
     private final int meshCols;
     private final int meshRows;
     private final float[] canonicalVertices;
@@ -75,12 +113,14 @@ public final class LeonMeshRig {
     private final Binding shinR;
     private final Binding footR;
 
-    private LeonMeshRig(Rig rig, int cols, int rows,
+    private LeonMeshRig(Rig rig, Layer layer, int cols, int rows,
                         int sourceWidth, int sourceHeight,
                         float crownY, float soleY, float centreX) {
         if (rig == null) throw new IllegalArgumentException("rig required");
+        if (layer == null) throw new IllegalArgumentException("layer required");
         if (cols <= 0 || rows <= 0) throw new IllegalArgumentException("mesh size must be positive");
         this.rig = rig;
+        this.layer = layer;
         this.meshCols = cols;
         this.meshRows = rows;
 
@@ -129,9 +169,9 @@ public final class LeonMeshRig {
         }
     }
 
-    public static LeonMeshRig create(Rig rig, ProductionLeonTexture.Manifest manifest) {
+    public static LeonMeshRig create(Rig rig, ProductionLeonTexture.Manifest manifest, Layer layer) {
         if (manifest == null) throw new IllegalArgumentException("manifest required");
-        return new LeonMeshRig(rig, manifest.meshCols, manifest.meshRows,
+        return new LeonMeshRig(rig, layer, manifest.meshCols, manifest.meshRows,
                 manifest.sourceWidth, manifest.sourceHeight,
                 manifest.crownY, manifest.soleY, manifest.centreX);
     }
@@ -150,9 +190,18 @@ public final class LeonMeshRig {
      * authored in this 360x640 canvas space (soleY=619 sits near the bottom of a 640-tall canvas).
      */
     public static LeonMeshRig createForTest(int cols, int rows) {
-        return new LeonMeshRig(LeonRig.build(), cols, rows,
-                360, 640, 20f, 619f, 180f);
+        return createForTest(LeonRig.build(), cols, rows, Layer.BODY);
     }
+
+    /** Same production geometry for one layer; pass the same rig to both layers to pose them together. */
+    public static LeonMeshRig createForTest(Rig rig, int cols, int rows, Layer layer) {
+        return new LeonMeshRig(rig, layer, cols, rows, 360, 640, 20f, 619f, 180f);
+    }
+
+    public Layer layer() {
+        return layer;
+    }
+
 
     /** Exposed for tests that need to drive a pose through {@code LeonRigBinder} on this exact rig. */
     public Rig rig() {
@@ -217,8 +266,8 @@ public final class LeonMeshRig {
     }
 
     private VertexWeights weightsFor(float x, float y) {
-        // Transparent pixels outside Leon still need a stable transform because drawBitmapMesh
-        // requires a full rectangular grid. Root is the harmless default for that empty area.
+        // drawBitmapMesh needs a full rectangular grid, so transparent vertices outside Leon are
+        // still bound to the nearest body chain.
         if (y < 150f) return one(head);
 
         if (y < 205f) {
@@ -228,48 +277,34 @@ public final class LeonMeshRig {
                     chest, t * 0.65f);
         }
 
-        if (y < 395f) {
-            // Column-direction (x) blend across the side>72 torso/limb boundary, mirroring the
-            // row-direction (y) blends used everywhere else in this method. Real-device report:
-            // the hip visibly pinched/compressed right where the resting hand sits against it, at
-            // plain IDLE with no gesture at all. Root cause was that this boundary used to be a
-            // hard, unblended cutoff -- every OTHER seam in this file blends smoothly across a
-            // margin, but center columns (side<=72, chest/spine/hips) and side columns (side>72,
-            // shoulder/arm/forearm/hand) met with a single-pixel jump in bone binding. That is
-            // invisible at rest (every bone's transform is identity there) but PostureBehaviour's
-            // autonomous idle weight-shift moves the hips bone (a translation/rotation around the
-            // hip pivot) while also feeding a fraction of the same signal into ARM_*_SWING ("arms
-            // hang from the shoulders, so they inherit part of the sway" -- PostureBehaviour), a
-            // rotation around a completely different pivot (the shoulder). The two never move in
-            // lockstep, so the unblended column boundary right at hand-resting-on-hip height (this
-            // whole y<395 band) pinches on every idle weight-shift cycle -- no arm channel, gesture,
-            // or large pose needed to see it, unlike every other seam bug already fixed in this file.
-            float side = Math.abs(x - DESIGN_CENTRE_X);
-            boolean left = x < DESIGN_CENTRE_X;
-            if (side <= COLUMN_BLEND_START) return centerWeightsFor(y);
-            VertexWeights limb = sideWeightsFor(y, left);
-            if (side >= COLUMN_BLEND_END) return limb;
-            float t = smooth((side - COLUMN_BLEND_START) / (COLUMN_BLEND_END - COLUMN_BLEND_START));
-            return blend(centerWeightsFor(y), 1f - t, limb, t);
-        }
-
+        float side = Math.abs(x - DESIGN_CENTRE_X);
         boolean left = x < DESIGN_CENTRE_X;
-        float legSide = Math.abs(x - DESIGN_CENTRE_X);
-        // Deliberately NOT column-blended, unlike the torso/limb boundary above: a real-device
-        // regression report led to a probe of this exact production geometry (360x640, see
-        // createForTest) that showed this blend actively pulling upper-thigh vertices toward the
-        // dangling hand/root instead of fixing anything. At chest/shoulder height (above) the
-        // torso and arm are one continuous silhouette, so blending across that seam is
-        // anatomically correct. Down here, a hand hanging past the hip is NOT attached to the
-        // thigh -- legSideFadeWeightsFor's own comment already explains why this region fades to
-        // root instead of hip/thigh: to avoid exactly this kind of false attachment. Blending
-        // softened that boundary right back into the failure it was written to avoid, just
-        // pulling the opposite direction (thigh vertices picking up hand/root weight -- measured
-        // up to ~31% hand_l, ~33% root on real thigh vertices, e.g. WEIGHT_SHIFT-driven idle at
-        // canonical (x=114, y=441): hips=0.244 thigh_l=0.120 hand_l=0.307 root=0.330 -- rather
-        // than hand vertices picking up hip weight).
-        if (legSide > 72f) return legSideFadeWeightsFor(y, left);
-        return legWeightsFor(y, left);
+        if (y >= SHARED_SKIN_END_Y) {
+            // Below the armpit each layer follows only its own chain, wherever the vertex is.
+            if (layer == Layer.ARMS) return sideWeightsFor(y, left);
+            return y < 395f ? centerWeightsFor(y) : legWeightsFor(y, left);
+        }
+        float edge = bodyEdgeHalfWidth(y);
+        float half = y <= ARMPIT_Y ? SHOULDER_BLEND_HALF_WIDTH
+                : y >= GAP_OPEN_Y ? GAP_BLEND_HALF_WIDTH
+                : SHOULDER_BLEND_HALF_WIDTH + (GAP_BLEND_HALF_WIDTH - SHOULDER_BLEND_HALF_WIDTH)
+                        * ((y - ARMPIT_Y) / (GAP_OPEN_Y - ARMPIT_Y));
+        if (side <= edge - half) return centerWeightsFor(y);
+        VertexWeights limb = sideWeightsFor(y, left);
+        if (side >= edge + half) return limb;
+        float t = smooth((side - (edge - half)) / (2f * half));
+        return blend(centerWeightsFor(y), 1f - t, limb, t);
+    }
+
+    /** Body/arm boundary half-width at design row y (see BODY_EDGE_*). */
+    public static float bodyEdgeHalfWidth(float y) {
+        if (y <= BODY_EDGE_Y[0]) return BODY_EDGE_HALF_WIDTH[0];
+        int last = BODY_EDGE_Y.length - 1;
+        if (y >= BODY_EDGE_Y[last]) return BODY_EDGE_HALF_WIDTH[last];
+        int i = 1;
+        while (BODY_EDGE_Y[i] < y) i++;
+        float t = (y - BODY_EDGE_Y[i - 1]) / (BODY_EDGE_Y[i] - BODY_EDGE_Y[i - 1]);
+        return BODY_EDGE_HALF_WIDTH[i - 1] + t * (BODY_EDGE_HALF_WIDTH[i] - BODY_EDGE_HALF_WIDTH[i - 1]);
     }
 
     /** Chest/spine/hips chain for the torso columns of the y in [205,395) band -- ignores x. */
@@ -303,14 +338,14 @@ public final class LeonMeshRig {
             float t = smooth((y - 205f) / 30f);
             return two(chest, 1f - t, left ? armL : armR, t);
         }
-        if (y < 270f) return one(left ? armL : armR);
-        if (y < 300f) {
-            float t = smooth((y - 270f) / 30f);
+        if (y < LeonRig.ELBOW_Y - 15f) return one(left ? armL : armR);
+        if (y < LeonRig.ELBOW_Y + 15f) {
+            float t = smooth((y - (LeonRig.ELBOW_Y - 15f)) / 30f);
             return two(left ? armL : armR, 1f - t, left ? forearmL : forearmR, t);
         }
-        if (y < 345f) return one(left ? forearmL : forearmR);
-        if (y < 375f) {
-            float t = smooth((y - 345f) / 30f);
+        if (y < LeonRig.WRIST_Y - 15f) return one(left ? forearmL : forearmR);
+        if (y < LeonRig.WRIST_Y + 15f) {
+            float t = smooth((y - (LeonRig.WRIST_Y - 15f)) / 30f);
             return two(left ? forearmL : forearmR, 1f - t, left ? handL : handR, t);
         }
         return one(left ? handL : handR);
@@ -329,30 +364,6 @@ public final class LeonMeshRig {
         if (y < 748f) {
             float t = smooth((y - 655f) / 93f);
             return two(left ? shinL : shinR, 1f - t, left ? footL : footR, t);
-        }
-        return one(root);
-    }
-
-    /** Hand-fading-to-root chain for the side columns of the y >= 395 band. */
-    private VertexWeights legSideFadeWeightsFor(float y, boolean left) {
-        // Off to the side of the torso -- this is the hand/sleeve fading toward background below
-        // where an arm hangs, not leg territory, even though it shares this row range with the
-        // legs in the middle columns. Binding it to hip/thigh regardless of side (as this used to)
-        // means a hand swung away from rest snaps back to a stationary hip on the very next row,
-        // the same seam-stretch problem as the elbow/wrist above. Fading it to root instead means
-        // it settles toward the untouched canonical position rather than jumping to one.
-        //
-        // This column's seam against the adjacent hip/thigh column (legSide<=72) can still stretch
-        // severely under PostureBehaviour's idle sway (measured up to 2x at its real WEIGHT_SHIFT/
-        // shoulder-noise range, and far worse once idle's own base ELBOW_*=0.12 is stacked on top --
-        // see this file's own history for a rejected attempt at blending this column toward hips to
-        // reduce it, which fixed idle sway but broke actively-raised-hand gestures instead. Left as
-        // a hard cutoff for now: not contaminating legWeightsFor's columns with any hand/root weight
-        // is the one property every attempt here has to preserve, and a real fix needs either finer
-        // mesh resolution at this seam or reduced idle animation amplitude, not another weight blend.
-        if (y < 485f) {
-            float t = smooth((y - 395f) / 90f);
-            return two(left ? handL : handR, 1f - t, root, t);
         }
         return one(root);
     }

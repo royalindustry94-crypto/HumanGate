@@ -7,8 +7,8 @@ from pathlib import Path
 
 from PIL import Image, ImageEnhance
 
-MESH_COLS = 16
-MESH_ROWS = 28
+MESH_COLS = 48
+MESH_ROWS = 84
 DESIGN_SIZE = [384, 768]
 
 
