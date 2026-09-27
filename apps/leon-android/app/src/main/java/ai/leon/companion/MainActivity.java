@@ -266,11 +266,11 @@ public final class MainActivity extends Activity
         root.addView(conversationStatus, withBottom(22));
 
         root.addView(heading("Voice backend", 19), withBottom(4));
-        root.addView(caption("Where Leon's real voice (speech in, Claude reply, speech out) is "
+        root.addView(caption("Where Leon's real voice (speech in, OpenAI reply, speech out) is "
                 + "served from. Both live only on this device."), withBottom(10));
 
         final EditText baseUrlInput = new EditText(this);
-        baseUrlInput.setHint("https://your-backend.vercel.app");
+        baseUrlInput.setHint("https://humangate-production.up.railway.app");
         baseUrlInput.setHintTextColor(Color.rgb(122, 124, 136));
         baseUrlInput.setTextColor(Color.WHITE);
         baseUrlInput.setBackground(panel(Color.rgb(26, 27, 33)));

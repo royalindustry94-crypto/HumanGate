@@ -35,7 +35,6 @@ capture_state emulator-thinking thinking
 capture_state emulator-speaking speaking
 capture_state emulator-chin idle chin
 capture_state emulator-head-left idle head-left
-capture_state emulator-walk-right idle walk-right
 
 adb shell am force-stop ai.leon.companion
 adb shell appops set ai.leon.companion SYSTEM_ALERT_WINDOW allow

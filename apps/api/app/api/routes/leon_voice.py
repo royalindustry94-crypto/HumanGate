@@ -14,9 +14,14 @@ from __future__ import annotations
 import hmac
 import json
 import logging
-import struct
+from collections.abc import AsyncIterable
+from dataclasses import dataclass
+from pathlib import Path
 
-from fastapi import APIRouter, Form, Header, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Header, HTTPException, Request, status
+from starlette.datastructures import FormData, UploadFile
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.formparsers import MultiPartException
 
 from app.core.audit import audit
 from app.core.config import get_settings
@@ -30,15 +35,202 @@ from app.services.leon_voice import (
     run_voice_turn,
 )
 
-logger = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/leon", tags=["leon-voice"])
+logger = logging.getLogger(__name__)
 
 _ALLOWED_HISTORY_ROLES = {"user", "assistant"}
 # Read in bounded slices so a caller that lies about Content-Length (or a
 # proxy that doesn't enforce one) can never make this handler materialize
 # more than MAX_AUDIO_BYTES + 1 bytes before the size check below runs.
 _AUDIO_READ_CHUNK_BYTES = 1024 * 1024
+_FORM_CONTENT_TYPES = {"application/x-www-form-urlencoded", "multipart/form-data"}
+_CONTENT_TYPE_TO_AUDIO_FORMAT = {
+    "audio/flac": "flac",
+    "audio/m4a": "m4a",
+    "audio/mp3": "mp3",
+    "audio/mp4": "mp4",
+    "audio/mpeg": "mp3",
+    "audio/ogg": "ogg",
+    "audio/wav": "wav",
+    "audio/webm": "webm",
+    "audio/wave": "wav",
+    "audio/x-flac": "flac",
+    "audio/x-m4a": "m4a",
+    "audio/x-wav": "wav",
+    "application/octet-stream": None,
+    "video/mp4": "mp4",
+    "video/ogg": "ogg",
+    "video/webm": "webm",
+}
+_EXTENSION_TO_AUDIO_FORMAT = {
+    ".flac": "flac",
+    ".m4a": "m4a",
+    ".mp3": "mp3",
+    ".mp4": "mp4",
+    ".oga": "ogg",
+    ".ogg": "ogg",
+    ".wav": "wav",
+    ".wave": "wav",
+    ".webm": "webm",
+}
+_AUDIO_FORMAT_TO_CONTENT_TYPE = {
+    "flac": "audio/flac",
+    "m4a": "audio/m4a",
+    "mp3": "audio/mpeg",
+    "mp4": "audio/mp4",
+    "ogg": "audio/ogg",
+    "wav": "audio/wav",
+    "webm": "audio/webm",
+}
+_AUDIO_FORMAT_TO_EXTENSION = {
+    "flac": "flac",
+    "m4a": "m4a",
+    "mp3": "mp3",
+    "mp4": "mp4",
+    "ogg": "ogg",
+    "wav": "wav",
+    "webm": "webm",
+}
+
+
+@dataclass(slots=True)
+class _AudioUpload:
+    data: bytes
+    filename: str
+    content_type: str
+    container: str
+    byte_count: int
+    magic_bytes: str
+
+
+@dataclass(slots=True)
+class _VoiceTurnRequest:
+    text: str | None
+    history: str | None
+    audio: _AudioUpload | None
+
+
+def _voice_error_detail(
+    message: str,
+    *,
+    stage: str,
+    error_code: str,
+    request_id: str | None = None,
+    error_type: str | None = None,
+) -> dict[str, str]:
+    detail = {
+        "message": message,
+        "stage": stage,
+        "error_code": error_code,
+    }
+    if request_id:
+        detail["request_id"] = request_id
+    if error_type:
+        detail["error_type"] = error_type
+    return detail
+
+
+def _normalized_content_type(content_type: str | None) -> str:
+    return (content_type or "").split(";", 1)[0].strip().lower()
+
+
+def _magic_preview(audio_bytes: bytes) -> str:
+    return audio_bytes[:8].hex()
+
+
+def _safe_filename_stem(filename: str | None) -> str:
+    candidate = Path(filename or "").name
+    stem = Path(candidate).stem if candidate else "speech"
+    cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in stem).strip("-_")
+    return cleaned or "speech"
+
+
+def _audio_format_from_extension(filename: str | None) -> str | None:
+    suffix = Path(filename or "").suffix.lower()
+    return _EXTENSION_TO_AUDIO_FORMAT.get(suffix)
+
+
+def _audio_format_from_magic(audio_bytes: bytes) -> str | None:
+    if len(audio_bytes) >= 12 and audio_bytes[:4] == b"RIFF" and audio_bytes[8:12] == b"WAVE":
+        return "wav"
+    if audio_bytes.startswith(b"ID3"):
+        return "mp3"
+    if len(audio_bytes) >= 2 and audio_bytes[0] == 0xFF and audio_bytes[1] & 0xE0 == 0xE0:
+        return "mp3"
+    if audio_bytes.startswith(b"fLaC"):
+        return "flac"
+    if audio_bytes.startswith(b"OggS"):
+        return "ogg"
+    if audio_bytes.startswith(b"\x1aE\xdf\xa3"):
+        return "webm"
+    if len(audio_bytes) >= 12 and audio_bytes[4:8] == b"ftyp":
+        return "m4a" if audio_bytes[8:12] == b"M4A " else "mp4"
+    return None
+
+
+def _resolved_audio_extension(
+    audio_format: str,
+    *,
+    filename: str | None,
+    content_type: str,
+) -> str:
+    suffix = Path(filename or "").suffix.lower()
+    if suffix in {".m4a", ".mp4"} and audio_format in {"m4a", "mp4"}:
+        return suffix[1:]
+    if _normalized_content_type(content_type) == "video/mp4":
+        return "mp4"
+    return _AUDIO_FORMAT_TO_EXTENSION[audio_format]
+
+
+def _normalize_audio_upload(
+    *,
+    audio_bytes: bytes,
+    filename: str | None,
+    content_type: str | None,
+    request_id: str | None,
+) -> _AudioUpload:
+    normalized_content_type = _normalized_content_type(content_type)
+    detected_format = _audio_format_from_magic(audio_bytes)
+    extension_format = _audio_format_from_extension(filename)
+    content_type_format = _CONTENT_TYPE_TO_AUDIO_FORMAT.get(normalized_content_type)
+    resolved_format = detected_format or extension_format or content_type_format
+
+    if resolved_format is None:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=_voice_error_detail(
+                "unsupported audio format",
+                stage="request_parsing",
+                error_code="unsupported_audio_format",
+                request_id=request_id,
+            ),
+        )
+
+    if resolved_format == "wav" and detected_format != "wav":
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=_voice_error_detail(
+                "audio/wav requires a valid WAV container",
+                stage="request_parsing",
+                error_code="unsupported_audio_format",
+                request_id=request_id,
+            ),
+        )
+
+    safe_stem = _safe_filename_stem(filename)
+    extension = _resolved_audio_extension(
+        resolved_format,
+        filename=filename,
+        content_type=normalized_content_type,
+    )
+    return _AudioUpload(
+        data=audio_bytes,
+        filename=f"{safe_stem}.{extension}",
+        content_type=_AUDIO_FORMAT_TO_CONTENT_TYPE[resolved_format],
+        container=resolved_format,
+        byte_count=len(audio_bytes),
+        magic_bytes=_magic_preview(audio_bytes),
+    )
 
 
 async def _read_audio_bounded(audio: UploadFile) -> bytes:
@@ -59,94 +251,152 @@ async def _read_audio_bounded(audio: UploadFile) -> bytes:
     return b"".join(chunks)
 
 
-# Enough leading bytes to name the container. Never more: the rest is the user's voice.
-_AUDIO_MAGIC_BYTES = 12
+async def _read_stream_bounded(stream: AsyncIterable[bytes]) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in stream:
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > MAX_AUDIO_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"audio must be at most {MAX_AUDIO_BYTES} bytes",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
-def _sniff_container(head: bytes) -> str:
-    if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
-        return "wav"
-    if head[4:8] == b"ftyp":
-        return "mp4/m4a"
-    if head[:4] == b"OggS":
-        return "ogg"
-    if head[:4] == b"\x1aE\xdf\xa3":
-        return "webm/matroska"
-    if head[:3] == b"ID3" or head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
-        return "mp3"
-    if head[:6] == b"#!AMR\n":
-        return "amr"
-    if head[:4] == b"fLaC":
-        return "flac"
-    return "unknown"
+async def _read_request_form(request: Request, request_id: str | None) -> FormData:
+    try:
+        return await request.form()
+    except StarletteHTTPException as exc:
+        if exc.status_code != status.HTTP_400_BAD_REQUEST:
+            raise
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_voice_error_detail(
+                "malformed multipart form data",
+                stage="request_parsing",
+                error_code="invalid_multipart",
+                request_id=request_id,
+            ),
+        ) from exc
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_400_BAD_REQUEST:
+            raise
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_voice_error_detail(
+                "malformed multipart form data",
+                stage="request_parsing",
+                error_code="invalid_multipart",
+                request_id=request_id,
+            ),
+        ) from exc
+    except (MultiPartException, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_voice_error_detail(
+                "malformed multipart form data",
+                stage="request_parsing",
+                error_code="invalid_multipart",
+                request_id=request_id,
+            ),
+        ) from exc
 
 
-def _wav_format(audio: bytes) -> dict[str, int] | None:
-    """Channels/rate/bits from a canonical WAV "fmt " chunk; None when it is not one."""
-    if len(audio) < 36 or audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+def _coerce_optional_form_text(
+    form: FormData,
+    field_name: str,
+    *,
+    request_id: str | None,
+) -> str | None:
+    value = form.get(field_name)
+    if value is None:
         return None
-    offset = 12
-    while offset + 8 <= len(audio):
-        chunk_id = audio[offset : offset + 4]
-        (chunk_size,) = struct.unpack_from("<I", audio, offset + 4)
-        if chunk_id == b"fmt " and offset + 24 <= len(audio):
-            audio_format, channels, sample_rate = struct.unpack_from("<HHI", audio, offset + 8)
-            (bits,) = struct.unpack_from("<H", audio, offset + 22)
-            return {
-                "wav_audio_format": audio_format,
-                "wav_channels": channels,
-                "wav_sample_rate_hz": sample_rate,
-                "wav_bits_per_sample": bits,
-            }
-        offset += 8 + chunk_size + (chunk_size & 1)
-    return None
+    if isinstance(value, UploadFile):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_voice_error_detail(
+                f"{field_name} must be a text field",
+                stage="request_parsing",
+                error_code="invalid_form_field",
+                request_id=request_id,
+            ),
+        )
+    return str(value)
 
 
-def _payload_shape(
+async def _parse_voice_turn_request(
     request: Request,
     *,
-    text: str | None,
-    history: str | None,
-    audio: UploadFile | None,
-    audio_bytes: bytes | None,
-) -> dict[str, object]:
-    """What the client sent, described without its content.
+    request_id: str | None,
+) -> _VoiceTurnRequest:
+    content_type = _normalized_content_type(request.headers.get("content-type"))
+    if not content_type:
+        audio_bytes = await _read_stream_bounded(request.stream())
+        if not audio_bytes:
+            return _VoiceTurnRequest(text=None, history=None, audio=None)
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=_voice_error_detail(
+                "unsupported content type",
+                stage="request_parsing",
+                error_code="unsupported_media_type",
+                request_id=request_id,
+            ),
+        )
+    if content_type in _FORM_CONTENT_TYPES:
+        form = await _read_request_form(request, request_id)
+        text = _coerce_optional_form_text(form, "text", request_id=request_id)
+        history = _coerce_optional_form_text(form, "history", request_id=request_id)
+        upload = form.get("audio") or form.get("file")
+        if upload is None:
+            return _VoiceTurnRequest(text=text, history=history, audio=None)
+        if not isinstance(upload, UploadFile):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_voice_error_detail(
+                    "audio must be a file upload",
+                    stage="request_parsing",
+                    error_code="invalid_form_field",
+                    request_id=request_id,
+                ),
+            )
+        audio_bytes = await _read_audio_bounded(upload)
+        return _VoiceTurnRequest(
+            text=text,
+            history=history,
+            audio=_normalize_audio_upload(
+                audio_bytes=audio_bytes,
+                filename=upload.filename,
+                content_type=upload.content_type,
+                request_id=request_id,
+            ),
+        )
 
-    Never includes the Authorization header, the audio beyond its first few container bytes, the
-    typed text or the conversation history: those are credentials and the user's own words.
-    """
-    content_type = request.headers.get("content-type", "")
-    shape: dict[str, object] = {
-        "request_content_type": content_type.split(";", 1)[0].strip()[:80],
-        "request_content_length": request.headers.get("content-length"),
-        "user_agent": (request.headers.get("user-agent") or "")[:120],
-        "has_text": bool(text),
-        "text_length": len(text) if text else 0,
-        "history_length": len(history) if history else 0,
-        "has_audio_part": audio is not None,
-    }
-    if audio is not None:
-        part_headers = {
-            key.lower(): value[:120]
-            for key, value in audio.headers.items()
-            if key.lower() in ("content-type", "content-disposition", "content-transfer-encoding")
-        }
-        shape.update(
-            audio_part_filename=(audio.filename or "")[:80],
-            audio_part_content_type=audio.content_type,
-            audio_part_headers=part_headers,
-        )
-    if audio_bytes is not None:
-        head = audio_bytes[:_AUDIO_MAGIC_BYTES]
-        shape.update(
-            audio_bytes=len(audio_bytes),
-            audio_magic_hex=head.hex(),
-            audio_container=_sniff_container(head),
-        )
-        wav = _wav_format(audio_bytes)
-        if wav:
-            shape.update(wav)
-    return shape
+    if content_type in _CONTENT_TYPE_TO_AUDIO_FORMAT:
+        audio_bytes = await _read_stream_bounded(request.stream())
+        audio = None
+        if audio_bytes:
+            audio = _normalize_audio_upload(
+                audio_bytes=audio_bytes,
+                filename=None,
+                content_type=content_type,
+                request_id=request_id,
+            )
+        return _VoiceTurnRequest(text=None, history=None, audio=audio)
+
+    raise HTTPException(
+        status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+        detail=_voice_error_detail(
+            "unsupported content type",
+            stage="request_parsing",
+            error_code="unsupported_media_type",
+            request_id=request_id,
+        ),
+    )
 
 
 @router.get("/voice-status")
@@ -163,9 +413,7 @@ async def voice_status(
     _require_app_token(authorization)
     settings = get_settings()
     return {
-        "configured": bool(
-            settings.leon_voice_app_token and settings.anthropic_api_key and settings.openai_api_key
-        ),
+        "configured": bool(settings.leon_voice_app_token and settings.openai_api_key),
         "anthropic_configured": bool(settings.anthropic_api_key),
         "openai_configured": bool(settings.openai_api_key),
         "request_id": getattr(request.state, "request_id", None),
@@ -225,54 +473,55 @@ def _parse_history(raw: str | None) -> list[dict[str, str]]:
 @router.post("/voice-turn", response_model=LeonVoiceTurnOut)
 async def voice_turn(
     request: Request,
-    text: str | None = Form(default=None),
-    history: str | None = Form(default=None),
-    audio: UploadFile | None = None,
     authorization: str | None = Header(default=None),
 ) -> LeonVoiceTurnOut:
     _require_app_token(authorization)
-
     request_id = getattr(request.state, "request_id", None)
-    stage = "read_audio"
-    audio_bytes: bytes | None = None
+    failure_stage = "request_parsing"
+    audio: _AudioUpload | None = None
+    audio_diagnostics: dict[str, int | str | None] = {
+        "audio_byte_count": None,
+        "audio_container": None,
+        "audio_content_type": None,
+        "audio_filename": None,
+        "audio_magic_bytes": None,
+    }
     try:
+        parsed = await _parse_voice_turn_request(request, request_id=request_id)
+        text = parsed.text
+        history = parsed.history
+        audio = parsed.audio
+        if audio is not None:
+            audio_diagnostics.update(
+                {
+                    "audio_byte_count": audio.byte_count,
+                    "audio_container": audio.container,
+                    "audio_content_type": audio.content_type,
+                    "audio_filename": audio.filename,
+                    "audio_magic_bytes": audio.magic_bytes,
+                }
+            )
+
+        failure_stage = "request_validation"
         if text is not None and len(text) > MAX_TEXT_CHARS:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"text must be at most {MAX_TEXT_CHARS} characters",
             )
 
-        if audio is not None:
-            audio_bytes = await _read_audio_bounded(audio)
-
-        shape = _payload_shape(
-            request, text=text, history=history, audio=audio, audio_bytes=audio_bytes
-        )
-        logger.info("leon_voice_turn_received", extra={"request_id": request_id, **shape})
-
-        if not audio_bytes and not (text or "").strip():
+        if audio is None and not (text or "").strip():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="either audio or text is required",
             )
 
-        stage = "parse_history"
-        parsed_history = _parse_history(history)
-
-        stage = "voice_turn"
+        failure_stage = "voice_turn"
         user_text, reply_text, reply_audio = await run_voice_turn(
             user_text=text,
-            audio_bytes=audio_bytes,
+            audio_bytes=audio.data if audio else None,
             audio_filename=(audio.filename if audio else None) or "speech.m4a",
             audio_content_type=(audio.content_type if audio else None) or "audio/m4a",
-            history=parsed_history,
-        )
-
-        stage = "encode_reply"
-        response = LeonVoiceTurnOut(
-            user_text=user_text,
-            reply_text=reply_text,
-            reply_audio_base64=encode_audio_base64(reply_audio),
+            history=_parse_history(history),
         )
     except HTTPException:
         raise
@@ -280,7 +529,7 @@ async def voice_turn(
         audit(
             request,
             "leon_voice_turn_failed",
-            had_audio=audio_bytes is not None,
+            had_audio=audio is not None,
             failure_stage=exc.stage,
         )
         if exc.stage == "spend":
@@ -301,46 +550,42 @@ async def voice_turn(
             },
         ) from exc
     except Exception as exc:
-        # Anything else used to escape to the global handler as a bare "internal server error",
-        # with no stage for the client and nothing tied to the request in the log. The traceback
-        # stays server-side; the client gets the stage, the exception class and the payload shape
-        # (never the exception message, which can carry SQL, hostnames or provider responses).
-        shape = _payload_shape(
-            request, text=text, history=history, audio=audio, audio_bytes=audio_bytes
-        )
         logger.exception(
-            "leon_voice_turn_unhandled",
+            "leon_voice_turn_internal_error",
             extra={
                 "request_id": request_id,
-                "failure_stage": stage,
-                "error_type": type(exc).__name__,
-                **shape,
+                "failure_stage": failure_stage,
+                **audio_diagnostics,
             },
         )
         audit(
             request,
-            "leon_voice_turn_failed",
-            had_audio=audio_bytes is not None,
-            failure_stage=f"internal:{stage}",
+            "leon_voice_turn_internal_error",
+            had_audio=audio_diagnostics["audio_byte_count"] is not None,
+            failure_stage=failure_stage,
             error_type=type(exc).__name__,
+            **audio_diagnostics,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={
-                "message": "Leon's voice backend hit an internal error",
-                "stage": stage,
-                "error_code": "voice_internal_error",
-                "error_type": type(exc).__name__,
-                "request_id": request_id,
-                "received": shape,
-            },
+            detail=_voice_error_detail(
+                "voice turn failed unexpectedly",
+                stage=failure_stage,
+                error_code="voice_internal_error",
+                request_id=request_id,
+                error_type=type(exc).__name__,
+            ),
         ) from exc
 
     audit(
         request,
         "leon_voice_turn_completed",
-        had_audio=audio_bytes is not None,
+        had_audio=audio is not None,
         user_text_length=len(user_text),
         reply_text_length=len(reply_text),
     )
-    return response
+    return LeonVoiceTurnOut(
+        user_text=user_text,
+        reply_text=reply_text,
+        reply_audio_base64=encode_audio_base64(reply_audio),
+    )

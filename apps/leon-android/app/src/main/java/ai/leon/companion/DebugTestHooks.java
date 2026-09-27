@@ -42,12 +42,6 @@ public final class DebugTestHooks {
             case "head-right":
                 controller.onTouched(-0.8f, 0f);
                 break;
-            case "walk-right":
-                controller.startWalkForDebug(1f, 4f);
-                break;
-            case "walk-left":
-                controller.startWalkForDebug(-1f, 4f);
-                break;
             case "blink":
                 controller.triggerBlink();
                 break;

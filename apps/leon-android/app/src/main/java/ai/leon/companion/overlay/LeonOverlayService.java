@@ -8,6 +8,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.app.KeyguardManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -20,6 +21,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.GestureDetector;
@@ -35,7 +37,6 @@ import ai.leon.companion.LeonRuntime;
 import ai.leon.companion.MainActivity;
 import ai.leon.companion.R;
 import ai.leon.companion.anim.LeonAnimationController;
-import ai.leon.companion.anim.WalkBehaviour;
 import ai.leon.companion.render.LeonCharacterView;
 import ai.leon.companion.render.ProductionLeonTexture;
 import ai.leon.companion.rig.LeonRig;
@@ -79,9 +80,6 @@ public final class LeonOverlayService extends Service implements LeonStateContro
     private static final int EXPANDED_HEIGHT_DP = 264;
     private static final int MINIMISED_WIDTH_DP = 62;
     private static final int MINIMISED_HEIGHT_DP = 124;
-    /** A slow amble, matched to the leg cadence in {@code WalkBehaviour} -- fast enough to read as
-     *  walking, slow enough not to look like he's sliding across the glass. */
-    private static final float WALK_SPEED_DP_PER_SECOND = 46f;
 
     /** Set while a service instance holds a live overlay, for the control centre's status line. */
     private static volatile boolean overlayLive;
@@ -104,6 +102,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
     private BroadcastReceiver screenReceiver;
     private GestureDetector gestureDetector;
     private ValueAnimator settleAnimator;
+    private boolean overlayInitializing;
     private boolean dragging;
     private int dragStartX;
     private int dragStartY;
@@ -111,8 +110,6 @@ public final class LeonOverlayService extends Service implements LeonStateContro
     private float dragDownY;
     private int touchSlop;
     private String blockedReason;
-    private boolean wasWalking;
-    private float walkPositionRemainderPx;
 
     /** True while an overlay view is attached to the window manager. */
     public static boolean isOverlayLive() {
@@ -152,19 +149,25 @@ public final class LeonOverlayService extends Service implements LeonStateContro
         registerScreenReceiver();
         runtime.states().addListener(this);
 
+        if (!prefs.isEnabled()) {
+            stopSelf();
+            return;
+        }
         if (!Settings.canDrawOverlays(this)) {
             blockedReason = "Display over other apps is not granted.";
             updateNotification();
             return;
         }
+        long now = System.currentTimeMillis();
         long hiddenUntil = prefs.hiddenUntilMillis();
-        if (hiddenUntil > System.currentTimeMillis()) {
-            scheduleUnhide(hiddenUntil - System.currentTimeMillis());
+        if (LeonOverlayRestorePolicy.isTemporarilyHidden(hiddenUntil, now)) {
+            scheduleUnhide(hiddenUntil - now);
             updateNotification();
             return;
         }
         prefs.setHiddenUntilMillis(0L);
-        showOverlay();
+        restoreOverlayIfEligible(now);
+        updateNotification();
     }
 
     @Override
@@ -193,15 +196,17 @@ public final class LeonOverlayService extends Service implements LeonStateContro
         // A sticky restart delivers a null intent. Only an explicit start means the user wants Leon
         // running; a restart must not re-enable him after he was stopped.
         if (intent != null) prefs.setEnabled(true);
+        if (!prefs.isEnabled()) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         if (ACTION_SHOW.equals(action)) {
             prefs.setHiddenUntilMillis(0L);
             handler.removeCallbacks(unhide);
         }
         if (Settings.canDrawOverlays(this)) {
             blockedReason = null;
-            if (host == null && prefs.hiddenUntilMillis() <= System.currentTimeMillis()) {
-                showOverlay();
-            }
+            restoreOverlayIfEligible(System.currentTimeMillis());
         } else {
             blockedReason = "Display over other apps is not granted.";
         }
@@ -212,58 +217,60 @@ public final class LeonOverlayService extends Service implements LeonStateContro
     // ------------------------------------------------------------------ overlay window
 
     private void showOverlay() {
-        if (windowManager == null || host != null) return;
-
-        rig = LeonRig.build();
-        texture = ProductionLeonTexture.load(this);
-        animation = new LeonAnimationController(rig, runtime.states(), System.nanoTime());
-        runtime.attachSurface(animation);
-
-        characterView = new LeonCharacterView(this, rig, animation, texture);
-        characterView.renderer().setShowRigDebug(prefs.isRigDebugEnabled());
-        walkPositionRemainderPx = 0f;
-        wasWalking = false;
-        characterView.setFrameListener(this::onAnimationFrame);
-
-        host = new FrameLayout(this);
-        // No card, no rounded rectangle, no background: Leon stands on the user's own screen.
-        host.setBackgroundColor(Color.TRANSPARENT);
-        host.addView(characterView, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-
-        boolean minimised = runtime.states().isMinimised();
-        int width = dp(minimised ? MINIMISED_WIDTH_DP : EXPANDED_WIDTH_DP);
-        int height = dp(minimised ? MINIMISED_HEIGHT_DP : EXPANDED_HEIGHT_DP);
-
-        params = new WindowManager.LayoutParams(width, height,
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                        | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
-                PixelFormat.TRANSLUCENT);
-        params.gravity = Gravity.TOP | Gravity.START;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            params.layoutInDisplayCutoutMode =
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-        }
-        applySavedPosition(width, height);
-
-        gestureDetector = new GestureDetector(this, new GestureListener());
-        host.setOnTouchListener(new OverlayTouchListener());
+        if (windowManager == null || host != null || overlayInitializing) return;
+        overlayInitializing = true;
 
         try {
-            windowManager.addView(host, params);
-            overlayLive = true;
-            blockedReason = null;
-            startAlwaysListeningIfEnabled();
-        } catch (Exception e) {
-            // Nothing to work around here — report it and leave the user in control.
-            Log.e(TAG, "Window manager refused Leon's overlay", e);
-            blockedReason = "Android refused the overlay window on this device.";
-            teardownOverlay();
+            rig = LeonRig.build();
+            texture = ProductionLeonTexture.load(this);
+            animation = new LeonAnimationController(rig, runtime.states(), System.nanoTime());
+            runtime.attachSurface(animation);
+
+            characterView = new LeonCharacterView(this, rig, animation, texture);
+            characterView.renderer().setShowRigDebug(prefs.isRigDebugEnabled());
+
+            host = new FrameLayout(this);
+            // No card, no rounded rectangle, no background: Leon stands on the user's own screen.
+            host.setBackgroundColor(Color.TRANSPARENT);
+            host.addView(characterView, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+            boolean minimised = runtime.states().isMinimised();
+            int width = dp(minimised ? MINIMISED_WIDTH_DP : EXPANDED_WIDTH_DP);
+            int height = dp(minimised ? MINIMISED_HEIGHT_DP : EXPANDED_HEIGHT_DP);
+
+            params = new WindowManager.LayoutParams(width, height,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                            | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                    PixelFormat.TRANSLUCENT);
+            params.gravity = Gravity.TOP | Gravity.START;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                params.layoutInDisplayCutoutMode =
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            }
+            applySavedPosition(width, height);
+
+            gestureDetector = new GestureDetector(this, new GestureListener());
+            host.setOnTouchListener(new OverlayTouchListener());
+
+            try {
+                windowManager.addView(host, params);
+                overlayLive = true;
+                blockedReason = null;
+                startAlwaysListeningIfEnabled();
+            } catch (Exception e) {
+                // Nothing to work around here — report it and leave the user in control.
+                Log.e(TAG, "Window manager refused Leon's overlay", e);
+                blockedReason = "Android refused the overlay window on this device.";
+                teardownOverlay();
+            }
+        } finally {
+            overlayInitializing = false;
+            updateNotification();
         }
-        updateNotification();
     }
 
     private void applySavedPosition(int width, int height) {
@@ -340,6 +347,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
         dismissQuickControls();
         stopAlwaysListening();
         overlayLive = false;
+        overlayInitializing = false;
         if (host != null && windowManager != null) {
             try {
                 windowManager.removeView(host);
@@ -436,36 +444,6 @@ public final class LeonOverlayService extends Service implements LeonStateContro
             }
         });
         settleAnimator.start();
-    }
-
-    /**
-     * Called every animated frame by {@link LeonCharacterView}. Translates the overlay window while
-     * {@link WalkBehaviour} reports a walk in progress; does nothing the rest of the time, which is
-     * the overwhelming majority of frames. A drag always wins -- the moment the user grabs Leon this
-     * simply stops moving him, and {@link LeonAnimationController#onTouched} has already cancelled
-     * the walk behind the scenes so the legs settle out too.
-     */
-    private void onAnimationFrame(float dtSeconds) {
-        if (dragging || host == null || params == null || windowManager == null) return;
-
-        float travel = animation.walkTravelFraction();
-        if (travel == 0f) {
-            if (wasWalking) {
-                wasWalking = false;
-                walkPositionRemainderPx = 0f;
-                savePosition();
-            }
-            return;
-        }
-        wasWalking = true;
-
-        // Accumulate sub-pixel motion so a slow amble still visibly advances instead of rounding to
-        // zero every frame on a low-density screen.
-        walkPositionRemainderPx += travel * dp(WALK_SPEED_DP_PER_SECOND) * dtSeconds;
-        int dx = (int) walkPositionRemainderPx;
-        if (dx == 0) return;
-        walkPositionRemainderPx -= dx;
-        moveTo(params.x + dx, params.y);
     }
 
     private void moveTo(int x, int y) {
@@ -634,7 +612,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
         @Override
         public void run() {
             prefs.setHiddenUntilMillis(0L);
-            if (Settings.canDrawOverlays(LeonOverlayService.this) && host == null) showOverlay();
+            restoreOverlayIfEligible(System.currentTimeMillis());
             updateNotification();
         }
     };
@@ -666,24 +644,7 @@ public final class LeonOverlayService extends Service implements LeonStateContro
                     return;
                 }
                 if (Intent.ACTION_SCREEN_ON.equals(action) || Intent.ACTION_USER_PRESENT.equals(action)) {
-                    if (!prefs.isEnabled()) return;
-                    if (prefs.hiddenUntilMillis() > System.currentTimeMillis()) return;
-                    if (host == null) {
-                        if (Settings.canDrawOverlays(LeonOverlayService.this)) showOverlay();
-                    } else {
-                        host.setVisibility(View.VISIBLE);
-                        if (characterView != null) {
-                            characterView.setPaused(false);
-                            if (animation != null) {
-                                // Restart the behaviour timers so intervals that elapsed with the
-                                // screen off do not all fire at once on the first visible frame.
-                                animation.resetBehaviours();
-                                // A blink on unlock reads as Leon waking up with the screen.
-                                animation.triggerBlink();
-                            }
-                        }
-                        startAlwaysListeningIfEnabled();
-                    }
+                    restoreOverlayIfEligible(System.currentTimeMillis());
                 }
             }
         };
@@ -777,6 +738,49 @@ public final class LeonOverlayService extends Service implements LeonStateContro
     private void updateNotification() {
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm != null) nm.notify(NOTIFICATION_ID, buildNotification());
+    }
+
+    private void restoreOverlayIfEligible(long nowMillis) {
+        if (!LeonOverlayRestorePolicy.shouldRestoreOverlay(
+                prefs.isEnabled(),
+                Settings.canDrawOverlays(this),
+                isScreenInteractive(),
+                isKeyguardLocked(),
+                prefs.hiddenUntilMillis(),
+                nowMillis)) {
+            return;
+        }
+        if (overlayInitializing) return;
+        blockedReason = null;
+        if (host == null) {
+            showOverlay();
+            return;
+        }
+        if (!host.isAttachedToWindow() || characterView == null) {
+            teardownOverlay();
+            showOverlay();
+            return;
+        }
+        host.setVisibility(View.VISIBLE);
+        characterView.setPaused(false);
+        if (animation != null) {
+            // Restart the behaviour timers so intervals that elapsed with the
+            // screen off do not all fire at once on the first visible frame.
+            animation.resetBehaviours();
+            // A blink on unlock reads as Leon waking up with the screen.
+            animation.triggerBlink();
+        }
+        startAlwaysListeningIfEnabled();
+    }
+
+    private boolean isScreenInteractive() {
+        PowerManager power = getSystemService(PowerManager.class);
+        return power == null || power.isInteractive();
+    }
+
+    private boolean isKeyguardLocked() {
+        KeyguardManager keyguard = getSystemService(KeyguardManager.class);
+        return keyguard != null && keyguard.isKeyguardLocked();
     }
 
     // ------------------------------------------------------------------ lifecycle

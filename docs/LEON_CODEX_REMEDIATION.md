@@ -18,7 +18,6 @@ Audit the current Leon avatar visually using the existing offline renderer and A
 - arm swing
 - elbow bend
 - wrist / hand motion
-- walking
 
 Inspect real rendered pixels for mesh folding, seam smears, stretched limbs, bad joint deformation, cropping, transparency defects, and unnatural motion.
 

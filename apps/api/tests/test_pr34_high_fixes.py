@@ -10,7 +10,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import select, text
 
-from app.core.config import Settings
+from app.core.config import Settings, database_role_name
 from app.db.session import AsyncSessionLocal
 from app.models.billing import WorkspaceBilling
 from app.models.content import ContentItem
@@ -32,6 +32,28 @@ from app.orchestration import controller, dispatcher, scheduler
 from app.services import billing as billing_service
 from app.services.spend import ensure_default_spend_cap
 from tests.conftest import nontest_jwt_secret
+
+_POOLER_OWNER_URL = (
+    "postgresql://"
+    + "postgres.vagfnbcnvtojljggxvxr"
+    + ":"
+    + "owner-secret"
+    + "@aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres"
+)
+_POOLER_RUNTIME_URL = (
+    "postgresql://"
+    + "app_runtime.vagfnbcnvtojljggxvxr"
+    + ":"
+    + "runtime-secret"
+    + "@aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres"
+)
+_POOLER_OTHER_ROLE_URL = (
+    "postgresql://"
+    + "other_role.vagfnbcnvtojljggxvxr"
+    + ":"
+    + "runtime-secret"
+    + "@aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres"
+)
 
 
 def _base_settings_kwargs(**overrides) -> dict:
@@ -211,6 +233,72 @@ def test_c2_non_local_rejects_passwordless_urls(
                 environment=environment,
                 database_url=database_url,
                 app_database_url=app_database_url,
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "username,expected",
+    [
+        ("app_runtime", "app_runtime"),
+        ("postgres", "postgres"),
+        ("app_runtime.vagfnbcnvtojljggxvxr", "app_runtime"),
+        ("postgres.vagfnbcnvtojljggxvxr", "postgres"),
+        ("app_runtime.vagfnbcnvtojljggxvxr.extra", "app_runtime.vagfnbcnvtojljggxvxr.extra"),
+        ("app_runtime.vagfnbcnvtojljggxvx", "app_runtime.vagfnbcnvtojljggxvx"),  # 19-char ref
+        ("app_runtime.vagfnbcnvtojljggxvxr1", "app_runtime.vagfnbcnvtojljggxvxr1"),  # 21-char ref
+        ("app_runtime.vagfnbcnvtojljggxvxR", "app_runtime.vagfnbcnvtojljggxvxR"),  # uppercase ref
+    ],
+)
+def test_database_role_name_maps_supabase_pooler_usernames(username: str, expected: str):
+    assert database_role_name(username) == expected
+
+
+@pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
+def test_c2_non_local_accepts_supabase_pooler_runtime_username(environment: str):
+    settings = Settings(
+        **_base_settings_kwargs(
+            environment=environment,
+            database_url=_POOLER_OWNER_URL,
+            app_database_url=_POOLER_RUNTIME_URL,
+        )
+    )
+    assert settings.environment == environment
+
+
+@pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
+def test_c2_non_local_rejects_pooler_non_canonical_runtime_role(environment: str):
+    with pytest.raises(ValidationError, match="canonical"):
+        Settings(
+            **_base_settings_kwargs(
+                environment=environment,
+                app_database_url=_POOLER_OTHER_ROLE_URL,
+            )
+        )
+
+
+@pytest.mark.parametrize("environment", ["staging", "preview", "production", "prod"])
+def test_c2_non_local_pooler_owner_maps_to_plain_postgres_role(environment: str):
+    """Pooler owner `postgres.<ref>` and pooler runtime `app_runtime.<ref>`
+    resolve to distinct roles and must be accepted."""
+    settings = Settings(
+        **_base_settings_kwargs(
+            environment=environment,
+            database_url=_POOLER_OWNER_URL,
+            app_database_url=_POOLER_RUNTIME_URL,
+        )
+    )
+    assert settings.environment == environment
+
+
+def test_c2_pooler_owner_identity_reuse_rejected_in_production():
+    """Pooler `app_runtime.<ref>` as DATABASE_URL plus plain `app_runtime`
+    as APP_DATABASE_URL resolves to the same role and is rejected."""
+    with pytest.raises(ValidationError, match="owner identity"):
+        Settings(
+            **_base_settings_kwargs(
+                environment="production",
+                database_url=_POOLER_RUNTIME_URL,
             )
         )
 

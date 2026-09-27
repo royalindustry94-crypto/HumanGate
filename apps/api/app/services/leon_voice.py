@@ -29,10 +29,9 @@ from app.services import leon_voice_spend
 
 logger = logging.getLogger(__name__)
 
-_ANTHROPIC_API = "https://api.anthropic.com/v1/messages"
+_OPENAI_CHAT_API = "https://api.openai.com/v1/chat/completions"
 _OPENAI_TRANSCRIPTION_API = "https://api.openai.com/v1/audio/transcriptions"
 _OPENAI_SPEECH_API = "https://api.openai.com/v1/audio/speech"
-_ANTHROPIC_VERSION = "2023-06-01"
 
 _HTTP_TIMEOUT_SECONDS = 30.0
 
@@ -105,22 +104,12 @@ def _safe_json(response: httpx.Response, *, stage: str, fallback: str) -> dict:
     return body
 
 
-def _require_anthropic_key() -> str:
-    key = get_settings().anthropic_api_key
-    if not key:
-        raise LeonVoiceError(
-            "voice conversation is not configured (missing Anthropic key)",
-            stage="llm",
-        )
-    return key
-
-
-def _require_openai_key() -> str:
+def _require_openai_key(*, stage: str) -> str:
     key = get_settings().openai_api_key
     if not key:
         raise LeonVoiceError(
             "voice conversation is not configured (missing OpenAI key)",
-            stage="openai",
+            stage=stage,
         )
     return key
 
@@ -139,7 +128,7 @@ async def _reserve_or_fail(*, provider: str, estimated_cost_usd: Decimal, stage:
 
 async def transcribe_audio(audio_bytes: bytes, *, filename: str, content_type: str) -> str:
     """Speech to text via OpenAI's Whisper API."""
-    key = _require_openai_key()
+    key = _require_openai_key(stage="stt")
     reservation_id = await _reserve_or_fail(
         provider="openai-whisper",
         estimated_cost_usd=leon_voice_spend.stt_reserve_estimate_usd(),
@@ -191,29 +180,31 @@ async def transcribe_audio(audio_bytes: bytes, *, filename: str, content_type: s
 
 
 async def generate_reply(user_text: str, *, history: list[dict[str, str]]) -> str:
-    """Leon's reply to one turn, via the Claude Messages API."""
-    key = _require_anthropic_key()
+    """Leon's reply to one turn, via OpenAI Chat Completions."""
+    key = _require_openai_key(stage="llm")
     reservation_id = await _reserve_or_fail(
-        provider="anthropic",
+        provider="openai-llm",
         estimated_cost_usd=leon_voice_spend.llm_reserve_estimate_usd(
             history=history, user_text=user_text
         ),
         stage="llm",
     )
-    messages = [*history, {"role": "user", "content": user_text}]
+    messages = [
+        {"role": "system", "content": LEON_SYSTEM_PROMPT},
+        *history,
+        {"role": "user", "content": user_text},
+    ]
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
             response = await client.post(
-                _ANTHROPIC_API,
+                _OPENAI_CHAT_API,
                 headers={
-                    "x-api-key": key,
-                    "anthropic-version": _ANTHROPIC_VERSION,
+                    "Authorization": "Bearer " + key,
                     "content-type": "application/json",
                 },
                 json={
-                    "model": get_settings().leon_anthropic_model,
+                    "model": get_settings().leon_openai_chat_model,
                     "max_tokens": _MAX_REPLY_TOKENS,
-                    "system": LEON_SYSTEM_PROMPT,
                     "messages": messages,
                 },
             )
@@ -236,17 +227,29 @@ async def generate_reply(user_text: str, *, history: list[dict[str, str]]) -> st
             stage="llm",
             fallback="Leon's brain returned an unexpected response",
         )
-        content = body.get("content")
-        if not isinstance(content, list):
+        choices = body.get("choices")
+        if not isinstance(choices, list) or not choices:
             raise LeonVoiceError("Leon's brain returned an unexpected response", stage="llm")
-        parts = [
-            block.get("text", "")
-            for block in content
-            if isinstance(block, dict)
-            and block.get("type") == "text"
-            and isinstance(block.get("text"), str)
-        ]
-        reply = "".join(parts).strip()
+        first_choice = choices[0]
+        if not isinstance(first_choice, dict):
+            raise LeonVoiceError("Leon's brain returned an unexpected response", stage="llm")
+        message = first_choice.get("message")
+        if not isinstance(message, dict):
+            raise LeonVoiceError("Leon's brain returned an unexpected response", stage="llm")
+        content = message.get("content")
+        if isinstance(content, str):
+            reply = content.strip()
+        elif isinstance(content, list):
+            parts = [
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict)
+                and block.get("type") == "text"
+                and isinstance(block.get("text"), str)
+            ]
+            reply = "".join(parts).strip()
+        else:
+            reply = ""
         if not reply:
             raise LeonVoiceError("Leon couldn't think of a reply just now", stage="llm")
     except LeonVoiceError:
@@ -255,13 +258,15 @@ async def generate_reply(user_text: str, *, history: list[dict[str, str]]) -> st
 
     raw_usage = body.get("usage")
     usage: dict = raw_usage if isinstance(raw_usage, dict) else {}
-    input_tokens = usage.get("input_tokens")
-    output_tokens = usage.get("output_tokens")
+    raw_input_tokens = usage.get("input_tokens", usage.get("prompt_tokens"))
+    raw_output_tokens = usage.get("output_tokens", usage.get("completion_tokens"))
+    input_tokens = raw_input_tokens if isinstance(raw_input_tokens, int) else 0
+    output_tokens = raw_output_tokens if isinstance(raw_output_tokens, int) else 0
     await leon_voice_spend.commit(
         reservation_id=reservation_id,
         actual_cost_usd=leon_voice_spend.llm_actual_cost_usd(
-            input_tokens=input_tokens if isinstance(input_tokens, int) else 0,
-            output_tokens=output_tokens if isinstance(output_tokens, int) else 0,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         ),
     )
     return reply
@@ -269,7 +274,7 @@ async def generate_reply(user_text: str, *, history: list[dict[str, str]]) -> st
 
 async def synthesize_speech(text: str) -> bytes:
     """Text to speech via OpenAI's TTS API. Returns MP3 bytes."""
-    key = _require_openai_key()
+    key = _require_openai_key(stage="tts")
     reservation_id = await _reserve_or_fail(
         provider="openai-tts",
         estimated_cost_usd=leon_voice_spend.tts_cost_usd(text),

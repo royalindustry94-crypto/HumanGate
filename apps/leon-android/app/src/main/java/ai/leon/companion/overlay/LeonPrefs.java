@@ -23,6 +23,8 @@ public final class LeonPrefs {
     private static final String KEY_RIG_DEBUG = "rig_debug";
     private static final String KEY_ALWAYS_LISTENING = "always_listening";
     private static final String KEY_VOICE_BASE_URL = "voice_base_url";
+    private static final String DEFAULT_VOICE_BASE_URL =
+            "https://humangate-production.up.railway.app";
     // Legacy plaintext key, kept only so an existing install can be migrated once into
     // LeonSecureTokenStore's Keystore-encrypted, backup-excluded storage -- see
     // leonVoiceAppToken() below. Never written to after that migration.
@@ -130,7 +132,9 @@ public final class LeonPrefs {
 
     /** Base URL of the deployed voice backend (apps/api), e.g. https://your-app.vercel.app. */
     public String leonVoiceBaseUrl() {
-        return prefs.getString(KEY_VOICE_BASE_URL, "");
+        if (!prefs.contains(KEY_VOICE_BASE_URL)) return DEFAULT_VOICE_BASE_URL;
+        String configured = prefs.getString(KEY_VOICE_BASE_URL, "");
+        return configured == null ? "" : configured.trim();
     }
 
     public void setLeonVoiceBaseUrl(String url) {

@@ -8,11 +8,12 @@ failure" rule in the project instructions.
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from typing import ClassVar, TypedDict
 from urllib.parse import unquote
 
-from pydantic import Field, PostgresDsn, model_validator
+from pydantic import AliasChoices, Field, PostgresDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Minted by AUTH_MODE=local (see app/services/local_auth.py) and required on
@@ -22,6 +23,18 @@ LOCAL_JWT_ISSUER = "content-orchestrator-local"
 # environments must use it as APP_DATABASE_URL — an arbitrary login with
 # CONNECT cannot run the application under FORCE RLS.
 CANONICAL_RUNTIME_ROLE = "app_runtime"
+
+# Supabase's IPv4 pooler addresses authenticate as `<role>.<project-ref>`
+# (e.g. `app_runtime.vagfnbcnvtojljggxvxr`); the Postgres role is the prefix.
+_SUPABASE_POOLER_USER_RE = re.compile(r"^(?P<role>[A-Za-z_][A-Za-z0-9_]{0,62})\.[a-z0-9]{20}$")
+
+
+def database_role_name(username: str) -> str:
+    """The Postgres role a connection username authenticates as
+    (Supabase pooler form `<role>.<20-char project ref>` -> `<role>`)."""
+    match = _SUPABASE_POOLER_USER_RE.fullmatch(username)
+    return match.group("role") if match else username
+
 
 # Fixed secret used only by API tests/CI under ENVIRONMENT=test. Listed in
 # the known-weak set so a production/staging/development process cannot boot
@@ -166,16 +179,19 @@ class Settings(BaseSettings):
     deployment_ci_status: str | None = Field(default=None)
     deployment_ci_url: str | None = Field(default=None)
 
-    # --- Leon voice conversation (Anthropic + OpenAI) ---
+    # --- Leon voice conversation (OpenAI STT/LLM/TTS) ---
     # Optional: unset means the /leon/voice-turn route reports unavailable
     # rather than failing at startup, since not every deployment runs the
     # Leon Android companion's voice backend. Validation aliases match the
-    # operator's actual Vercel env var names for this project (`anthkey`,
-    # `ANTHTOPIC_APO_KEY` — the latter holds the OpenAI key despite the
-    # name; do not rename here without updating the Vercel dashboard too).
+    # operator's actual Vercel env var names for this project. OPENAI_API_KEY
+    # is the standard name; ANTHTOPIC_APO_KEY is a temporary legacy alias in
+    # production and should be removed once rollout is complete.
     anthropic_api_key: str | None = Field(default=None, validation_alias="anthkey")
-    openai_api_key: str | None = Field(default=None, validation_alias="ANTHTOPIC_APO_KEY")
+    openai_api_key: str | None = Field(
+        default=None, validation_alias=AliasChoices("OPENAI_API_KEY", "ANTHTOPIC_APO_KEY")
+    )
     leon_anthropic_model: str = Field(default="claude-sonnet-5")
+    leon_openai_chat_model: str = Field(default="gpt-4o-mini")
     leon_openai_tts_voice: str = Field(default="alloy")
     # Shared secret the Android app presents as a bearer token. The companion
     # is a single-user overlay with no account system of its own, so this
@@ -268,13 +284,15 @@ class Settings(BaseSettings):
                     f"in ENVIRONMENT={self.environment!r}; rotate the "
                     "credential and update the URL before starting"
                 )
-        if runtime_user.casefold() != CANONICAL_RUNTIME_ROLE:
+        runtime_role = database_role_name(runtime_user)
+        owner_role = database_role_name(owner_user)
+        if runtime_role.casefold() != CANONICAL_RUNTIME_ROLE:
             raise ValueError(
                 "APP_DATABASE_URL must use the canonical "
                 f"{CANONICAL_RUNTIME_ROLE} role; migrations grant application "
                 "privileges to that identity only"
             )
-        if owner_user.casefold() == runtime_user.casefold():
+        if owner_role.casefold() == runtime_role.casefold():
             raise ValueError(
                 "APP_DATABASE_URL must not reuse the DATABASE_URL owner identity; "
                 "the owner/superuser role bypasses FORCE RLS"
