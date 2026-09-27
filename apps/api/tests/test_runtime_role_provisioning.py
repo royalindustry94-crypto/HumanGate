@@ -93,6 +93,69 @@ async def test_provision_runtime_role_rejects_unsafe_name_before_connect():
         )
 
 
+async def test_provision_runtime_role_works_when_owner_is_createrole_not_superuser():
+    """Reproduces the real Supabase failure mode this module used to hit in production.
+
+    Supabase's `postgres` connection role has CREATEROLE but is not a true PostgreSQL
+    superuser. Postgres refuses to let a non-superuser name SUPERUSER, BYPASSRLS,
+    CREATEROLE, or CREATEDB in an ALTER ROLE statement at all -- even to reassert a
+    value the target role already has -- so the old unconditional
+    ``ALTER ROLE ... NOSUPERUSER NOBYPASSRLS ...`` failed on every provisioning call
+    against Supabase, regardless of the runtime role's actual (correct) privileges.
+    """
+    owner_dsn = os.environ["DATABASE_URL"]
+    owner_url = make_url(owner_dsn)
+    superuser = await asyncpg.connect(owner_dsn)
+    limited_owner_password = f"limited-owner-{uuid.uuid4().hex}"
+    rotated = f"rotated-{uuid.uuid4().hex}"
+    try:
+        create_sql = await superuser.fetchval(
+            "SELECT format('CREATE ROLE %I LOGIN PASSWORD %L CREATEROLE NOSUPERUSER', "
+            "'regression_owner', $1::text)",
+            limited_owner_password,
+        )
+        await superuser.execute(create_sql)
+        await superuser.execute(
+            f"GRANT {CANONICAL_RUNTIME_ROLE} TO regression_owner WITH ADMIN OPTION"
+        )
+
+        limited_owner_dsn = owner_url.set(
+            username="regression_owner", password=limited_owner_password
+        ).render_as_string(hide_password=False)
+        await provision_runtime_role(
+            owner_dsn=limited_owner_dsn,
+            runtime_user=CANONICAL_RUNTIME_ROLE,
+            runtime_password=rotated,
+        )
+
+        runtime = await asyncpg.connect(
+            host=owner_url.host,
+            port=owner_url.port or 5432,
+            database=owner_url.database,
+            user=CANONICAL_RUNTIME_ROLE,
+            password=rotated,
+        )
+        try:
+            attrs = await runtime.fetchrow(
+                "SELECT rolsuper, rolbypassrls, rolcreaterole, rolcreatedb FROM pg_roles"
+                " WHERE rolname = $1",
+                CANONICAL_RUNTIME_ROLE,
+            )
+            assert attrs is not None
+            assert not any(attrs.values())
+        finally:
+            await runtime.close()
+    finally:
+        restore_sql = await superuser.fetchval(
+            "SELECT format('ALTER ROLE %I PASSWORD %L', $1::text, $2::text)",
+            CANONICAL_RUNTIME_ROLE,
+            _LOCAL_RUNTIME_PASSWORD,
+        )
+        await superuser.execute(restore_sql)
+        await superuser.execute("DROP ROLE IF EXISTS regression_owner")
+        await superuser.close()
+
+
 async def test_provisioned_app_runtime_can_run_rls_bound_query():
     """Migrations + entrypoint rotation must yield a usable app_runtime role.
 

@@ -101,20 +101,50 @@ async def provision_runtime_role(
             runtime_user,
         )
         if not exists:
+            # No SUPERUSER/BYPASSRLS/CREATEROLE/CREATEDB clause here, in either polarity: Postgres
+            # only lets an altering/creating role name one of these four attributes at all -- even
+            # to negate it -- if that role already holds the attribute itself (or is a true
+            # superuser). A managed Postgres owner role (e.g. Supabase's `postgres`) commonly has
+            # CREATEROLE without CREATEDB or real superuser status, so asserting any of these here
+            # would fail even when the resulting value is identical to the default. Every one of
+            # them already defaults to off for a newly created role; the fetchrow check below
+            # fails closed if that were ever not so.
             create_sql = await _formatted_sql(
                 conn,
-                "CREATE ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB",
+                "CREATE ROLE %I LOGIN PASSWORD %L",
                 runtime_user,
                 runtime_password,
             )
             await conn.execute(create_sql)
+        # Same reasoning as CREATE above, and more load-bearing here: ALTER runs unconditionally
+        # on every provisioning call, so an owner role that is CREATEROLE-but-not-superuser would
+        # fail this statement on every single run -- including the common case where the role is
+        # already correctly unprivileged -- if any of those four clauses were present.
         alter_sql = await _formatted_sql(
             conn,
-            "ALTER ROLE %I WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB PASSWORD %L",
+            "ALTER ROLE %I WITH LOGIN PASSWORD %L",
             runtime_user,
             runtime_password,
         )
         await conn.execute(alter_sql)
+        attrs = await conn.fetchrow(
+            "SELECT rolsuper, rolbypassrls, rolcreaterole, rolcreatedb FROM pg_roles"
+            " WHERE rolname = $1",
+            runtime_user,
+        )
+        if attrs is None:
+            raise RuntimeRoleError(f"runtime role {runtime_user} was not found after provisioning")
+        overprivileged = (
+            attrs["rolsuper"]
+            or attrs["rolbypassrls"]
+            or attrs["rolcreaterole"]
+            or attrs["rolcreatedb"]
+        )
+        if overprivileged:
+            raise RuntimeRoleError(
+                f"runtime role {runtime_user} has SUPERUSER, BYPASSRLS, CREATEROLE, or CREATEDB "
+                "set; refusing to use it as the application's row-level-security-bound role"
+            )
         database = await conn.fetchval("SELECT current_database()")
         if not database:
             raise RuntimeRoleError("owner connection has no current database")
