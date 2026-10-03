@@ -4,7 +4,7 @@
 Jinja2==3.1.6
 Mako==1.4.1
 MarkupSafe==3.0.3
-PyJWT==2.13.0
+PyJWT==2.15.0
 PyYAML==6.0.3
 SQLAlchemy==2.0.52
 alembic==1.16.5
@@ -34,4 +34,4 @@ starlette==1.6.0
 stripe==12.5.1
 typing-inspection==0.4.4
 typing_extensions==4.16.0
-urllib3==2.7.0
+urllib3==2.8.0
