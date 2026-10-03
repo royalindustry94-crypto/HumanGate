@@ -360,4 +360,44 @@ public class LeonMeshRigTest {
             assertTrue(state + " deformed the armpit by " + armpit, armpit < ARMPIT_KNOWN_RESIDUAL);
         }
     }
+
+    @Test
+    public void sustainedHandRaiseDoesNotDragFarBelowTheHand() throws Exception {
+        // THINKING holds the CHIN gesture (elbow/hand raise near their max) for as long as the state
+        // is active, far longer and stronger than any other gesture. Before ARM_LAYER_BOTTOM_Y, the
+        // ARMS layer bound every row below the wrist to the hand bone with no lower limit, so this
+        // held pose dragged the (always-transparent) rows far below the hand -- down past the hips,
+        // between the feet -- hundreds of design units out of place. Those rows sit on canonical
+        // positions LeonTextureMask has no opaque samples for, so no opacity-gated edge-ratio test
+        // catches it; drawBitmapMesh still draws the triangle between a dragged vertex and its
+        // still-correctly-placed neighbours, painting a wrong-colour wedge across the body -- the
+        // reported "stuck hand"/"compressed hips" defect. Assert directly on vertex displacement
+        // instead, which does not depend on any pixel being opaque.
+        Rig rig = LeonRig.build();
+        LeonMeshRig arms = LeonMeshRig.createForTest(rig, LeonMeshRig.PRODUCTION_COLS,
+                LeonMeshRig.PRODUCTION_ROWS, Layer.ARMS);
+        float[] rest = arms.canonicalVertices().clone();
+
+        LeonStateController states = new LeonStateController();
+        LeonAnimationController controller = new LeonAnimationController(rig, states, 11L);
+        states.request(LeonState.THINKING);
+
+        float maxDisplacementFarBelowHand = 0f;
+        for (int f = 0; f < 60 * 8; f++) {
+            controller.update(1f / 60f);
+        }
+        arms.updateFromSolvedRig();
+        float[] deformed = arms.deformedVertices();
+        for (int i = 0; i < rest.length / 2; i++) {
+            float restY = rest[i * 2 + 1];
+            if (restY < 490f) continue; // below any arm/hand content plus a safety margin
+            float dx = deformed[i * 2] - rest[i * 2];
+            float dy = deformed[i * 2 + 1] - rest[i * 2 + 1];
+            float d = (float) Math.hypot(dx, dy);
+            maxDisplacementFarBelowHand = Math.max(maxDisplacementFarBelowHand, d);
+        }
+        assertTrue("a sustained hand raise moved a point far below the hand (canonical y>=490) by "
+                        + maxDisplacementFarBelowHand + " design units",
+                maxDisplacementFarBelowHand < 5f);
+    }
 }

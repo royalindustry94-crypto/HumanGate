@@ -85,6 +85,24 @@ public final class LeonMeshRig {
     public static final float ARM_LAYER_OVERLAP = 2f;
     /** One mesh cell below the cut, so no cell holding cut-line pixels changes binding. */
     private static final float SHARED_SKIN_END_Y = 292f;
+    /**
+     * Below this, the ARMS layer has no opaque content at all (measured on the generated texture:
+     * the lowest opaque arm/hand/finger pixel outside the torso column sits at y=450). {@link
+     * #sideWeightsFor} binds every row past the wrist to the hand bone with no lower bound, which is
+     * harmless while that part of the layer is transparent -- until a large, sustained hand rotation
+     * (e.g. THINKING's held chin gesture) sweeps those far-below-the-hand vertices through a huge arc
+     * (the lever arm from the hand pivot to, say, y=756 between the feet is ~400 design units, so
+     * even a clamped few-degree rotation moves them hundreds of units). The stray vertex then drags a
+     * triangle whose other corners are still correctly placed, and drawBitmapMesh paints that
+     * triangle by interpolating texture coordinates across it -- sweeping through unrelated opaque
+     * arm/hand pixels on the way, which is what renders as a long wrong-colour wedge or "stick"
+     * reaching from the hand down past the hip. LeonTextureMask's edge-ratio tests never caught this:
+     * they skip any edge whose *rest* position is transparent, which this one always is. Anchoring
+     * everything below the hand to the static root bone (with a short blend so there is no seam
+     * inside the always-transparent gap) keeps those vertices still no matter how the hand moves.
+     */
+    private static final float ARM_LAYER_BOTTOM_Y = 470f;
+    private static final float ARM_LAYER_BOTTOM_BLEND = 15f;
 
     private final Rig rig;
     private final Layer layer;
@@ -281,7 +299,7 @@ public final class LeonMeshRig {
         boolean left = x < DESIGN_CENTRE_X;
         if (y >= SHARED_SKIN_END_Y) {
             // Below the armpit each layer follows only its own chain, wherever the vertex is.
-            if (layer == Layer.ARMS) return sideWeightsFor(y, left);
+            if (layer == Layer.ARMS) return armSideWeightsFor(y, left);
             return y < 395f ? centerWeightsFor(y) : legWeightsFor(y, left);
         }
         float edge = bodyEdgeHalfWidth(y);
@@ -349,6 +367,19 @@ public final class LeonMeshRig {
             return two(left ? forearmL : forearmR, 1f - t, left ? handL : handR, t);
         }
         return one(left ? handL : handR);
+    }
+
+    /**
+     * {@link #sideWeightsFor} for the ARMS layer, anchored to the static root past where any arm/
+     * hand content exists (see {@link #ARM_LAYER_BOTTOM_Y}) so a hand rotation cannot drag the
+     * always-transparent rows far below it into view.
+     */
+    private VertexWeights armSideWeightsFor(float y, boolean left) {
+        if (y < ARM_LAYER_BOTTOM_Y - ARM_LAYER_BOTTOM_BLEND) return sideWeightsFor(y, left);
+        VertexWeights anchored = one(root);
+        if (y >= ARM_LAYER_BOTTOM_Y + ARM_LAYER_BOTTOM_BLEND) return anchored;
+        float t = smooth((y - (ARM_LAYER_BOTTOM_Y - ARM_LAYER_BOTTOM_BLEND)) / (2f * ARM_LAYER_BOTTOM_BLEND));
+        return blend(sideWeightsFor(y, left), 1f - t, anchored, t);
     }
 
     /** Hip/thigh/shin/foot chain for the torso-width columns of the y >= 395 band. */
