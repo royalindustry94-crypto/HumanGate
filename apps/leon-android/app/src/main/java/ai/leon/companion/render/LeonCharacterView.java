@@ -3,6 +3,7 @@ package ai.leon.companion.render;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.util.Log;
 import android.view.Choreographer;
 import android.view.View;
 
@@ -20,6 +21,7 @@ import ai.leon.companion.rig.Rig;
  * {@link #ACTIVE_FPS} whenever the animation controller reports something worth showing smoothly.
  */
 public final class LeonCharacterView extends View {
+    private static final String TAG = "LeonCharacterView";
     public static final int ACTIVE_FPS = 60;
     public static final int IDLE_FPS = 20;
     /** Longest gap the animation is stepped by in one frame, so a stall cannot jolt the rig. */
@@ -33,18 +35,34 @@ public final class LeonCharacterView extends View {
     private boolean running;
     private boolean paused;
     private boolean attached;
+    /**
+     * Set once an update or a draw throws. The overlay/activity construction path (see
+     * LeonOverlayService#showOverlay) is wrapped in a try/catch, but this frame loop runs later, as
+     * its own asynchronous Choreographer callback -- an exception here is not inside that call stack
+     * and would otherwise crash the whole process with no {@code blockedReason} ever reported.
+     * Nothing here is worth that: once a frame fails, stop driving the loop (the last good frame
+     * just stays on screen) instead of crashing or retrying the same failure 60 times a second.
+     */
+    private boolean renderFailed;
 
     private final Choreographer.FrameCallback frameCallback = new Choreographer.FrameCallback() {
         @Override
         public void doFrame(long frameTimeNanos) {
-            if (!running) return;
+            if (!running || renderFailed) return;
             long delta = lastFrameNanos == 0L ? 0L : frameTimeNanos - lastFrameNanos;
             if (delta < 0L) delta = 0L;
             if (delta > MAX_FRAME_NANOS) delta = MAX_FRAME_NANOS;
             lastFrameNanos = frameTimeNanos;
 
             float dt = delta / 1_000_000_000f;
-            controller.update(dt);
+            try {
+                controller.update(dt);
+            } catch (Throwable e) {
+                Log.e(TAG, "Leon's animation update failed; stopping the render loop", e);
+                renderFailed = true;
+                stopLoop();
+                return;
+            }
             invalidate();
             scheduleNextFrame();
         }
@@ -144,7 +162,14 @@ public final class LeonCharacterView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
-        renderer.draw(canvas);
+        if (renderFailed) return;
+        try {
+            renderer.draw(canvas);
+        } catch (Throwable e) {
+            Log.e(TAG, "Leon failed to render a frame; stopping the render loop", e);
+            renderFailed = true;
+            stopLoop();
+        }
     }
 
     /** Releases the animation loop. The production texture is owned by the caller. */
